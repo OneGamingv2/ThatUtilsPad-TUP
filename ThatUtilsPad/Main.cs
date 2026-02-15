@@ -55,13 +55,13 @@ namespace ThatUtilsPad
 
         void Start()
         {
-            Debug.Log("\n" +
-                "================:  ┌○○○─TUP──────────────────────────── x ┐\n" +
-                ".::=*=-+*--++-:.   ┌─────────────────────────────────────┐\n" +
-                ".+*************-   │ TUP: ThatUtilsPad                   │\n" +
-                "   :*.     ++.     │ Discord: https://discord.gg/fuJcTWsn│\n" +
-                "   :*.     ++.     │ Made by Jelly and Kwyf <3           │\n" +
-                "                   └─────────────────────────────────────┘");
+            Debug.Log("\n \n" +
+                "   ================:  ┌○○○─TUP────────────────────────────── x ┐\n" +
+                "   .::=*=-+*--++-:.   ┣────────────────────────────────────────┫\n" +
+                "   .+*************-   │ TUP: ThatUtilsPad                      │\n" +
+                "      :*.     ++.     │ Discord: https://discord.gg/fuJcTWsn   │\n" +
+                "      :*.     ++.     │ Made by Jelly and Kwyf <3              │\n" +
+                "                      └────────────────────────────────────────┘\n");
 
             LoadAudio();
             PlayStartSound();
@@ -207,6 +207,8 @@ namespace ThatUtilsPad
                 CreateButton(0.24f, "Disconnect");
                 CreateButton(0.17f, "Join Random");
                 CreateButton(0.10f, "Lobby Hop");
+                CreateButton(0.03f, "Copy Room");
+                CreateButton(-0.04f, "Select User");
             }
             else if (isMenuOpened && !shouldShow)
             {
@@ -260,10 +262,14 @@ namespace ThatUtilsPad
         {
             GameObject btn = Instantiate(btnPrefab);
             GameObject btnOutline = Instantiate(btnPrefab);
+            GameObject btnCollider = GameObject.CreatePrimitive(PrimitiveType.Cube);
 
             btn.transform.localScale = Vector3.one * 0.78f;
             btn.transform.localRotation = Quaternion.identity;
-            btn.layer = 18;
+
+            btnCollider.transform.localScale = new Vector3(0.015f, 0.265f, 0.04f);
+            btnCollider.transform.localRotation = Quaternion.identity;
+            btnCollider.layer = 18;
 
             btnOutline.transform.localScale = Vector3.one * 0.79f;
             btnOutline.transform.localRotation = Quaternion.identity;
@@ -278,12 +284,12 @@ namespace ThatUtilsPad
             followOutline.position = new Vector3(0.025f, 0f, zOffset) + menuHandOffset + menuGripPosition;
             followOutline.rotation = Quaternion.identity * Quaternion.Euler(270f, 0f, 0f);
 
-            var trigger = btn.AddComponent<ButtonTrigger>();
+            var trigger = btnCollider.AddComponent<ButtonTrigger>();
             trigger.btnIdentifier = btnName;
             trigger.pressButtonSoundIndex = 28;
 
-            var boxCollider = btn.AddComponent<BoxCollider>();
-            boxCollider.isTrigger = true;
+            btnCollider.GetComponent<Collider>().isTrigger = true;
+            btnCollider.GetComponent<Rigidbody>().Destroy();
 
             var renderer = btn.GetComponentInChildren<Renderer>();
             if (renderer != null)
