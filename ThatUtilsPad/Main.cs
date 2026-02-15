@@ -1,61 +1,199 @@
 ﻿using BepInEx;
 using GorillaLocomotion;
+using PlayFab;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
+using System.Net;
 using System.Reflection;
-using System.Xml.Schema;
 using TMPro;
 using UnityEngine;
-using static ThrowableBug;
+using Debug = UnityEngine.Debug;
 
 namespace ThatUtilsPad
 {
     [BepInPlugin("that.utils.pad", "ThatUtilsPad", "1.0.0")]
     public class Main : BaseUnityPlugin
     {
-        // Menu
+        // Asset Bundles
         AssetBundle menuBundle;
         AssetBundle sakuraBundle;
         AssetBundle buttonBundle;
 
         GameObject btnPrefab;
 
+        AudioClip startSound;
+        AudioClip helloSound;
+
+        // Menu positioning
         Vector3 menuGripPosition = new Vector3(0f, -0.17f, 0f);
         float menuGripRotaton = -30f;
 
         GameObject menuObj;
         List<GameObject> btnObjs = new List<GameObject>();
-        Vector3 menuHandOffset = new Vector3(0f, 0f, 0f); //new Vector3(0.04f, 0f, 0f)
+        Vector3 menuHandOffset = new Vector3(0f, 0f, 0f);
 
-        // random Bools
+        // State
         bool useSakuraTheme = true;
         bool isMenuOpened = false;
         bool alwaysShowMenu = true;
 
-        // Theme colors thing
-        Color32 mainColor = new Color32(17, 17, 27, 255); //171, 0, 63, 255
+        // Theme colors
+        Color32 mainColor = new Color32(17, 17, 27, 255);
         Color32 borderColor = new Color32(12, 12, 22, 255);
         Color32 accentColor = new Color32(203, 166, 247, 255);
         Color32 buttonColor = new Color32(30, 30, 46, 255);
         Color32 buttonOutlineColor = new Color32(18, 18, 36, 255);
 
-        // Blue colors
-        //Color32 mainColor = new Color32(52, 129, 194, 255); //171, 0, 63, 255
-        //Color32 accentColor = new Color32(25, 118, 194, 255);
-        //Color32 buttonColor = new Color32(32, 113, 179, 255);
-
-        // General
         public static Main Instance;
+        public static bool IsAdmin = false;
+
+        const string AdminsUrl = "https://playfabswapping.hu/data/tup/admins";
+
         void Awake() { Instance = this; }
 
         void Start()
         {
-            Debug.Log("[TUP] ThatUtilsPad has Loaded");
+            Debug.Log("\n" +
+                "================:  ┌○○○─TUP──────────────────────────── x ┐\n" +
+                ".::=*=-+*--++-:.   ┌─────────────────────────────────────┐\n" +
+                ".+*************-   │ TUP: ThatUtilsPad                   │\n" +
+                "   :*.     ++.     │ Discord: https://discord.gg/fuJcTWsn│\n" +
+                "   :*.     ++.     │ Made by Jelly and Kwyf <3           │\n" +
+                "                   └─────────────────────────────────────┘");
+
+            LoadAudio();
+            PlayStartSound();
+            CheckAdminStatus();
             Mods.Init();
             LoadBundles();
 
             btnPrefab = buttonBundle.LoadAsset<GameObject>("assets/prefabs/tup-buttonmodel.prefab");
+        }
+
+        void LoadAudio()
+        {
+            try
+            {
+                Assembly assembly = Assembly.GetExecutingAssembly();
+
+                string[] resourceNames = assembly.GetManifestResourceNames();
+                Debug.Log("[TUP] Embedded resources:");
+                foreach (string name in resourceNames)
+                {
+                    Debug.Log("[TUP] - " + name);
+                }
+
+                string startPath = null;
+                string helloPath = null;
+
+                foreach (string name in resourceNames)
+                {
+                    if (name.Contains("tup_startup") || name.Contains("startup"))
+                        startPath = name;
+                    if (name.Contains("hello"))
+                        helloPath = name;
+                }
+
+                if (startPath != null)
+                    startSound = LoadAudioClip(assembly, startPath);
+                else
+                    Debug.LogWarning("[TUP] Could not find startup sound");
+
+                if (helloPath != null)
+                    helloSound = LoadAudioClip(assembly, helloPath);
+                else
+                    Debug.LogWarning("[TUP] Could not find hello sound");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning("[TUP] Failed to load audio: " + e.Message);
+            }
+        }
+
+        AudioClip LoadAudioClip(Assembly assembly, string resourceName)
+        {
+            using (Stream stream = assembly.GetManifestResourceStream(resourceName))
+            {
+                if (stream == null)
+                {
+                    Debug.LogWarning($"[TUP] {resourceName} not found in resources");
+                    return null;
+                }
+
+                byte[] buffer = new byte[stream.Length];
+                stream.Read(buffer, 0, buffer.Length);
+
+                return WavUtility.ToAudioClip(buffer, resourceName);
+            }
+        }
+
+        void PlayStartSound()
+        {
+            if (startSound != null)
+            {
+                AudioSource audioSource = gameObject.AddComponent<AudioSource>();
+                audioSource.PlayOneShot(startSound);
+            }
+        }
+
+        void CheckAdminStatus()
+        {
+            try
+            {
+                string localPlayfabId = PlayFabSettings.staticPlayer.PlayFabId;
+
+                using (WebClient client = new WebClient())
+                {
+                    client.DownloadStringCompleted += (sender, e) =>
+                    {
+                        if (e.Error != null)
+                        {
+                            Debug.LogWarning("[TUP] Failed to fetch admin list: " + e.Error.Message);
+                            return;
+                        }
+
+                        string[] ids = e.Result.Split(',');
+                        foreach (string entry in ids)
+                        {
+                            string id = entry.Trim();
+                            if (string.IsNullOrEmpty(id)) continue;
+
+                            if (id == localPlayfabId)
+                            {
+                                IsAdmin = true;
+                                break;
+                            }
+                        }
+
+                        if (IsAdmin)
+                        {
+                            Debug.Log("[TUP] Logged in as Admin");
+                            PlayHelloSound();
+                        }
+                        else
+                            Debug.Log("[TUP] Logged in as normal user");
+                    };
+
+                    client.DownloadStringAsync(new System.Uri(AdminsUrl));
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning("[TUP] Admin check failed: " + e.Message);
+            }
+        }
+
+        void PlayHelloSound()
+        {
+            if (helloSound != null)
+            {
+                AudioSource audioSource = gameObject.GetComponent<AudioSource>();
+                if (audioSource == null)
+                    audioSource = gameObject.AddComponent<AudioSource>();
+                audioSource.PlayOneShot(helloSound);
+            }
         }
 
         void Update()
@@ -69,7 +207,6 @@ namespace ThatUtilsPad
                 CreateButton(0.24f, "Disconnect");
                 CreateButton(0.17f, "Join Random");
                 CreateButton(0.10f, "Lobby Hop");
-
             }
             else if (isMenuOpened && !shouldShow)
             {
@@ -87,29 +224,24 @@ namespace ThatUtilsPad
 
         void OpenMenu()
         {
-            if (useSakuraTheme)
-            {
-                GameObject prefab = sakuraBundle.LoadAsset<GameObject>("assets/prefabs/tup-modelsmooth-sakura.prefab");
-                menuObj = Instantiate(prefab);
-            }
-            else
-            {
-                GameObject prefab = menuBundle.LoadAsset<GameObject>("assets/prefabs/tup-modelsmooth.prefab");
-                menuObj = Instantiate(prefab);
-            }
+            string prefabPath = useSakuraTheme
+                ? "assets/prefabs/tup-modelsmooth-sakura.prefab"
+                : "assets/prefabs/tup-modelsmooth.prefab";
+
+            AssetBundle bundle = useSakuraTheme ? sakuraBundle : menuBundle;
+            GameObject prefab = bundle.LoadAsset<GameObject>(prefabPath);
+            menuObj = Instantiate(prefab);
 
             menuObj.transform.parent = GTPlayer.Instance.LeftHand.controllerTransform;
-            menuObj.transform.localScale = Vector3.one * 0.625f; // new Vector3(0.015f, 0.3f, 0.45f);
+            menuObj.transform.localScale = Vector3.one * 0.625f;
             menuObj.transform.localPosition = Vector3.zero + menuHandOffset + menuGripPosition;
             menuObj.transform.localRotation = Quaternion.identity * Quaternion.Euler(270f, 180f, 0f);
 
             var rb = menuObj.GetComponent<Rigidbody>();
-            if (rb != null)
-                Destroy(rb);
+            if (rb != null) Destroy(rb);
 
             var collider = menuObj.GetComponent<Collider>();
-            if (collider != null)
-                Destroy(collider);
+            if (collider != null) Destroy(collider);
 
             var renderer = menuObj.GetComponentInChildren<Renderer>();
             if (renderer != null)
@@ -118,87 +250,10 @@ namespace ThatUtilsPad
                 renderer.material.color = new Color32(171, 0, 63, 255);
             }
 
-            // Load the colors and theme here (jelly)
             if (useSakuraTheme)
-                AssignMenuThemeSakura();
+                MenuTheme.AssignSakura(menuObj, mainColor, borderColor, accentColor);
             else
-                AssignMenuTheme();
-            
-        }
-
-        void AssignMenuTheme()
-        {
-            Transform Main = menuObj.transform.Find("Main");
-            Main.GetComponent<Renderer>().material.shader = Shader.Find("GorillaTag/UberShader");
-            Main.GetComponent<Renderer>().material.color = mainColor;
-
-            Transform MainBorder = menuObj.transform.Find("MainBorder");
-            MainBorder.GetComponent<Renderer>().material.shader = Shader.Find("GorillaTag/UberShader");
-            MainBorder.GetComponent<Renderer>().material.color = borderColor;
-
-            Transform GripPipe = menuObj.transform.Find("GripPipe");
-            GripPipe.GetComponent<Renderer>().material.shader = Shader.Find("GorillaTag/UberShader");
-            GripPipe.GetComponent<Renderer>().material.color = mainColor;
-
-            Transform GripAccent = menuObj.transform.Find("GripAccent");
-            GripAccent.GetComponent<Renderer>().material.shader = Shader.Find("GorillaTag/UberShader");
-            GripAccent.GetComponent<Renderer>().material.color = accentColor;
-        }
-
-        void AssignMenuThemeSakura()
-        {
-            Transform Main = menuObj.transform.Find("Main");
-            Main.GetComponent<Renderer>().material.shader = Shader.Find("GorillaTag/UberShader");
-            Main.GetComponent<Renderer>().material.color = mainColor;
-
-            Transform MainBorder = menuObj.transform.Find("MainBorder");
-            MainBorder.GetComponent<Renderer>().material.shader = Shader.Find("GorillaTag/UberShader");
-            MainBorder.GetComponent<Renderer>().material.color = borderColor;
-
-            Transform GripPipe = menuObj.transform.Find("GripPipe");
-            GripPipe.GetComponent<Renderer>().material.shader = Shader.Find("GorillaTag/UberShader");
-            GripPipe.GetComponent<Renderer>().material.color = mainColor;
-
-            Transform GripAccent = menuObj.transform.Find("GripAccent");
-            GripAccent.GetComponent<Renderer>().material.shader = Shader.Find("GorillaTag/UberShader");
-            GripAccent.GetComponent<Renderer>().material.color = accentColor;
-
-            // Extra sakura coloring
-            Transform Pole1 = menuObj.transform.Find("Pole1");
-            Pole1.GetComponent<Renderer>().material.shader = Shader.Find("GorillaTag/UberShader");
-            Pole1.GetComponent<Renderer>().material.color = mainColor;
-
-            Transform Pole2 = menuObj.transform.Find("Pole2");
-            Pole2.GetComponent<Renderer>().material.shader = Shader.Find("GorillaTag/UberShader");
-            Pole2.GetComponent<Renderer>().material.color = mainColor;
-
-            Transform PipeTop1 = menuObj.transform.Find("PipeTop1");
-            PipeTop1.GetComponent<Renderer>().material.shader = Shader.Find("GorillaTag/UberShader");
-            PipeTop1.GetComponent<Renderer>().material.color = borderColor;
-
-            Transform PipeTop2 = menuObj.transform.Find("PipeTop2");
-            PipeTop2.GetComponent<Renderer>().material.shader = Shader.Find("GorillaTag/UberShader");
-            PipeTop2.GetComponent<Renderer>().material.color = borderColor;
-
-            Transform UnderBar = menuObj.transform.Find("UnderBar");
-            UnderBar.GetComponent<Renderer>().material.shader = Shader.Find("GorillaTag/UberShader");
-            UnderBar.GetComponent<Renderer>().material.color = borderColor;
-
-            Transform BarConnector = menuObj.transform.Find("BarConnector");
-            BarConnector.GetComponent<Renderer>().material.shader = Shader.Find("GorillaTag/UberShader");
-            BarConnector.GetComponent<Renderer>().material.color = mainColor;
-
-            Transform TopUnderBar = menuObj.transform.Find("BarConnector");
-            BarConnector.GetComponent<Renderer>().material.shader = Shader.Find("GorillaTag/UberShader");
-            BarConnector.GetComponent<Renderer>().material.color = mainColor;
-
-            Transform TopBarUnder = menuObj.transform.Find("TopBarUnder");
-            TopBarUnder.GetComponent<Renderer>().material.shader = Shader.Find("GorillaTag/UberShader");
-            TopBarUnder.GetComponent<Renderer>().material.color = mainColor;
-
-            Transform TopBar = menuObj.transform.Find("TopBar");
-            TopBar.GetComponent<Renderer>().material.shader = Shader.Find("GorillaTag/UberShader");
-            TopBar.GetComponent<Renderer>().material.color = accentColor;
+                MenuTheme.Assign(menuObj, mainColor, borderColor, accentColor);
         }
 
         void CreateButton(float zOffset, string btnName)
@@ -206,12 +261,11 @@ namespace ThatUtilsPad
             GameObject btn = Instantiate(btnPrefab);
             GameObject btnOutline = Instantiate(btnPrefab);
 
-            //GameObject btn = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            btn.transform.localScale = Vector3.one * 0.78f; //new Vector3(0.015f, 0.265f, 0.04f)
+            btn.transform.localScale = Vector3.one * 0.78f;
             btn.transform.localRotation = Quaternion.identity;
             btn.layer = 18;
 
-            btnOutline.transform.localScale = Vector3.one * 0.79f; //new Vector3(0.015f, 0.265f, 0.04f)
+            btnOutline.transform.localScale = Vector3.one * 0.79f;
             btnOutline.transform.localRotation = Quaternion.identity;
 
             var follow = btn.AddComponent<FollowMenu>();
@@ -228,8 +282,8 @@ namespace ThatUtilsPad
             trigger.btnIdentifier = btnName;
             trigger.pressButtonSoundIndex = 28;
 
-            var collider = btn.AddComponent<BoxCollider>();
-            collider.isTrigger = true;
+            var boxCollider = btn.AddComponent<BoxCollider>();
+            boxCollider.isTrigger = true;
 
             var renderer = btn.GetComponentInChildren<Renderer>();
             if (renderer != null)
@@ -247,7 +301,7 @@ namespace ThatUtilsPad
 
             GameObject textObj = new GameObject("ButtonLabel");
             textObj.transform.SetParent(btn.transform);
-            textObj.transform.localPosition = new Vector3(0.023f, 0f, 0f); //new Vector3(0.58f, 0f, 0f);
+            textObj.transform.localPosition = new Vector3(0.023f, 0f, 0f);
             textObj.transform.localRotation = Quaternion.Euler(0f, -90f, 180f);
 
             var text = textObj.AddComponent<TextMeshPro>();
@@ -257,7 +311,6 @@ namespace ThatUtilsPad
             text.color = Color.white;
             text.font = VRRig.LocalRig.playerText1.font;
             text.enableAutoSizing = false;
-            //text.rectTransform.sizeDelta = new Vector2(100f, 40f);
             text.transform.localScale = new Vector3(0.02f, 0.018f, 2f);
 
             btnObjs.Add(btn);
@@ -266,77 +319,57 @@ namespace ThatUtilsPad
         void DestroyButtons()
         {
             foreach (GameObject btnObj in btnObjs)
-            {
                 Destroy(btnObj);
-            }
         }
 
         void LoadBundles()
         {
             Assembly assembly = Assembly.GetExecutingAssembly();
 
-            using (Stream stream = assembly.GetManifestResourceStream("ThatUtilsPad.Assets.tup-prefab"))
-            {
-                byte[] buffer = new byte[stream.Length];
-                stream.Read(buffer, 0, buffer.Length);
-                menuBundle = AssetBundle.LoadFromMemory(buffer);
-            }
-
-            using (Stream stream = assembly.GetManifestResourceStream("ThatUtilsPad.Assets.tupsakura-prefab"))
-            {
-                byte[] buffer = new byte[stream.Length];
-                stream.Read(buffer, 0, buffer.Length);
-                sakuraBundle = AssetBundle.LoadFromMemory(buffer);
-            }
-
-            using (Stream stream = assembly.GetManifestResourceStream("ThatUtilsPad.Assets.tupbutton-prefab"))
-            {
-                byte[] buffer = new byte[stream.Length];
-                stream.Read(buffer, 0, buffer.Length);
-                buttonBundle = AssetBundle.LoadFromMemory(buffer);
-            }
+            menuBundle = LoadBundle(assembly, "ThatUtilsPad.Assets.tup-prefab");
+            sakuraBundle = LoadBundle(assembly, "ThatUtilsPad.Assets.tupsakura-prefab");
+            buttonBundle = LoadBundle(assembly, "ThatUtilsPad.Assets.tupbutton-prefab");
 
             foreach (string name in buttonBundle.GetAllAssetNames())
-            {
                 Debug.Log("BUNDLE ASSET: " + name);
-            }
         }
 
-    }
-
-    public class ButtonTrigger : GorillaPressableButton
-    {
-        public string btnIdentifier;
-        public override void ButtonActivationWithHand(bool isLeftHand)
+        AssetBundle LoadBundle(Assembly assembly, string resourceName)
         {
-            base.ButtonActivationWithHand(isLeftHand);
-
-            if (!isLeftHand)
+            using (Stream stream = assembly.GetManifestResourceStream(resourceName))
             {
-                if (Mods.Actions.TryGetValue(btnIdentifier, out var action))
-                {
-                    action.Invoke();
-                }
-                else
-                {
-                    Debug.LogWarning($"[TUP: WARNING] No mod found for button: {btnIdentifier}");
-                }
+                byte[] buffer = new byte[stream.Length];
+                stream.Read(buffer, 0, buffer.Length);
+                return AssetBundle.LoadFromMemory(buffer);
             }
         }
     }
 
-    public class FollowMenu : MonoBehaviour
+    public static class WavUtility
     {
-        public Transform target;
-        public Vector3 position;
-        public Quaternion rotation;
-
-        void LateUpdate()
+        public static AudioClip ToAudioClip(byte[] fileBytes, string name = "wav")
         {
-            if (target == null) return;
+            int headerSize = 44;
+            int subchunk1 = BitConverter.ToInt32(fileBytes, 16);
+            ushort audioFormat = BitConverter.ToUInt16(fileBytes, 20);
 
-            transform.position = target.TransformPoint(position);
-            transform.rotation = target.rotation * rotation;
+            ushort numChannels = BitConverter.ToUInt16(fileBytes, 22);
+            int sampleRate = BitConverter.ToInt32(fileBytes, 24);
+            ushort bitDepth = BitConverter.ToUInt16(fileBytes, 34);
+
+            int dataSize = BitConverter.ToInt32(fileBytes, 40);
+            float[] data = new float[dataSize / (bitDepth / 8)];
+
+            for (int i = 0; i < data.Length; i++)
+            {
+                int offset = headerSize + (i * 2);
+                data[i] = BitConverter.ToInt16(fileBytes, offset) / 32768.0f;
+            }
+
+            AudioClip audioClip = AudioClip.Create(name, data.Length / numChannels, numChannels, sampleRate, false);
+            audioClip.SetData(data, 0);
+
+            return audioClip;
         }
     }
 }
