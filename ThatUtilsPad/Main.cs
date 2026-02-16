@@ -9,6 +9,7 @@ using System.Net;
 using System.Reflection;
 using TMPro;
 using UnityEngine;
+using static ThrowableBug;
 using Debug = UnityEngine.Debug;
 
 namespace ThatUtilsPad
@@ -68,8 +69,30 @@ namespace ThatUtilsPad
             CheckAdminStatus();
             Mods.Init();
             LoadBundles();
+            StumpInfo();
 
             btnPrefab = buttonBundle.LoadAsset<GameObject>("assets/prefabs/tup-buttonmodel.prefab");
+        }
+
+        void StumpInfo()
+        {
+            GameObject stumpInfo = new GameObject("ButtonLabel");
+            stumpInfo.transform.localPosition = new Vector3(-66.689f, 11.896f, -82.602f); // Middle of stump pos (took too long)
+            stumpInfo.transform.localRotation = Quaternion.identity;
+            stumpInfo.transform.LookAt(Camera.main.transform.position);
+            stumpInfo.transform.Rotate(0f, 180f, 0f);
+
+            var text = stumpInfo.AddComponent<TextMeshPro>();
+            text.text = "ThatUtilsPad\n<size=15><color=white>Version 1.0.0</color></size>";
+            text.color = accentColor;
+            text.fontSize = 25;
+            text.alignment = TextAlignmentOptions.Center;
+            text.font = VRRig.LocalRig.playerText1.font;
+            text.enableAutoSizing = false;
+            text.richText = true;
+            text.transform.localScale = Vector3.one * 0.12f;
+            var rect = text.GetComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(500f, 100f);
         }
 
         void LoadAudio()
