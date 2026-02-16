@@ -4,6 +4,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Text;
+using ThatUtilsPad;
 using UnityEngine;
 using GorillaLocomotion;
 
@@ -80,7 +81,7 @@ namespace ThatUtilsPad
             if (line == null)
             {
                 line = checkerLine.AddComponent<LineRenderer>();
-                line.material = new Material(Shader.Find("GUI/Text Shader"));
+                line.material = new Material(ShaderCache.TextShader);
                 line.startWidth = 0.01f;
                 line.endWidth = 0.01f;
                 line.positionCount = 2;
@@ -122,7 +123,7 @@ namespace ThatUtilsPad
             var renderer = rig.mainSkin;
             if (renderer != null)
             {
-                renderer.material.shader = Shader.Find("GUI/Text Shader");
+                renderer.material.shader = ShaderCache.TextShader;
                 renderer.material.color = Color.cyan;
             }
         }
@@ -132,7 +133,7 @@ namespace ThatUtilsPad
             var renderer = rig.mainSkin;
             if (renderer != null)
             {
-                renderer.material.shader = Shader.Find("GorillaTag/UberShader");
+                renderer.material.shader = ShaderCache.TextShader;
                 if (renderer.material.name.Contains("gorilla_body"))
                     renderer.material.color = rig.playerColor;
             }

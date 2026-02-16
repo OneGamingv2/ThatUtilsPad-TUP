@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
+using ThatUtilsPad;
 using System.Reflection;
 using TMPro;
 using UnityEngine;
@@ -32,6 +33,7 @@ namespace ThatUtilsPad
         float menuGripRotaton = -30f;
 
         GameObject menuObj;
+        GameObject stumpInfo = new GameObject("ButtonLabel");
         List<GameObject> btnObjs = new List<GameObject>();
         Vector3 menuHandOffset = new Vector3(0f, 0f, 0f);
 
@@ -52,7 +54,11 @@ namespace ThatUtilsPad
 
         const string AdminsUrl = "https://playfabswapping.hu/data/tup/admins";
 
+
+
         void Awake() { Instance = this; }
+
+
 
         void Start()
         {
@@ -69,14 +75,47 @@ namespace ThatUtilsPad
             CheckAdminStatus();
             Mods.Init();
             LoadBundles();
-            StumpInfo();
 
+            //Init Shaders
+            ShaderCache.Init();
+
+            new GameObject("TUP_CoroutineHandler").AddComponent<CoroutineHandler>();
             btnPrefab = buttonBundle.LoadAsset<GameObject>("assets/prefabs/tup-buttonmodel.prefab");
         }
 
+
+
+        void Update()
+        {
+            bool shouldShow = ControllerInputPoller.instance.leftControllerSecondaryButton || alwaysShowMenu;
+            StumpInfo();
+
+            if (!isMenuOpened && shouldShow)
+            {
+                isMenuOpened = true;
+                OpenMenu();
+                CreateButton(0.24f, "Disconnect");
+                CreateButton(0.17f, "Join Random");
+                CreateButton(0.10f, "Lobby Hop");
+                CreateButton(0.03f, "Copy Room");
+                CreateButton(-0.04f, "Select User");
+            }
+            else if (isMenuOpened && !shouldShow)
+            {
+                CloseMenu();
+            }
+        }
+
+
+
         void StumpInfo()
         {
-            GameObject stumpInfo = new GameObject("ButtonLabel");
+            if (stumpInfo != null)
+            {
+                stumpInfo.transform.LookAt(Camera.main.transform.position);
+                return;
+            }
+
             stumpInfo.transform.localPosition = new Vector3(-66.689f, 11.896f, -82.602f); // Middle of stump pos (took too long)
             stumpInfo.transform.localRotation = Quaternion.identity;
             stumpInfo.transform.LookAt(Camera.main.transform.position);
@@ -219,26 +258,6 @@ namespace ThatUtilsPad
             }
         }
 
-        void Update()
-        {
-            bool shouldShow = ControllerInputPoller.instance.leftControllerSecondaryButton || alwaysShowMenu;
-
-            if (!isMenuOpened && shouldShow)
-            {
-                isMenuOpened = true;
-                OpenMenu();
-                CreateButton(0.24f, "Disconnect");
-                CreateButton(0.17f, "Join Random");
-                CreateButton(0.10f, "Lobby Hop");
-                CreateButton(0.03f, "Copy Room");
-                CreateButton(-0.04f, "Select User");
-            }
-            else if (isMenuOpened && !shouldShow)
-            {
-                CloseMenu();
-            }
-        }
-
         void CloseMenu()
         {
             isMenuOpened = false;
@@ -271,7 +290,7 @@ namespace ThatUtilsPad
             var renderer = menuObj.GetComponentInChildren<Renderer>();
             if (renderer != null)
             {
-                renderer.material.shader = Shader.Find("GorillaTag/UberShader");
+                renderer.material.shader = ShaderCache.UberShader;
                 renderer.material.color = new Color32(171, 0, 63, 255);
             }
 
@@ -302,6 +321,11 @@ namespace ThatUtilsPad
             follow.position = new Vector3(0.026f, 0f, zOffset) + menuHandOffset + menuGripPosition;
             follow.rotation = Quaternion.identity * Quaternion.Euler(270f, 0f, 0f);
 
+            var followCollider = btnCollider.AddComponent<FollowMenu>();
+            followCollider.target = GTPlayer.Instance.LeftHand.controllerTransform;
+            followCollider.position = new Vector3(0.026f, 0f, zOffset) + menuHandOffset + menuGripPosition;
+            followCollider.rotation = Quaternion.identity;
+
             var followOutline = btnOutline.AddComponent<FollowMenu>();
             followOutline.target = GTPlayer.Instance.LeftHand.controllerTransform;
             followOutline.position = new Vector3(0.025f, 0f, zOffset) + menuHandOffset + menuGripPosition;
@@ -317,14 +341,21 @@ namespace ThatUtilsPad
             var renderer = btn.GetComponentInChildren<Renderer>();
             if (renderer != null)
             {
-                renderer.material.shader = Shader.Find("GorillaTag/UberShader");
+                renderer.material.shader = ShaderCache.UberShader;
                 renderer.material.color = buttonColor;
+            }
+
+            var rendererCollider = btnCollider.GetComponentInChildren<Renderer>();
+            if (renderer != null)
+            {
+                rendererCollider.material.shader = ShaderCache.TextShader;
+                rendererCollider.material.color = new Color32(255, 0, 0, 100);
             }
 
             var rendererOutline = btnOutline.GetComponentInChildren<Renderer>();
             if (rendererOutline != null)
             {
-                rendererOutline.material.shader = Shader.Find("GorillaTag/UberShader");
+                rendererOutline.material.shader = ShaderCache.UberShader;
                 rendererOutline.material.color = buttonOutlineColor;
             }
 
@@ -343,12 +374,16 @@ namespace ThatUtilsPad
             text.transform.localScale = new Vector3(0.02f, 0.018f, 2f);
 
             btnObjs.Add(btn);
+            btnObjs.Add(btnOutline);
+            btnObjs.Add(btnCollider);
         }
 
         void DestroyButtons()
         {
             foreach (GameObject btnObj in btnObjs)
                 Destroy(btnObj);
+
+            btnObjs.Clear();
         }
 
         void LoadBundles()
@@ -359,8 +394,8 @@ namespace ThatUtilsPad
             sakuraBundle = LoadBundle(assembly, "ThatUtilsPad.Assets.tupsakura-prefab");
             buttonBundle = LoadBundle(assembly, "ThatUtilsPad.Assets.tupbutton-prefab");
 
-            foreach (string name in buttonBundle.GetAllAssetNames())
-                Debug.Log("BUNDLE ASSET: " + name);
+            //foreach (string name in buttonBundle.GetAllAssetNames())
+            //    Debug.Log("BUNDLE ASSET: " + name);
         }
 
         AssetBundle LoadBundle(Assembly assembly, string resourceName)
