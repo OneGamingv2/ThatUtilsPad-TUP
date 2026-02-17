@@ -6,11 +6,12 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
-using ThatUtilsPad;
 using System.Reflection;
+using ThatUtilsPad;
 using TMPro;
 using UnityEngine;
 using static ThrowableBug;
+using static UnityEngine.GraphicsBuffer;
 using Debug = UnityEngine.Debug;
 
 namespace ThatUtilsPad
@@ -33,14 +34,14 @@ namespace ThatUtilsPad
         float menuGripRotaton = -30f;
 
         GameObject menuObj;
-        GameObject stumpInfo = new GameObject("ButtonLabel");
+        GameObject stumpInfo;
         List<GameObject> btnObjs = new List<GameObject>();
         Vector3 menuHandOffset = new Vector3(0f, 0f, 0f);
 
         // State
         bool useSakuraTheme = true;
         bool isMenuOpened = false;
-        bool alwaysShowMenu = true;
+        bool alwaysShowMenu = false;
 
         // Theme colors
         Color32 mainColor = new Color32(17, 17, 27, 255);
@@ -88,7 +89,6 @@ namespace ThatUtilsPad
         void Update()
         {
             bool shouldShow = ControllerInputPoller.instance.leftControllerSecondaryButton || alwaysShowMenu;
-            StumpInfo();
 
             if (!isMenuOpened && shouldShow)
             {
@@ -108,34 +108,8 @@ namespace ThatUtilsPad
 
 
 
-        void StumpInfo()
-        {
-            if (stumpInfo != null)
-            {
-                stumpInfo.transform.LookAt(Camera.main.transform.position);
-                return;
-            }
-
-            stumpInfo.transform.localPosition = new Vector3(-66.689f, 11.896f, -82.602f); // Middle of stump pos (took too long)
-            stumpInfo.transform.localRotation = Quaternion.identity;
-            stumpInfo.transform.LookAt(Camera.main.transform.position);
-            stumpInfo.transform.Rotate(0f, 180f, 0f);
-
-            var text = stumpInfo.AddComponent<TextMeshPro>();
-            text.text = "ThatUtilsPad\n<size=15><color=white>Version 1.0.0</color></size>";
-            text.color = accentColor;
-            text.fontSize = 25;
-            text.alignment = TextAlignmentOptions.Center;
-            text.font = VRRig.LocalRig.playerText1.font;
-            text.enableAutoSizing = false;
-            text.richText = true;
-            text.transform.localScale = Vector3.one * 0.12f;
-            var rect = text.GetComponent<RectTransform>();
-            rect.sizeDelta = new Vector2(500f, 100f);
-        }
-
         void LoadAudio()
-        {
+        {  
             try
             {
                 Assembly assembly = Assembly.GetExecutingAssembly();
@@ -236,6 +210,7 @@ namespace ThatUtilsPad
                         }
                         else
                             Debug.Log("[TUP] Logged in as normal user");
+                        
                     };
 
                     client.DownloadStringAsync(new System.Uri(AdminsUrl));
