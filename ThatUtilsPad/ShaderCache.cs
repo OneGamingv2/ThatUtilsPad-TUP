@@ -1,22 +1,22 @@
 ﻿using UnityEngine;
 
-namespace ThatUtilsPad
+namespace ThatUtilsPad;
+
+public static class ShaderCache
 {
-    public static class ShaderCache
+    public static Shader UberShader { get; private set; }
+    public static Shader TextShader { get; private set; }
+
+    public static void Init()
     {
-        public static Shader UberShader { get; private set; }
-        public static Shader TextShader { get; private set; }
+        // ReSharper disable once ShaderLabShaderReferenceNotResolved
+        UberShader = Shader.Find("GorillaTag/UberShader");
+        TextShader = Shader.Find("GUI/Text Shader");
 
-        public static void Init()
-        {
-            UberShader = Shader.Find("GorillaTag/UberShader");
-            TextShader = Shader.Find("GUI/Text Shader");
+        if (UberShader == null)
+            Debug.LogError("[TUP] Failed to find UberShader!");
 
-            if (UberShader == null)
-                Debug.LogError("[TUP] Failed to find UberShader!");
-
-            if (TextShader == null)
-                Debug.LogError("[TUP] Failed to find TextShader!");
-        }
+        if (TextShader == null)
+            Debug.LogError("[TUP] Failed to find TextShader!");
     }
 }
