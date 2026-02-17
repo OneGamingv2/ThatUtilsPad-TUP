@@ -397,7 +397,7 @@ public class Main : BaseUnityPlugin
         text.color                = Color.white;
         text.font                 = VRRig.LocalRig.playerText1.font;
         text.enableAutoSizing     = false;
-        text.transform.localScale = new Vector3(0.03f, 0.03f, 0.03f);
+        text.transform.localScale = Vector3.one * 0.02f;
 
         btnObjs.Add(btn);
         btnObjs.Add(btnOutline);
