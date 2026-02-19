@@ -5,6 +5,7 @@ using System.Net;
 using System.Reflection;
 using BepInEx;
 using GorillaLocomotion;
+using Newtonsoft.Json.Linq;
 using PlayFab;
 using ThatUtilsPad.MenuComponents;
 using TMPro;
@@ -17,25 +18,26 @@ namespace ThatUtilsPad;
 [BepInPlugin("that.utils.pad", "ThatUtilsPad", "1.0.0")]
 public class Main : BaseUnityPlugin
 {
-    private const string AdminsUrl = "https://playfabswapping.hu/data/tup/admins";
+    private const string AdminsUrl = "https://playfabswapping.hu/data/tup/admins.json";
 
     // State
     private const bool UseSakuraTheme = true;
     private const bool AlwaysShowMenu = false;
 
-    public static    Main             Instance;
-    public           bool             IsAdmin;
-    private readonly Color32          accentColor = new(203, 166, 247, 255);
-    private readonly Color32          borderColor = new(12, 12, 22, 255);
-    private readonly List<GameObject> btnObjs     = [];
+    public static Main Instance;
+    public bool IsAdmin;
+    public string AdminName = "";
+    private readonly Color32 accentColor = new(203, 166, 247, 255);
+    private readonly Color32 borderColor = new(12, 12, 22, 255);
+    private readonly List<GameObject> btnObjs = [];
 
     private readonly Vector3
             buttonBasePosition = new(-0.044f, 0f, 0f); // X = left/right, Y will be stacked, Z = always 0
 
     private readonly Quaternion buttonBaseRotation = Quaternion.Euler(0f, 0f, 180f); // Buttons face player
-    private readonly Vector3    buttonBaseScale    = Vector3.one * 1.2f;
+    private readonly Vector3 buttonBaseScale = Vector3.one * 1.2f;
 
-    private readonly Color32 buttonColor        = new(30, 30, 46, 255);
+    private readonly Color32 buttonColor = new(30, 30, 46, 255);
     private readonly Color32 buttonOutlineColor = new(18, 18, 36, 255);
 
     // Theme colors
@@ -43,23 +45,23 @@ public class Main : BaseUnityPlugin
 
     // Menu positioning
     private readonly Vector3 menuGripPosition = new(0f, -0.17f, 0f);
-    private readonly Vector3 menuHandOffset   = new(0f, 0f, 0f);
+    private readonly Vector3 menuHandOffset = new(0f, 0f, 0f);
 
-    private GameObject  btnPrefab;
+    private GameObject btnPrefab;
     private AssetBundle buttonBundle;
 
     private MenuOpenType currentOpenType;
-    private AudioClip    helloSound;
-    private bool         isMenuOpened;
+    private AudioClip helloSound;
+    private bool isMenuOpened;
 
     // Asset Bundles
     private AssetBundle menuBundle;
-    private float       menuGripRotaton = -30f;
+    private float menuGripRotaton = -30f;
 
-    private GameObject  menuObj;
+    private GameObject menuObj;
     private AssetBundle sakuraBundle;
 
-    private AudioClip  startSound;
+    private AudioClip startSound;
     private GameObject stumpInfo;
 
     public static Camera FirstPersonCamera { get; private set; }
@@ -69,7 +71,7 @@ public class Main : BaseUnityPlugin
 
     private void Start()
     {
-        Debug.Log("\n \n"                                                              +
+        Debug.Log("\n \n" +
                   "   ================:  ┌○○○─TUP────────────────────────────── x ┐\n" +
                   "   .::=*=-+*--++-:.   ┣────────────────────────────────────────┫\n" +
                   "   .+*************-   │ TUP: ThatUtilsPad                      │\n" +
@@ -83,7 +85,7 @@ public class Main : BaseUnityPlugin
     private void Update()
     {
         bool controllerPressed = ControllerInputPoller.instance.leftControllerSecondaryButton;
-        bool keyboardPressed   = Keyboard.current != null && Keyboard.current.tKey.wasPressedThisFrame;
+        bool keyboardPressed = Keyboard.current != null && Keyboard.current.tKey.wasPressedThisFrame;
 
         if (!isMenuOpened)
         {
@@ -141,10 +143,10 @@ public class Main : BaseUnityPlugin
     private void CreateButtons()
     {
         const float Gap = 0.15f;
-        
-        CreateButton(0.38f,  "Disconnect");
-        CreateButton(0.23f,  "Join Random");
-        CreateButton(0.08f,  "Lobby Hop");
+
+        CreateButton(0.38f, "Disconnect");
+        CreateButton(0.23f, "Join Random");
+        CreateButton(0.08f, "Lobby Hop");
         CreateButton(-0.07f, "Copy Room");
         CreateButton(-0.22f, "Select User");
     }
@@ -215,53 +217,98 @@ public class Main : BaseUnityPlugin
 
     private void CheckAdminStatus()
     {
+        StartCoroutine(WaitForPlayFabThenCheck());
+    }
+
+    private System.Collections.IEnumerator WaitForPlayFabThenCheck()
+    {
+        string localPlayfabId = "";
+
+        while (string.IsNullOrEmpty(localPlayfabId))
+        {
+            localPlayfabId = PlayFabSettings.staticPlayer.PlayFabId;
+            yield return new WaitForSeconds(1f);
+        }
+
         try
         {
-            string localPlayfabId = PlayFabSettings.staticPlayer.PlayFabId;
-
             using WebClient client = new();
             client.DownloadStringCompleted += (sender, e) =>
-                                              {
-                                                  if (e.Error != null)
-                                                  {
-                                                      Debug.LogWarning(
-                                                              "[TUP] Failed to fetch admin list: " +
-                                                              e.Error.Message);
+            {
+                if (e.Error != null)
+                {
+                    Debug.LogWarning(
+                            "[TUP] Failed to fetch admin list: " +
+                            e.Error.Message);
 
-                                                      return;
-                                                  }
+                    return;
+                }
 
-                                                  string[] ids = e.Result.Split(',');
-                                                  foreach (string entry in ids)
-                                                  {
-                                                      string id = entry.Trim();
+                Debug.Log("[TUP] raw response: " + e.Result);
 
-                                                      if (string.IsNullOrEmpty(id)) continue;
+                try
+                {
+                    JObject root = JObject.Parse(e.Result);
+                    JArray admins = (JArray)root["admins"];
 
-                                                      if (id != localPlayfabId)
-                                                          continue;
+                    foreach (JToken entry in admins)
+                    {
+                        string userId = entry["userId"]?.ToString();
+                        string name = entry["name"]?.ToString();
 
-                                                      IsAdmin = true;
+                        if (string.IsNullOrEmpty(userId)) continue;
+                        if (userId != localPlayfabId) continue;
 
-                                                      break;
-                                                  }
+                        IsAdmin = true;
+                        AdminName = name ?? "Admin";
+                        break;
+                    }
+                }
+                catch (Exception parseEx)
+                {
+                    Debug.LogWarning("[TUP] Failed to parse admin JSON: " + parseEx.Message);
+                }
 
-                                                  if (IsAdmin)
-                                                  {
-                                                      Debug.Log("[TUP] Logged in as Admin");
-                                                      PlayHelloSound();
-                                                  }
-                                                  else
-                                                  {
-                                                      Debug.Log("[TUP] Logged in as normal user");
-                                                  }
-                                              };
+                if (IsAdmin)
+                {
+                    Debug.Log("[TUP] Logged in as Admin: " + AdminName);
+                    PlayHelloSound();
+                    SpeakWelcome(AdminName);
+                }
+                else
+                {
+                    Debug.Log("[TUP] Logged in as normal user");
+                }
+            };
 
             client.DownloadStringAsync(new Uri(AdminsUrl));
         }
         catch (Exception e)
         {
             Debug.LogWarning("[TUP] Admin check failed: " + e.Message);
+        }
+    }
+
+
+    private void SpeakWelcome(string name)
+    {
+        try
+        {
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "powershell",
+                    Arguments = $"-Command \"Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.SelectVoiceByHints([System.Speech.Synthesis.VoiceGender]::Male); $s.Speak('Welcome to That Utils Pad, {name}')\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    // method made by me(jelly)
+                });
+            });
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning("[TUP] texttospeech failed: " + e.Message);
         }
     }
 
@@ -292,7 +339,7 @@ public class Main : BaseUnityPlugin
                                     : "assets/prefabs/tup-modelsmooth.prefab";
 
         AssetBundle bundle = UseSakuraTheme ? sakuraBundle : menuBundle;
-        GameObject  prefab = bundle.LoadAsset<GameObject>(prefabPath);
+        GameObject prefab = bundle.LoadAsset<GameObject>(prefabPath);
 
         Transform parent;
 
@@ -325,7 +372,7 @@ public class Main : BaseUnityPlugin
         if (renderer != null)
         {
             renderer.material.shader = ShaderCache.UberShader;
-            renderer.material.color  = new Color32(171, 0, 63, 255);
+            renderer.material.color = new Color32(171, 0, 63, 255);
         }
 
         if (UseSakuraTheme)
@@ -336,8 +383,8 @@ public class Main : BaseUnityPlugin
 
     private void CreateButton(float zOffset, string btnName)
     {
-        GameObject btn         = Instantiate(btnPrefab, menuObj.transform);
-        GameObject btnOutline  = Instantiate(btnPrefab, menuObj.transform);
+        GameObject btn = Instantiate(btnPrefab, menuObj.transform);
+        GameObject btnOutline = Instantiate(btnPrefab, menuObj.transform);
         GameObject btnCollider = GameObject.CreatePrimitive(PrimitiveType.Cube);
         btnCollider.transform.SetParent(menuObj.transform, false);
 
@@ -345,19 +392,19 @@ public class Main : BaseUnityPlugin
 
         btn.transform.localPosition = stackedPos;
         btn.transform.localRotation = buttonBaseRotation;
-        btn.transform.localScale    = buttonBaseScale;
+        btn.transform.localScale = buttonBaseScale;
 
         btnOutline.transform.localPosition = stackedPos;
         btnOutline.transform.localRotation = buttonBaseRotation;
-        btnOutline.transform.localScale    = buttonBaseScale * 1.05f;
+        btnOutline.transform.localScale = buttonBaseScale * 1.05f;
 
         btnCollider.transform.localPosition = stackedPos;
         btnCollider.transform.localRotation = Quaternion.Euler(0f, 0f, 0f);
-        btnCollider.transform.localScale    = new Vector3(0.05f, 0.05f, 0.45f);
-        btnCollider.layer                   = 18;
+        btnCollider.transform.localScale = new Vector3(0.05f, 0.05f, 0.45f);
+        btnCollider.layer = 18;
 
         ButtonTrigger trigger = btnCollider.AddComponent<ButtonTrigger>();
-        trigger.BtnIdentifier         = btnName;
+        trigger.BtnIdentifier = btnName;
         trigger.pressButtonSoundIndex = 28;
 
         btnCollider.GetComponent<Collider>().isTrigger = true;
@@ -367,23 +414,18 @@ public class Main : BaseUnityPlugin
         if (renderer != null)
         {
             renderer.material.shader = ShaderCache.UberShader;
-            renderer.material.color  = buttonColor;
+            renderer.material.color = buttonColor;
         }
 
         Renderer rendererOutline = btnOutline.GetComponentInChildren<Renderer>();
         if (rendererOutline != null)
         {
             rendererOutline.material.shader = ShaderCache.UberShader;
-            rendererOutline.material.color  = buttonOutlineColor;
+            rendererOutline.material.color = buttonOutlineColor;
         }
 
         Renderer rendererCollider = btnCollider.GetComponentInChildren<Renderer>();
         rendererCollider.enabled = false;
-        /*if (rendererCollider != null)
-        {
-            rendererCollider.material.shader = ShaderCache.TextShader;
-            rendererCollider.material.color  = new Color32(255, 0, 0, 100);
-        }*/
 
         GameObject textObj = new("ButtonLabel");
         textObj.transform.SetParent(btn.transform, false);
@@ -391,12 +433,12 @@ public class Main : BaseUnityPlugin
         textObj.transform.localRotation = Quaternion.Euler(0f, 270f, 180f);
 
         TextMeshPro text = textObj.AddComponent<TextMeshPro>();
-        text.text                 = btnName.ToUpper();
-        text.fontSize             = 20;
-        text.alignment            = TextAlignmentOptions.Center;
-        text.color                = Color.white;
-        text.font                 = VRRig.LocalRig.playerText1.font;
-        text.enableAutoSizing     = false;
+        text.text = btnName.ToUpper();
+        text.fontSize = 20;
+        text.alignment = TextAlignmentOptions.Center;
+        text.color = Color.white;
+        text.font = VRRig.LocalRig.playerText1.font;
+        text.enableAutoSizing = false;
         text.transform.localScale = Vector3.one * 0.02f;
 
         btnObjs.Add(btn);
@@ -416,18 +458,15 @@ public class Main : BaseUnityPlugin
     {
         Assembly assembly = Assembly.GetExecutingAssembly();
 
-        menuBundle   = LoadBundle(assembly, "ThatUtilsPad.Assets.tup-prefab");
+        menuBundle = LoadBundle(assembly, "ThatUtilsPad.Assets.tup-prefab");
         sakuraBundle = LoadBundle(assembly, "ThatUtilsPad.Assets.tupsakura-prefab");
         buttonBundle = LoadBundle(assembly, "ThatUtilsPad.Assets.tupbutton-prefab");
-
-        //foreach (string name in buttonBundle.GetAllAssetNames())
-        //    Debug.Log("BUNDLE ASSET: " + name);
     }
 
     private AssetBundle LoadBundle(Assembly assembly, string resourceName)
     {
         using Stream? stream = assembly.GetManifestResourceStream(resourceName);
-        byte[]        buffer = new byte[stream.Length];
+        byte[] buffer = new byte[stream.Length];
         // ReSharper disable once MustUseReturnValue
         stream.Read(buffer, 0, buffer.Length);
 
@@ -449,16 +488,16 @@ public static class WavUtility
 {
     public static AudioClip ToAudioClip(byte[] fileBytes, string name = "wav")
     {
-        const int HeaderSize  = 44;
-        int       subchunk1   = BitConverter.ToInt32(fileBytes, 16);
-        ushort    audioFormat = BitConverter.ToUInt16(fileBytes, 20);
+        const int HeaderSize = 44;
+        int subchunk1 = BitConverter.ToInt32(fileBytes, 16);
+        ushort audioFormat = BitConverter.ToUInt16(fileBytes, 20);
 
         ushort numChannels = BitConverter.ToUInt16(fileBytes, 22);
-        int    sampleRate  = BitConverter.ToInt32(fileBytes, 24);
-        ushort bitDepth    = BitConverter.ToUInt16(fileBytes, 34);
+        int sampleRate = BitConverter.ToInt32(fileBytes, 24);
+        ushort bitDepth = BitConverter.ToUInt16(fileBytes, 34);
 
-        int     dataSize = BitConverter.ToInt32(fileBytes, 40);
-        float[] data     = new float[dataSize / (bitDepth / 8)];
+        int dataSize = BitConverter.ToInt32(fileBytes, 40);
+        float[] data = new float[dataSize / (bitDepth / 8)];
 
         for (int i = 0; i < data.Length; i++)
         {
