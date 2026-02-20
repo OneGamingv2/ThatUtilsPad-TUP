@@ -39,7 +39,7 @@ public class ButtonTrigger : GorillaPressableButton
 
 public static class MenuEffects
 {
-    public static IEnumerator SpawnHitCircle(Vector3 position)
+    public static IEnumerator SpawnHitCircle(Vector3 position, Transform hit)
     {
         GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         sphere.transform.position = position;

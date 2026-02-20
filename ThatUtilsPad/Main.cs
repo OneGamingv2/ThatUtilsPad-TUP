@@ -23,6 +23,7 @@ public class Main : BaseUnityPlugin
     // State
     private const bool UseSakuraTheme = true;
     private const bool AlwaysShowMenu = false;
+    private const bool toggleMenuMethod = true;
 
     public static Main Instance;
     public bool IsAdmin;
@@ -85,25 +86,48 @@ public class Main : BaseUnityPlugin
     private void Update()
     {
         bool controllerPressed = ControllerInputPoller.instance.leftControllerSecondaryButton;
-        bool keyboardPressed = Keyboard.current != null && Keyboard.current.tKey.isPressed;
+        bool keyboardPressed = Keyboard.current != null && Keyboard.current.tKey.wasPressedThisFrame;
+        
+        bool togglePressed = controllerPressed || keyboardPressed;
 
-        if (!isMenuOpened)
+        // toggle mode
+        if (toggleMenuMethod && !AlwaysShowMenu)
         {
-            if (controllerPressed || keyboardPressed || AlwaysShowMenu)
+            if (togglePressed)
             {
-                //Debug.Log("Pressed T");
-                currentOpenType = controllerPressed ? MenuOpenType.Hand : MenuOpenType.Head;
+                if (isMenuOpened)
+                {
+                    CloseMenu();
+                    isMenuOpened = false;
+                }
+                else
+                {
+                    currentOpenType = controllerPressed ? MenuOpenType.Hand : MenuOpenType.Head;
+                    OpenMenu();
+                    isMenuOpened = true;
+                    CreateButtons();
+                }
+            }
+        }
+        // hold mode
+        else
+        {
+            bool isHeld =
+                ControllerInputPoller.instance.leftControllerSecondaryButton ||
+                (Keyboard.current != null && Keyboard.current.tKey.isPressed);
+
+            if (!isMenuOpened && (isHeld || AlwaysShowMenu))
+            {
+                currentOpenType = isHeld ? MenuOpenType.Hand : MenuOpenType.Head;
                 OpenMenu();
                 isMenuOpened = true;
                 CreateButtons();
             }
-        }
-        else
-        {
-            bool releaseCondition = !controllerPressed && !Keyboard.current.tKey.isPressed && !AlwaysShowMenu;
-
-            if (releaseCondition)
+            else if (isMenuOpened && !isHeld && !AlwaysShowMenu)
+            {
                 CloseMenu();
+                isMenuOpened = false;
+            }
         }
 
         if (!isMenuOpened)
@@ -119,7 +143,7 @@ public class Main : BaseUnityPlugin
             return;
 
         //Debug.Log("Raycast Sent");
-        StartCoroutine(MenuEffects.SpawnHitCircle(hit.point));
+        StartCoroutine(MenuEffects.SpawnHitCircle(hit.point, hit.transform));
 
         if (hit.collider.TryGetComponent(out ButtonTrigger buttonTrigger))
         {
