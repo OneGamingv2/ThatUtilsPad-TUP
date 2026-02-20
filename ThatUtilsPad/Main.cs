@@ -52,7 +52,7 @@ public class Main : BaseUnityPlugin
 
     private MenuOpenType currentOpenType;
     private AudioClip helloSound;
-    private bool isMenuOpened;
+    private bool isMenuOpened = false;
 
     // Asset Bundles
     private AssetBundle menuBundle;
@@ -85,12 +85,13 @@ public class Main : BaseUnityPlugin
     private void Update()
     {
         bool controllerPressed = ControllerInputPoller.instance.leftControllerSecondaryButton;
-        bool keyboardPressed = Keyboard.current != null && Keyboard.current.tKey.wasPressedThisFrame;
+        bool keyboardPressed = Keyboard.current != null && Keyboard.current.tKey.isPressed;
 
         if (!isMenuOpened)
         {
             if (controllerPressed || keyboardPressed || AlwaysShowMenu)
             {
+                //Debug.Log("Pressed T");
                 currentOpenType = controllerPressed ? MenuOpenType.Hand : MenuOpenType.Head;
                 OpenMenu();
                 isMenuOpened = true;
@@ -110,16 +111,21 @@ public class Main : BaseUnityPlugin
 
         if (!Mouse.current.leftButton.wasPressedThisFrame)
             return;
-
+        //Debug.Log("Mouse.current.leftButton.wasPressedThisFrame");
+        
         Camera raycastCamera = GetActiveCamera();
-
-        if (!Physics.Raycast(raycastCamera.ScreenPointToRay(Mouse.current.position.ReadValue()),
-                    out RaycastHit hit,
-                    0.6f, 1 << 2, QueryTriggerInteraction.Collide))
+        Ray ray = raycastCamera.ScreenPointToRay(Mouse.current.position.ReadValue());
+        if (!Physics.Raycast(ray, out RaycastHit hit, 100f, 1 << 18, QueryTriggerInteraction.Collide))
             return;
 
+        //Debug.Log("Raycast Sent");
+        StartCoroutine(MenuEffects.SpawnHitCircle(hit.point));
+
         if (hit.collider.TryGetComponent(out ButtonTrigger buttonTrigger))
+        {
+            //Debug.Log("Raycast hit button");
             ButtonTrigger.PcPress(buttonTrigger);
+        }
     }
 
     private void OnPlayerSpawned()
@@ -383,7 +389,7 @@ public class Main : BaseUnityPlugin
 
     private void CreateButton(float zOffset, string btnName)
     {
-        GameObject btn = Instantiate(btnPrefab, menuObj.transform);
+        GameObject btn  = Instantiate(btnPrefab, menuObj.transform);
         GameObject btnOutline = Instantiate(btnPrefab, menuObj.transform);
         GameObject btnCollider = GameObject.CreatePrimitive(PrimitiveType.Cube);
         btnCollider.transform.SetParent(menuObj.transform, false);
@@ -400,7 +406,7 @@ public class Main : BaseUnityPlugin
 
         btnCollider.transform.localPosition = stackedPos;
         btnCollider.transform.localRotation = Quaternion.Euler(0f, 0f, 0f);
-        btnCollider.transform.localScale = new Vector3(0.05f, 0.05f, 0.45f);
+        btnCollider.transform.localScale = new Vector3(0.05f, 0.065f, 0.45f) * 1.3f;
         btnCollider.layer = 18;
 
         ButtonTrigger trigger = btnCollider.AddComponent<ButtonTrigger>();
@@ -425,6 +431,8 @@ public class Main : BaseUnityPlugin
         }
 
         Renderer rendererCollider = btnCollider.GetComponentInChildren<Renderer>();
+        rendererCollider.material.shader = ShaderCache.TextShader;
+        rendererCollider.material.color = new Color32(255, 0, 0, 50);
         rendererCollider.enabled = false;
 
         GameObject textObj = new("ButtonLabel");

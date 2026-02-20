@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections;
 using UnityEngine;
+using UnityEngine.NVIDIA;
 
 namespace ThatUtilsPad.MenuComponents;
 
@@ -10,6 +12,8 @@ public class ButtonTrigger : GorillaPressableButton
     public static void PcPress(ButtonTrigger button)
     {
         if (button == null) return;
+        
+        Debug.Log("ButtonActivationPC");
 
         if (Mods.Actions.TryGetValue(button.BtnIdentifier, out Action? action))
             action.Invoke();
@@ -24,10 +28,58 @@ public class ButtonTrigger : GorillaPressableButton
         if (isLeftHand)
             return;
 
+        Debug.Log("ButtonActivationWithHand");
+        
         if (Mods.Actions.TryGetValue(BtnIdentifier, out Action? action))
             action.Invoke();
         else
             Debug.LogWarning($"[TUP: WARNING] No mod found for button: {BtnIdentifier}");
+    }
+}
+
+public static class MenuEffects
+{
+    public static IEnumerator SpawnHitCircle(Vector3 position)
+    {
+        GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        sphere.transform.position = position;
+        sphere.transform.localScale = Vector3.one * 0.02f;
+
+        // Remove physics
+        GameObject.Destroy(sphere.GetComponent<Collider>());
+        GameObject.Destroy(sphere.GetComponent<Rigidbody>());
+
+        Renderer renderer = sphere.GetComponent<Renderer>();
+        renderer.material = new Material(Shader.Find("Sprites/Default"));
+        Color startColor = new Color32(255, 255, 255, 200);
+        renderer.material.color = startColor;
+
+        float duration = 0.4f;
+        float time = 0f;
+
+        Vector3 startScale = Vector3.one * 0.02f;
+        Vector3 endScale = Vector3.one * 0.055f;
+
+        while (time < duration)
+        {
+            float t = time / duration;
+
+            // Ease-out cubic: fast at start, slow at end
+            float easeT = 1f - Mathf.Pow(1f - t, 3);
+
+            // Scale grows with easing
+            sphere.transform.localScale = Vector3.Lerp(startScale, endScale, easeT);
+
+            // Alpha fades with easing
+            Color c = startColor;
+            c.a = Mathf.Lerp(1f, 0f, easeT);
+            renderer.material.color = c;
+
+            time += Time.deltaTime;
+            yield return null;
+        }
+
+        GameObject.Destroy(sphere);
     }
 }
 

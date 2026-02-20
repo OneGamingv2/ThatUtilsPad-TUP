@@ -27,8 +27,8 @@ public static class Mods
                 { "Disconnect", Disconnect },
                 { "Join Random", JoinRandom },
                 { "Lobby Hop", LobbyHop },
-                { "Toggle Checker", ToggleChecker },
-                { "Copy Room Code", CopyRoomCode },
+                { "Select User", ToggleChecker },
+                { "Copy Room", CopyRoomCode },
         };
     }
 
