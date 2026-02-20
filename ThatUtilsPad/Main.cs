@@ -148,13 +148,17 @@ public class Main : BaseUnityPlugin
 
     private void CreateButtons()
     {
-        const float Gap = 0.15f;
+        const float startY = 0.38f;
+        const float gap = 0.13f;
 
-        CreateButton(0.38f, "Disconnect");
-        CreateButton(0.23f, "Join Random");
-        CreateButton(0.08f, "Lobby Hop");
-        CreateButton(-0.07f, "Copy Room");
-        CreateButton(-0.22f, "Select User");
+        int index = 0;
+
+        foreach (var mod in Mods.Actions)
+        {
+            float height = startY - (index * gap);
+            CreateButton(height, mod.Key);
+            index++;
+        }
     }
 
     private void LoadAudio()
@@ -359,7 +363,7 @@ public class Main : BaseUnityPlugin
 
         if (currentOpenType == MenuOpenType.Head)
         {
-            menuObj.transform.localPosition = new Vector3(0f, -0.1f, 0.7f);
+            menuObj.transform.localPosition = new Vector3(0f, -0.07f, 0.7f); //-0.07f (perfect y-pos for default camera)
             menuObj.transform.localRotation = Quaternion.Euler(0f, 270f, 0f);
         }
         else

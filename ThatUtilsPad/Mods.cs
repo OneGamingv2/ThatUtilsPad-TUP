@@ -29,12 +29,19 @@ public static class Mods
                 { "Lobby Hop", LobbyHop },
                 { "Select User", ToggleChecker },
                 { "Copy Room", CopyRoomCode },
+                { "Temp1", PlaceholderButton },
+                { "Temp2", PlaceholderButton },
         };
     }
 
     // Mod functions (place them here jelly as public static void) ~ zlothy "member can be made private if not being called from another class"
     // then call them in the dictionary above, where the string is the BtnIdentifier (name as made in function) and thingy on right is the function name in here
 
+    private static void PlaceholderButton()
+    {
+        Debug.Log("PlaceholderButton activated");
+    }
+    
     private static void ToggleChecker()
     {
         checkerEnabled = !checkerEnabled;

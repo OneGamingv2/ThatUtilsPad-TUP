@@ -44,8 +44,7 @@ public static class MenuEffects
         GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         sphere.transform.position = position;
         sphere.transform.localScale = Vector3.one * 0.02f;
-
-        // Remove physics
+        
         GameObject.Destroy(sphere.GetComponent<Collider>());
         GameObject.Destroy(sphere.GetComponent<Rigidbody>());
 
@@ -63,14 +62,10 @@ public static class MenuEffects
         while (time < duration)
         {
             float t = time / duration;
-
-            // Ease-out cubic: fast at start, slow at end
             float easeT = 1f - Mathf.Pow(1f - t, 3);
-
-            // Scale grows with easing
+            
             sphere.transform.localScale = Vector3.Lerp(startScale, endScale, easeT);
-
-            // Alpha fades with easing
+            
             Color c = startColor;
             c.a = Mathf.Lerp(1f, 0f, easeT);
             renderer.material.color = c;
