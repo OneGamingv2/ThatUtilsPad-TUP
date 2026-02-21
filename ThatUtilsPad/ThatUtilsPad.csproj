@@ -20,13 +20,6 @@
     </ItemGroup>
 
     <ItemGroup>
-      <PackageReference Include="BepInEx.AssemblyPublicizer.MSBuild" Version="0.5.0-beta.2">
-        <PrivateAssets>all</PrivateAssets>
-        <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      </PackageReference>
-    </ItemGroup>
-
-    <ItemGroup>
       <Reference Include="0Harmony">
         <HintPath>C:\Program Files (x86)\Steam\steamapps\common\Gorilla Tag\BepInEx\core\0Harmony.dll</HintPath>
       </Reference>

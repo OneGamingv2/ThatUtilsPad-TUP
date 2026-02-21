@@ -478,7 +478,7 @@ public class Main : BaseUnityPlugin
         Renderer rendererCollider = btnCollider.GetComponentInChildren<Renderer>();
         rendererCollider.material.shader = ShaderCache.TextShader;
         rendererCollider.material.color = new Color32(255, 0, 0, 50);
-        rendererCollider.enabled = false;
+        rendererCollider.enabled = true;
 
         GameObject textObj = new("ButtonLabel");
         textObj.transform.SetParent(btn.transform, false);
