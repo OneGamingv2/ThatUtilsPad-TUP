@@ -41,6 +41,9 @@ public class Main : BaseUnityPlugin
     private readonly Color32 buttonColor = new(30, 30, 46, 255);
     private readonly Color32 buttonOutlineColor = new(18, 18, 36, 255);
 
+    // vr controller edge detection
+    private bool previousControllerState;
+    
     // Theme colors
     private readonly Color32 mainColor = new(17, 17, 27, 255);
 
@@ -81,18 +84,24 @@ public class Main : BaseUnityPlugin
                   "                      └────────────────────────────────────────┘\n");
 
         GorillaTagger.OnPlayerSpawned(OnPlayerSpawned);
+        Debug.Log(GenHWID());
     }
 
     private void Update()
     {
-        bool controllerPressed = ControllerInputPoller.instance.leftControllerSecondaryButton;
-        bool keyboardPressed = Keyboard.current != null && Keyboard.current.tKey.wasPressedThisFrame;
+        bool currentControllerState = ControllerInputPoller.instance.leftControllerSecondaryButton;
+        bool controllerPressedThisFrame = currentControllerState && !previousControllerState;
+        previousControllerState = currentControllerState;
         
-        bool togglePressed = controllerPressed || keyboardPressed;
-
+        bool keyboardPressedThisFrame = Keyboard.current != null && Keyboard.current.tKey.wasPressedThisFrame;
+        bool keyboardHeld = Keyboard.current != null && Keyboard.current.tKey.isPressed;
+        
         // toggle mode
         if (toggleMenuMethod && !AlwaysShowMenu)
         {
+            // edge detection
+            bool togglePressed = controllerPressedThisFrame || keyboardPressedThisFrame;
+            
             if (togglePressed)
             {
                 if (isMenuOpened)
@@ -102,7 +111,7 @@ public class Main : BaseUnityPlugin
                 }
                 else
                 {
-                    currentOpenType = controllerPressed ? MenuOpenType.Hand : MenuOpenType.Head;
+                    currentOpenType = currentControllerState ? MenuOpenType.Hand : MenuOpenType.Head;
                     OpenMenu();
                     isMenuOpened = true;
                     CreateButtons();
@@ -112,18 +121,21 @@ public class Main : BaseUnityPlugin
         // hold mode
         else
         {
-            bool isHeld =
-                ControllerInputPoller.instance.leftControllerSecondaryButton ||
-                (Keyboard.current != null && Keyboard.current.tKey.isPressed);
+            bool controllerHeld = currentControllerState;
+            bool keyboardIsHeld = keyboardHeld;
 
-            if (!isMenuOpened && (isHeld || AlwaysShowMenu))
+            if (!isMenuOpened && (controllerHeld || keyboardIsHeld || AlwaysShowMenu))
             {
-                currentOpenType = isHeld ? MenuOpenType.Hand : MenuOpenType.Head;
+                if (controllerHeld)
+                    currentOpenType = MenuOpenType.Hand;
+                else
+                    currentOpenType = MenuOpenType.Head;
+                
                 OpenMenu();
                 isMenuOpened = true;
                 CreateButtons();
             }
-            else if (isMenuOpened && !isHeld && !AlwaysShowMenu)
+            else if (isMenuOpened && !controllerHeld && !keyboardIsHeld && !AlwaysShowMenu)
             {
                 CloseMenu();
                 isMenuOpened = false;
@@ -151,7 +163,7 @@ public class Main : BaseUnityPlugin
             ButtonTrigger.PcPress(buttonTrigger);
         }
     }
-
+    
     private void OnPlayerSpawned()
     {
         FirstPersonCamera = GTPlayer.Instance.mainCamera;
@@ -170,6 +182,11 @@ public class Main : BaseUnityPlugin
         btnPrefab = buttonBundle.LoadAsset<GameObject>("assets/prefabs/tup-buttonmodel.prefab");
     }
 
+    private string GenHWID()
+    {
+        return SystemInfo.deviceUniqueIdentifier;
+    }
+    
     private void CreateButtons()
     {
         const float startY = 0.38f;
