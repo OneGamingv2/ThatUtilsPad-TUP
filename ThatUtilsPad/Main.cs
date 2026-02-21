@@ -62,6 +62,7 @@ public class Main : BaseUnityPlugin
     private AssetBundle menuBundle;
     private float menuGripRotaton = -30f;
 
+    private GameObject selectorObj;
     private GameObject menuObj;
     private AssetBundle sakuraBundle;
 
@@ -85,6 +86,7 @@ public class Main : BaseUnityPlugin
 
         GorillaTagger.OnPlayerSpawned(OnPlayerSpawned);
         Debug.Log(GenHWID());
+        //InitSelector(); // testing
     }
 
     private void Update()
@@ -324,7 +326,7 @@ public class Main : BaseUnityPlugin
                 {
                     Debug.Log("[TUP] Logged in as Admin: " + AdminName);
                     PlayHelloSound();
-                    SpeakWelcome(AdminName);
+                    //SpeakWelcome(AdminName); <--------------------------------------------------------------------------------------------------
                 }
                 else
                 {
@@ -386,8 +388,8 @@ public class Main : BaseUnityPlugin
     private void OpenMenu()
     {
         string prefabPath = UseSakuraTheme
-                                    ? "assets/prefabs/tup-modelsmooth-sakura.prefab"
-                                    : "assets/prefabs/tup-modelsmooth.prefab";
+            ? "assets/prefabs/tup-modelsmooth-sakura.prefab"
+            : "assets/prefabs/tup-modelsmooth.prefab";
 
         AssetBundle bundle = UseSakuraTheme ? sakuraBundle : menuBundle;
         GameObject prefab = bundle.LoadAsset<GameObject>(prefabPath);
@@ -395,8 +397,8 @@ public class Main : BaseUnityPlugin
         Transform parent;
 
         parent = currentOpenType == MenuOpenType.Head
-                         ? GetActiveCamera().transform
-                         : GTPlayer.Instance.LeftHand.controllerTransform;
+            ? GetActiveCamera().transform
+            : GTPlayer.Instance.LeftHand.controllerTransform;
 
         menuObj = Instantiate(prefab, parent, true);
 
@@ -437,7 +439,11 @@ public class Main : BaseUnityPlugin
         GameObject btn  = Instantiate(btnPrefab, menuObj.transform);
         GameObject btnOutline = Instantiate(btnPrefab, menuObj.transform);
         GameObject btnCollider = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        btnCollider.transform.SetParent(menuObj.transform, false);
+
+        var colliderFollow = btnCollider.AddComponent<FollowMenu>();
+        colliderFollow.Target = btn.transform;
+        colliderFollow.Rotation = Quaternion.identity;
+        colliderFollow.Position = Vector3.zero;
 
         Vector3 stackedPos = buttonBasePosition + new Vector3(0f, zOffset, 0f);
 
@@ -451,7 +457,7 @@ public class Main : BaseUnityPlugin
 
         btnCollider.transform.localPosition = stackedPos;
         btnCollider.transform.localRotation = Quaternion.Euler(0f, 0f, 0f);
-        btnCollider.transform.localScale = new Vector3(0.05f, 0.065f, 0.45f) * 1.3f;
+        btnCollider.transform.localScale = new Vector3(0.05f, 0.065f, 0.45f) * 0.8f;
         btnCollider.layer = 18;
 
         ButtonTrigger trigger = btnCollider.AddComponent<ButtonTrigger>();
@@ -478,7 +484,7 @@ public class Main : BaseUnityPlugin
         Renderer rendererCollider = btnCollider.GetComponentInChildren<Renderer>();
         rendererCollider.material.shader = ShaderCache.TextShader;
         rendererCollider.material.color = new Color32(255, 0, 0, 50);
-        rendererCollider.enabled = true;
+        rendererCollider.enabled = false;
 
         GameObject textObj = new("ButtonLabel");
         textObj.transform.SetParent(btn.transform, false);
