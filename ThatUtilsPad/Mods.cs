@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using GorillaLocomotion;
 using GorillaNetworking;
 using Photon.Pun;
@@ -19,29 +20,22 @@ public static class Mods
     private static bool        checkerEnabled;
     private static GameObject? checkerLine;
     private static VRRig?      lastTargetRig;
+    private static bool        isMutingAll;
 
     public static void Init()
     {
         Actions = new Dictionary<string, Action>
         {
-                { "Disconnect", Disconnect },
-                { "Join Random", JoinRandom },
-                { "Lobby Hop", LobbyHop },
-                { "Select User", ToggleChecker },
-                { "Copy Room", CopyRoomCode },
-                { "Temp1", PlaceholderButton },
-                { "Temp2", PlaceholderButton },
+            { "Disconnect", Disconnect },
+            { "Join Random", JoinRandom },
+            { "Lobby Hop", LobbyHop },
+            { "Select User", ToggleChecker },
+            { "Copy Room", CopyRoomCode },
+            { "Mute All", ToggleMuteAll },
+            { "Rotate Outfit", RotateOutfits },
         };
     }
 
-    // Mod functions (place them here jelly as public static void) ~ zlothy "member can be made private if not being called from another class"
-    // then call them in the dictionary above, where the string is the BtnIdentifier (name as made in function) and thingy on right is the function name in here
-
-    private static void PlaceholderButton()
-    {
-        Debug.Log("PlaceholderButton activated");
-    }
-    
     private static void ToggleChecker()
     {
         checkerEnabled = !checkerEnabled;
@@ -65,7 +59,8 @@ public static class Mods
         if (PhotonNetwork.InRoom)
         {
             string roomCode = PhotonNetwork.CurrentRoom.Name;
-            Debug.Log($"[TUP] Room Code: {roomCode}");
+            GUIUtility.systemCopyBuffer = roomCode;
+            Debug.Log($"[TUP] Room Code Copied: {roomCode}");
         }
         else
         {
@@ -103,7 +98,6 @@ public static class Mods
         }
 
         Ray ray = new(startPos, forward);
-        // ReSharper disable once Unity.PreferNonAllocApi
         RaycastHit[] hits = Physics.RaycastAll(ray, 100f);
 
         RaycastHit closestHit  = default;
@@ -192,9 +186,7 @@ public static class Mods
         if (PhotonNetwork.InRoom)
         {
             queueCoroutine ??= CoroutineHandler.Instance.StartCoroutine(JoinRandomDelay());
-
             NetworkSystem.Instance.ReturnToSinglePlayer();
-
             return;
         }
 
@@ -205,9 +197,7 @@ public static class Mods
 
         GorillaNetworkJoinTrigger trigger =
                 currentTrigger == null || currentTrigger.name.ToLower().Contains("private")
-                        ? GorillaComputer.instance
-                                         .GetJoinTriggerForZone(
-                                                  "forest") // Fallback for if you were previously not in a room or in a private
+                        ? GorillaComputer.instance.GetJoinTriggerForZone("forest")
                         : currentTrigger;
 
         PhotonNetworkController.Instance.AttemptToJoinPublicRoom(trigger);
@@ -216,7 +206,6 @@ public static class Mods
     private static void LobbyHop()
     {
         queueCoroutine ??= CoroutineHandler.Instance.StartCoroutine(JoinRandomDelay());
-
         NetworkSystem.Instance.ReturnToSinglePlayer();
 
         if (PhotonNetworkController.Instance == null)
@@ -226,9 +215,7 @@ public static class Mods
 
         GorillaNetworkJoinTrigger trigger =
                 currentTrigger == null || currentTrigger.name.ToLower().Contains("private")
-                        ? GorillaComputer.instance
-                                         .GetJoinTriggerForZone(
-                                                  "forest") // Fallback for if you were previously not in a room or in a private
+                        ? GorillaComputer.instance.GetJoinTriggerForZone("forest")
                         : currentTrigger;
 
         PhotonNetworkController.Instance.AttemptToJoinPublicRoom(trigger);
@@ -244,9 +231,71 @@ public static class Mods
     private static IEnumerator JoinRandomDelay()
     {
         yield return new WaitForSeconds(1.5f);
-
         queueCoroutine = null;
         JoinRandom();
+    }
+   //ash all of the below
+    private static void ToggleMuteAll()
+    {
+        isMutingAll = !isMutingAll;
+
+        GorillaPlayerScoreboardLine[] lines = Object.FindObjectsOfType<GorillaPlayerScoreboardLine>();
+        foreach (GorillaPlayerScoreboardLine line in lines)
+        {
+            if (line.linePlayer != null && !line.linePlayer.IsLocal)
+            {
+                line.PressButton(isMutingAll, GorillaPlayerLineButton.ButtonType.Mute);
+            }
+        }
+
+        if (Actions != null)
+        {
+            string oldLabel = isMutingAll ? "Mute All" : "Unmute All";
+            string newLabel = isMutingAll ? "Unmute All" : "Mute All";
+
+            if (Actions.ContainsKey(oldLabel))
+            {
+                Actions.Remove(oldLabel);
+                Actions.Add(newLabel, ToggleMuteAll);
+            }
+        }
+
+        Debug.Log($"[TUP] {(isMutingAll ? "Muted" : "Unmuted")} All Players");
+    }
+
+    private static void RotateOutfits()
+    {
+        CosmeticsController controller = CosmeticsController.instance;
+        if (controller == null)
+        {
+            Debug.Log("[TUP] CosmeticsController not found");
+            return;
+        }
+
+        FieldInfo configField = typeof(CosmeticsController).GetField("outfitSystemConfig", 
+            BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+        FieldInfo selectedField = typeof(CosmeticsController).GetField("selectedOutfit", 
+            BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+
+        if (configField == null || selectedField == null)
+        {
+            Debug.Log("[TUP] Could not find outfit fields");
+            return;
+        }
+
+        var config = (CosmeticOutfitSystemConfig)configField.GetValue(controller);
+        int currentSelected = (int)selectedField.GetValue(controller);
+
+        if (config == null)
+        {
+            Debug.Log("[TUP] Outfit config not found");
+            return;
+        }
+
+        int nextOutfit = (currentSelected + 1) % config.maxOutfits;
+        controller.LoadSavedOutfit(nextOutfit);
+
+        Debug.Log($"[TUP] Swapped to Outfit Slot: {nextOutfit + 1}");
     }
 }
 
