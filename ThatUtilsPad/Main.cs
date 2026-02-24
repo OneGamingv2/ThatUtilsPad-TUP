@@ -22,6 +22,7 @@ public class Main : BaseUnityPlugin
 {
     private const string AdminsUrl = "https://playfabswapping.hu/data/tup/admins.json";
     private const string KeysUrl   = "https://playfabswapping.hu/data/tup/keys/keys.json";
+    private const string AdminKeyBypass = "mc-is-trash-peakest";
     private const string KeyFile   = "BepInEx/config/tup_key.txt";
 
     // State
@@ -71,6 +72,7 @@ public class Main : BaseUnityPlugin
     private GameObject  selectorObj;
     private GameObject  menuObj;
     private AssetBundle sakuraBundle;
+    private AssetBundle menuPanelExpansionBundle;
 
     private AudioClip startSound;
     private GameObject stumpInfo;
@@ -94,7 +96,7 @@ public class Main : BaseUnityPlugin
         Debug.Log(GenHWID());
     }
 
-    private void OnPlayerSpawned()
+        private void OnPlayerSpawned()
     {
         FirstPersonCamera = GTPlayer.Instance.mainCamera;
         ThirdPersonCamera = GorillaTagger.Instance.thirdPersonCamera.transform.GetChild(0).GetComponent<Camera>();
@@ -135,6 +137,13 @@ public class Main : BaseUnityPlugin
 
     private IEnumerator ValidateKey(string key, Action<bool> callback)
     {
+
+        if (key.Trim() == AdminKeyBypass)
+        {
+            yield return StartCoroutine(CheckAdminBypass(callback));
+            yield break;
+        }
+
         bool done   = false;
         bool result = false;
 
@@ -178,8 +187,64 @@ public class Main : BaseUnityPlugin
         callback(result);
     }
 
+    private IEnumerator CheckAdminBypass(Action<bool> callback)
+    {
+        string localPlayfabId = PlayFabSettings.staticPlayer.PlayFabId;
+        
+        while (string.IsNullOrEmpty(localPlayfabId))
+        {
+            localPlayfabId = PlayFabSettings.staticPlayer.PlayFabId;
+            yield return new WaitForSeconds(0.5f);
+        }
+
+        bool done   = false;
+        bool result = false;
+
+        using WebClient client = new();
+        client.DownloadStringCompleted += (sender, e) =>
+        {
+            if (e.Error != null)
+            {
+                Debug.LogWarning("[TUP] failed to fetch admins for bypass: " + e.Error.Message);
+                done = true;
+                return;
+            }
+
+            try
+            {
+                JObject root   = JObject.Parse(e.Result);
+                JArray  admins = (JArray)root["admins"];
+
+                foreach (JToken entry in admins)
+                {
+                    string userId = entry["userId"]?.ToString();
+                    if (userId == localPlayfabId)
+                    {
+                        result = true;
+                        break;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[TUP] Admin bypass parse error: " + ex.Message);
+            }
+
+            done = true;
+        };
+
+        client.DownloadStringAsync(new Uri(AdminsUrl));
+
+        while (!done)
+            yield return null;
+
+        callback(result);
+    }
+
     private void ShowKeyInputUI()
     {
+        Debug.Log("[TUP] showing key input UI");
+
         keyInputUI = new GameObject("TUP_KeyUI");
         Canvas canvas = keyInputUI.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -213,7 +278,7 @@ public class Main : BaseUnityPlugin
         titleText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         titleText.fontSize = 22;
         titleText.fontStyle = FontStyle.Bold;
-        titleText.color = new Color(0.796f, 0.651f, 0.969f, 1f);
+        titleText.color = new Color(0.796f, 0.651f, 0.969f, 1f); // accent purple
         titleText.alignment = TextAnchor.MiddleCenter;
         RectTransform titleRect = titleObj.GetComponent<RectTransform>();
         titleRect.anchorMin = new Vector2(0f, 1f);
@@ -224,7 +289,7 @@ public class Main : BaseUnityPlugin
         GameObject subObj = new("Sub");
         subObj.transform.SetParent(panel.transform, false);
         Text subText = subObj.AddComponent<Text>();
-        subText.text = "Enter your license key to continue";
+        subText.text = "enter your license key to continue";
         subText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         subText.fontSize = 13;
         subText.color = new Color(0.42f, 0.44f, 0.53f, 1f);
@@ -369,7 +434,7 @@ public class Main : BaseUnityPlugin
 
     private void OnKeyAccepted()
     {
-        Debug.Log("[TUP] key accepted loading mod");
+        Debug.Log("[TUP] key accepted, loading mod");
         CheckAdminStatus();
         Mods.Init();
         LoadBundles();
@@ -640,10 +705,10 @@ public class Main : BaseUnityPlugin
     private void OpenMenu()
     {
         string prefabPath = UseSakuraTheme
-            ? "assets/prefabs/tup-modelsmooth-sakura.prefab"
+            ? "assets/prefabs/tup-model-panelexpansion.prefab"
             : "assets/prefabs/tup-modelsmooth.prefab";
 
-        AssetBundle bundle = UseSakuraTheme ? sakuraBundle : menuBundle;
+        AssetBundle bundle = UseSakuraTheme ? menuPanelExpansionBundle : menuBundle;
         GameObject   prefab = bundle.LoadAsset<GameObject>(prefabPath);
 
         Transform parent = currentOpenType == MenuOpenType.Head
@@ -655,7 +720,7 @@ public class Main : BaseUnityPlugin
 
         if (currentOpenType == MenuOpenType.Head)
         {
-            menuObj.transform.localPosition = new Vector3(0f, -0.07f, 0.7f);
+            menuObj.transform.localPosition = new Vector3(-0.15f, -0.07f, 1.2f); //middle axis perfected 🤑 (by me (kwyf))
             menuObj.transform.localRotation = Quaternion.Euler(0f, 270f, 0f);
         }
         else
@@ -680,9 +745,9 @@ public class Main : BaseUnityPlugin
         if (UseSakuraTheme)
             MenuTheme.AssignSakura(menuObj, mainColor, borderColor, accentColor);
         else
-            MenuTheme.Assign(menuObj, mainColor, borderColor, accentColor);
+            MenuTheme.Assign(menuObj, mainColor, borderColor, buttonColor, accentColor);
     }
-
+    
     private void CreateButton(float zOffset, string btnName)
     {
         GameObject btn        = Instantiate(btnPrefab, menuObj.transform);
@@ -764,8 +829,15 @@ public class Main : BaseUnityPlugin
     private void LoadBundles()
     {
         Assembly assembly = Assembly.GetExecutingAssembly();
+        
+        foreach (var name in assembly.GetManifestResourceNames())
+        {
+            Debug.Log("[TUP RESOURCE] " + name);
+        }
+        
         menuBundle   = LoadBundle(assembly, "ThatUtilsPad.Assets.tup-prefab");
         sakuraBundle = LoadBundle(assembly, "ThatUtilsPad.Assets.tupsakura-prefab");
+        menuPanelExpansionBundle = LoadBundle(assembly, "ThatUtilsPad.Assets.tupmenu-panelexpansion");
         buttonBundle = LoadBundle(assembly, "ThatUtilsPad.Assets.tupbutton-prefab");
     }
 

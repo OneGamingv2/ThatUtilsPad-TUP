@@ -110,19 +110,36 @@ public static class MenuTheme
         rend.material.color  = color;
     }
 
-    public static void Assign(GameObject menuObj, Color32 mainColor, Color32 borderColor, Color32 accentColor)
+    public static void Assign(GameObject menuObj, Color32 mainColor, Color32 borderColor, Color32 buttonColor, Color32 accentColor)
     {
         Transform root = menuObj.transform;
         ApplyColor(root, "Main",       mainColor);
         ApplyColor(root, "MainBorder", borderColor);
         ApplyColor(root, "GripPipe",   mainColor);
         ApplyColor(root, "GripAccent", accentColor);
+        ApplyColor(root, "SideMain", mainColor);
+        ApplyColor(root, "SideBorder", borderColor);
+        ApplyColor(root, "PanelConnector1", borderColor);
+        ApplyColor(root, "PanelConnector2", borderColor);
+        
+        ApplyColor(root, "SelectorBorder", borderColor);
+        ApplyColor(root, "SelectorMain", mainColor);
+        
+        ApplyColor(root, "SelectorBtn1", buttonColor);
+        ApplyColor(root, "SelectorBtn2", buttonColor);
+        ApplyColor(root, "SelectorBtn3", buttonColor);
+        ApplyColor(root, "SelectorBtn4", buttonColor);
+        ApplyColor(root, "SelectorBtn5", buttonColor);
+        ApplyColor(root, "SelectorBtn6", buttonColor);
+        ApplyColor(root, "SelectorBtn7", buttonColor);
     }
 
     public static void AssignSakura(GameObject menuObj, Color32 mainColor, Color32 borderColor, Color32 accentColor)
     {
+        Color32 buttonColor = new(30, 30, 46,  255);
+        
         // Base colors
-        Assign(menuObj, mainColor, borderColor, accentColor);
+        Assign(menuObj, mainColor, borderColor, buttonColor, accentColor);
 
         Transform root = menuObj.transform;
 
@@ -135,5 +152,14 @@ public static class MenuTheme
         ApplyColor(root, "BarConnector", mainColor);
         ApplyColor(root, "TopBarUnder",  mainColor);
         ApplyColor(root, "TopBar",       accentColor);
+        
+        ApplyColor(root, "PoleSide1",        mainColor);
+        ApplyColor(root, "PoleSide2",        mainColor);
+        ApplyColor(root, "PipeTopSide1",     borderColor);
+        ApplyColor(root, "PipeTopSide2",     borderColor);
+        ApplyColor(root, "UnderBarSide",     borderColor);
+        ApplyColor(root, "BarConnectorSide", mainColor);
+        ApplyColor(root, "TopBarUnderSide",  mainColor);
+        ApplyColor(root, "TopBarSide",       accentColor);
     }
 }
