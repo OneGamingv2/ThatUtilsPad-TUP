@@ -9,15 +9,22 @@ namespace ThatUtilsPad.MenuComponents;
 public class ButtonTrigger : GorillaPressableButton
 {
     public string BtnIdentifier;
+    public Action? CustomAction;
 
     public static void PcPress(ButtonTrigger button)
     {
         if (button == null) return;
         
         Debug.Log("ButtonActivationPC");
+        
+        if (button.CustomAction != null)
+        {
+            button.CustomAction.Invoke();
+            return;
+        }
 
-        if (Mods.Actions.TryGetValue(button.BtnIdentifier, out Action? action))
-            action.Invoke();
+        if (Mods.TryGetAction(button.BtnIdentifier, out var action))
+            action?.Invoke();
         else
             Debug.LogWarning($"[TUP: WARNING] No mod found for button: {button.BtnIdentifier}");
     }
@@ -31,8 +38,14 @@ public class ButtonTrigger : GorillaPressableButton
 
         Debug.Log("ButtonActivationWithHand");
         
-        if (Mods.Actions.TryGetValue(BtnIdentifier, out Action? action))
-            action.Invoke();
+        if (CustomAction != null)
+        {
+            CustomAction.Invoke();
+            return;
+        }
+        
+        if (Mods.TryGetAction(BtnIdentifier, out var action))
+            action?.Invoke();
         else
             Debug.LogWarning($"[TUP: WARNING] No mod found for button: {BtnIdentifier}");
     }

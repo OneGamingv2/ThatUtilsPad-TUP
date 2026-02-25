@@ -5,6 +5,7 @@ using System.IO;
 using System.Net;
 using System.Reflection;
 using System.Text;
+using System.Linq;
 using BepInEx;
 using GorillaLocomotion;
 using Newtonsoft.Json.Linq;
@@ -41,6 +42,7 @@ public class Main : BaseUnityPlugin
     private readonly Color32          accentColor = new(203, 166, 247, 255);
     private readonly Color32          borderColor = new(12,  12,  22,  255);
     private readonly List<GameObject> btnObjs     = [];
+    private readonly List<GameObject> selectorBtnObjs = new List<GameObject>();
 
     private readonly Vector3    buttonBasePosition = new(-0.044f, 0f, 0f);
     private readonly Quaternion buttonBaseRotation = Quaternion.Euler(0f, 0f, 180f);
@@ -71,6 +73,9 @@ public class Main : BaseUnityPlugin
     private AssetBundle sakuraBundle;
     private AssetBundle menuPanelExpansionBundle;
 
+    private List<string> categories;
+    private string currentCategory = "Networking";
+    
     private AudioClip  startSound;
     private GameObject stumpInfo;
 
@@ -477,6 +482,7 @@ public class Main : BaseUnityPlugin
         PlayStartSound();
         CheckAdminStatus();
         Mods.Init();
+        categories = Mods.Actions.Keys.ToList();
         LoadBundles();
         ShaderCache.Init();
         new GameObject("TUP_CoroutineHandler").AddComponent<CoroutineHandler>();
@@ -553,17 +559,85 @@ public class Main : BaseUnityPlugin
 
     private string GenHWID() => SystemInfo.deviceUniqueIdentifier;
 
-    private void CreateButtons()
+    private void CreateButtons(string categoryName = "Networking")
     {
         const float startY = 0.38f;
         const float gap    = 0.13f;
         int index = 0;
 
-        foreach (var mod in Mods.Actions)
+        if (!Mods.Actions.TryGetValue(currentCategory, out var category))
+            return;
+        
+        foreach (var mod in category)
         {
             float height = startY - (index * gap);
             CreateButton(height, mod.Key);
             index++;
+        }
+    }
+    
+    private void SwitchCategory(string categoryName)
+    {
+        currentCategory = categoryName;
+
+        DestroyButtons();
+        CreateButtons();
+    }
+
+    private void InitPageButtons(GameObject menuObj)
+    {
+        List<string> categories = Mods.Actions.Keys.ToList();
+
+        foreach (Transform child in menuObj.GetComponentsInChildren<Transform>(true))
+        {
+            if (!child.name.Contains("SelectorBtn", StringComparison.OrdinalIgnoreCase))
+                continue;
+            
+            child.gameObject.layer = 18;
+
+            var trigger = child.gameObject.AddComponent<ButtonTrigger>();
+            Collider col = child.gameObject.GetComponent<Collider>();
+            if (col == null)
+                col = child.gameObject.AddComponent<BoxCollider>();
+            col.isTrigger = true;
+            Destroy(child.gameObject.GetComponent<Rigidbody>());
+            
+            Vector3 previousLocalPos = child.transform.localPosition;
+            Quaternion previousLocalRot = child.transform.localRotation;
+
+            child.transform.parent = null;
+
+            var follow = child.AddComponent<FollowMenu>();
+            follow.Target = menuObj.transform;
+            follow.Position = previousLocalPos;
+            follow.Rotation = previousLocalRot;
+            
+            Renderer rend = child.GetComponent<Renderer>();
+            if (rend != null)
+            {
+                rend.material.shader = ShaderCache.UberShader;
+                rend.material.color = buttonColor;
+            }
+            
+            //if (child.transform.parent != null)
+            //    Debug.Log($"[TUP] Parent: {child.transform.parent}");
+            //else
+            //    Debug.Log($"[TUP] No parent found");
+
+            string numberPart = child.name.Replace("SelectorBtn", "");
+            if (!int.TryParse(numberPart, out int index))
+                continue;
+
+            index -= 1;
+            if (index < 0 || index >= categories.Count)
+                continue;
+
+            string categoryName = categories[index];
+            
+            trigger.CustomAction = () => SwitchCategory(categoryName);
+            //Debug.Log($"[TUP] Assigned {child.name} -> {categoryName}");
+            
+            selectorBtnObjs.Add(child.gameObject);
         }
     }
 
@@ -748,6 +822,10 @@ public class Main : BaseUnityPlugin
         Destroy(menuObj);
         DestroyButtons();
         menuObj = null;
+        
+        foreach (GameObject selectorObj in selectorBtnObjs)
+            Destroy(selectorObj);
+        selectorBtnObjs.Clear();
     }
 
     private void OpenMenu()
@@ -765,6 +843,8 @@ public class Main : BaseUnityPlugin
 
         menuObj = Instantiate(prefab, parent, true);
         menuObj.transform.localScale = Vector3.one * 0.625f;
+        
+        InitPageButtons(menuObj);
 
         if (currentOpenType == MenuOpenType.Head)
         {

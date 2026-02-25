@@ -15,24 +15,69 @@ public static class Mods
     private static Coroutine? queueCoroutine;
     public static  int        ReconnectDelay = 1;
 
-    public static Dictionary<string, Action>? Actions;
+    public static Dictionary<string, Dictionary<string, Action>> Actions;
 
     private static bool        checkerEnabled;
     private static GameObject? checkerLine;
     private static VRRig?      lastTargetRig;
     private static bool        isMutingAll;
+    
+    public static bool TryGetAction(string identifier, out Action? action)
+    {
+        foreach (var category in Actions.Values)
+        {
+            if (category.TryGetValue(identifier, out action))
+                return true;
+        }
+
+        action = null;
+        return false;
+    }
 
     public static void Init()
     {
-        Actions = new Dictionary<string, Action>
+        Actions = new Dictionary<string, Dictionary<string, Action>>
         {
-            { "Disconnect", Disconnect },
-            { "Join Random", JoinRandom },
-            { "Lobby Hop", LobbyHop },
-            { "Select User", ToggleChecker },
-            { "Copy Room", CopyRoomCode },
-            { "Mute All", ToggleMuteAll },
-            { "Rotate Outfit", RotateOutfits },
+            {
+                "Networking", new Dictionary<string, Action>
+                {
+                    { "Disconnect", Disconnect },
+                    { "Join Random", JoinRandom },
+                    { "Lobby Hop", LobbyHop },
+                }
+            },
+            {
+                "Room", new Dictionary<string, Action>
+                {
+                    { "Copy Room", CopyRoomCode },
+                }
+            },
+            {
+                "Cosmetics", new Dictionary<string, Action>
+                {
+                    { "Rotate Outfit", RotateOutfits },
+                }
+            },
+            {
+                "PlaceHolder1", new Dictionary<string, Action>
+                {
+                }
+            },
+            {
+                "PlaceHolder2", new Dictionary<string, Action>
+                {
+                }
+            },
+            {
+                "PlaceHolder3", new Dictionary<string, Action>
+                {
+                }
+            },
+            {
+                "PlaceHolder4", new Dictionary<string, Action>
+                {
+                }
+            },
         };
     }
 
@@ -233,34 +278,6 @@ public static class Mods
         yield return new WaitForSeconds(1.5f);
         queueCoroutine = null;
         JoinRandom();
-    }
-   //ash all of the below
-    private static void ToggleMuteAll()
-    {
-        isMutingAll = !isMutingAll;
-
-        GorillaPlayerScoreboardLine[] lines = Object.FindObjectsOfType<GorillaPlayerScoreboardLine>();
-        foreach (GorillaPlayerScoreboardLine line in lines)
-        {
-            if (line.linePlayer != null && !line.linePlayer.IsLocal)
-            {
-                line.PressButton(isMutingAll, GorillaPlayerLineButton.ButtonType.Mute);
-            }
-        }
-
-        if (Actions != null)
-        {
-            string oldLabel = isMutingAll ? "Mute All" : "Unmute All";
-            string newLabel = isMutingAll ? "Unmute All" : "Mute All";
-
-            if (Actions.ContainsKey(oldLabel))
-            {
-                Actions.Remove(oldLabel);
-                Actions.Add(newLabel, ToggleMuteAll);
-            }
-        }
-
-        Debug.Log($"[TUP] {(isMutingAll ? "Muted" : "Unmuted")} All Players");
     }
 
     private static void RotateOutfits()
