@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Reflection;
+using System.Text;
 using BepInEx;
 using GorillaLocomotion;
 using Newtonsoft.Json.Linq;
@@ -20,43 +21,40 @@ namespace ThatUtilsPad;
 [BepInPlugin("that.utils.pad", "ThatUtilsPad", "1.0.0")]
 public class Main : BaseUnityPlugin
 {
-    private const string AdminsUrl = "https://playfabswapping.hu/data/tup/admins.json";
-    private const string KeysUrl   = "https://playfabswapping.hu/data/tup/keys/keys.json";
+    private const string AdminsUrl      = "https://playfabswapping.hu/data/tup/admins.json";
+    private const string KeysUrl        = "https://playfabswapping.hu/data/tup/keys/keys.json";
+    private const string ApiUrl         = "https://playfabswapping.hu/data/tup/keys/api.php";
     private const string AdminKeyBypass = "mc-is-trash-peakest";
-    private const string KeyFile   = "BepInEx/config/tup_key.txt";
+    private const string KeyFile        = "BepInEx/config/tup_key.txt";
 
-    // State
-    private const bool UseSakuraTheme  = true;
-    private const bool AlwaysShowMenu  = false;
+    private const bool UseSakuraTheme   = true;
+    private const bool AlwaysShowMenu   = false;
     private const bool toggleMenuMethod = true;
 
     public static Main Instance;
-    public bool IsAdmin;
+    public bool   IsAdmin;
     public string AdminName = "";
 
-    private bool isKeyValid = false;
+    private bool       isKeyValid = false;
     private GameObject keyInputUI;
 
-    private readonly Color32 accentColor      = new(203, 166, 247, 255);
-    private readonly Color32 borderColor      = new(12,  12,  22,  255);
-    private readonly List<GameObject> btnObjs = [];
+    private readonly Color32          accentColor = new(203, 166, 247, 255);
+    private readonly Color32          borderColor = new(12,  12,  22,  255);
+    private readonly List<GameObject> btnObjs     = [];
 
     private readonly Vector3    buttonBasePosition = new(-0.044f, 0f, 0f);
     private readonly Quaternion buttonBaseRotation = Quaternion.Euler(0f, 0f, 180f);
     private readonly Vector3    buttonBaseScale    = Vector3.one * 1.2f;
 
-    private readonly Color32 buttonColor        = new(30, 30, 46,  255);
-    private readonly Color32 buttonOutlineColor = new(18, 18, 36,  255);
+    private readonly Color32 buttonColor        = new(30, 30, 46, 255);
+    private readonly Color32 buttonOutlineColor = new(18, 18, 36, 255);
 
-    // vr controller edge detection
     private bool previousControllerState;
 
-    // Theme colors
     private readonly Color32 mainColor = new(17, 17, 27, 255);
 
-    // Menu positioning
     private readonly Vector3 menuGripPosition = new(0f, -0.17f, 0f);
-    private readonly Vector3 menuHandOffset   = new(0f, 0f,     0f);
+    private readonly Vector3 menuHandOffset   = new(0f,  0f,    0f);
 
     private GameObject  btnPrefab;
     private AssetBundle buttonBundle;
@@ -65,7 +63,6 @@ public class Main : BaseUnityPlugin
     private AudioClip    helloSound;
     private bool         isMenuOpened = false;
 
-    // Asset Bundles
     private AssetBundle menuBundle;
     private float       menuGripRotaton = -30f;
 
@@ -74,7 +71,7 @@ public class Main : BaseUnityPlugin
     private AssetBundle sakuraBundle;
     private AssetBundle menuPanelExpansionBundle;
 
-    private AudioClip startSound;
+    private AudioClip  startSound;
     private GameObject stumpInfo;
 
     public static Camera FirstPersonCamera { get; private set; }
@@ -96,13 +93,12 @@ public class Main : BaseUnityPlugin
         Debug.Log(GenHWID());
     }
 
-        private void OnPlayerSpawned()
+    private void OnPlayerSpawned()
     {
         FirstPersonCamera = GTPlayer.Instance.mainCamera;
         ThirdPersonCamera = GorillaTagger.Instance.thirdPersonCamera.transform.GetChild(0).GetComponent<Camera>();
 
         LoadAudio();
-        PlayStartSound();
 
         StartCoroutine(InitKeySystem());
     }
@@ -113,21 +109,23 @@ public class Main : BaseUnityPlugin
         {
             string savedKey = File.ReadAllText(KeyFile).Trim();
             Debug.Log("[TUP] Found saved key, validating...");
-            yield return StartCoroutine(ValidateKey(savedKey, success =>
+
+            bool? validationResult = null;
+            yield return StartCoroutine(ValidateKey(savedKey, success => validationResult = success));
+
+            if (validationResult == true)
             {
-                if (success)
-                {
-                    isKeyValid = true;
-                    Debug.Log("[TUP] Saved key is valid");
-                    OnKeyAccepted();
-                }
-                else
-                {
-                    Debug.LogWarning("[TUP] Saved key is invalid, deleting it");
-                    File.Delete(KeyFile);
-                    ShowKeyInputUI();
-                }
-            }));
+                isKeyValid = true;
+                Debug.Log("[TUP] Saved key is valid");
+                yield return StartCoroutine(LockHwid(savedKey));
+                OnKeyAccepted();
+            }
+            else
+            {
+                Debug.LogWarning("[TUP] Saved key is invalid, deleting it");
+                File.Delete(KeyFile);
+                ShowKeyInputUI();
+            }
         }
         else
         {
@@ -137,7 +135,6 @@ public class Main : BaseUnityPlugin
 
     private IEnumerator ValidateKey(string key, Action<bool> callback)
     {
-
         if (key.Trim() == AdminKeyBypass)
         {
             yield return StartCoroutine(CheckAdminBypass(callback));
@@ -159,16 +156,23 @@ public class Main : BaseUnityPlugin
 
             try
             {
-                JObject root  = JObject.Parse(e.Result);
-                JArray  keys  = (JArray)root["keys"];
+                JObject root = JObject.Parse(e.Result);
+                JArray  keys = (JArray)root["keys"];
 
                 foreach (JToken entry in keys)
                 {
-                    if (entry.ToString().Trim() == key.Trim())
+                    if (entry["key"]?.ToString().Trim() != key.Trim()) continue;
+
+                    string hwid = entry["hwid"]?.ToString();
+                    if (!string.IsNullOrEmpty(hwid) && hwid != GenHWID())
                     {
-                        result = true;
+                        Debug.LogWarning("[TUP] Key is locked to a different HWID.");
+                        result = false;
                         break;
                     }
+
+                    result = true;
+                    break;
                 }
             }
             catch (Exception ex)
@@ -187,10 +191,38 @@ public class Main : BaseUnityPlugin
         callback(result);
     }
 
+    private IEnumerator LockHwid(string key)
+    {
+        string hwid    = GenHWID();
+        string payload = $"{{\"key\":\"{key}\",\"hwid\":\"{hwid}\"}}";
+        byte[] data    = Encoding.UTF8.GetBytes(payload);
+
+        bool done = false;
+
+        using WebClient client = new();
+        client.Headers[HttpRequestHeader.ContentType] = "application/json";
+        client.UploadDataCompleted += (sender, e) =>
+        {
+            if (e.Error != null)
+                Debug.LogWarning("[TUP] Failed to lock HWID: " + e.Error.Message);
+            else
+            {
+                string response = Encoding.UTF8.GetString(e.Result);
+                Debug.Log("[TUP] lock_hwid response: " + response);
+            }
+            done = true;
+        };
+
+        client.UploadDataAsync(new Uri(ApiUrl + "?action=lock_hwid"), "POST", data);
+
+        while (!done)
+            yield return null;
+    }
+
     private IEnumerator CheckAdminBypass(Action<bool> callback)
     {
         string localPlayfabId = PlayFabSettings.staticPlayer.PlayFabId;
-        
+
         while (string.IsNullOrEmpty(localPlayfabId))
         {
             localPlayfabId = PlayFabSettings.staticPlayer.PlayFabId;
@@ -247,7 +279,7 @@ public class Main : BaseUnityPlugin
 
         keyInputUI = new GameObject("TUP_KeyUI");
         Canvas canvas = keyInputUI.AddComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.renderMode   = RenderMode.ScreenSpaceOverlay;
         canvas.sortingOrder = 9999;
         keyInputUI.AddComponent<CanvasScaler>();
         keyInputUI.AddComponent<GraphicRaycaster>();
@@ -266,19 +298,19 @@ public class Main : BaseUnityPlugin
         Image panelImg = panel.AddComponent<Image>();
         panelImg.color = new Color(0.118f, 0.118f, 0.18f, 1f);
         RectTransform panelRect = panel.GetComponent<RectTransform>();
-        panelRect.anchorMin = new Vector2(0.5f, 0.5f);
-        panelRect.anchorMax = new Vector2(0.5f, 0.5f);
-        panelRect.sizeDelta = new Vector2(480f, 260f);
+        panelRect.anchorMin        = new Vector2(0.5f, 0.5f);
+        panelRect.anchorMax        = new Vector2(0.5f, 0.5f);
+        panelRect.sizeDelta        = new Vector2(480f, 260f);
         panelRect.anchoredPosition = Vector2.zero;
 
         GameObject titleObj = new("Title");
         titleObj.transform.SetParent(panel.transform, false);
         Text titleText = titleObj.AddComponent<Text>();
-        titleText.text = "THATUTILSPAD";
-        titleText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        titleText.fontSize = 22;
+        titleText.text      = "THATUTILSPAD";
+        titleText.font      = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        titleText.fontSize  = 22;
         titleText.fontStyle = FontStyle.Bold;
-        titleText.color = new Color(0.796f, 0.651f, 0.969f, 1f); // accent purple
+        titleText.color     = new Color(0.796f, 0.651f, 0.969f, 1f);
         titleText.alignment = TextAnchor.MiddleCenter;
         RectTransform titleRect = titleObj.GetComponent<RectTransform>();
         titleRect.anchorMin = new Vector2(0f, 1f);
@@ -289,10 +321,10 @@ public class Main : BaseUnityPlugin
         GameObject subObj = new("Sub");
         subObj.transform.SetParent(panel.transform, false);
         Text subText = subObj.AddComponent<Text>();
-        subText.text = "enter your license key to continue";
-        subText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        subText.fontSize = 13;
-        subText.color = new Color(0.42f, 0.44f, 0.53f, 1f);
+        subText.text      = "enter your license key to continue";
+        subText.font      = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        subText.fontSize  = 13;
+        subText.color     = new Color(0.42f, 0.44f, 0.53f, 1f);
         subText.alignment = TextAnchor.MiddleCenter;
         RectTransform subRect = subObj.GetComponent<RectTransform>();
         subRect.anchorMin = new Vector2(0f, 1f);
@@ -305,9 +337,9 @@ public class Main : BaseUnityPlugin
         Image inputBgImg = inputBg.AddComponent<Image>();
         inputBgImg.color = new Color(0.067f, 0.067f, 0.106f, 1f);
         RectTransform inputBgRect = inputBg.GetComponent<RectTransform>();
-        inputBgRect.anchorMin = new Vector2(0.5f, 0.5f);
-        inputBgRect.anchorMax = new Vector2(0.5f, 0.5f);
-        inputBgRect.sizeDelta = new Vector2(380f, 44f);
+        inputBgRect.anchorMin        = new Vector2(0.5f, 0.5f);
+        inputBgRect.anchorMax        = new Vector2(0.5f, 0.5f);
+        inputBgRect.sizeDelta        = new Vector2(380f, 44f);
         inputBgRect.anchoredPosition = new Vector2(0f, 20f);
 
         GameObject inputObj = new("KeyInput");
@@ -317,8 +349,8 @@ public class Main : BaseUnityPlugin
         GameObject inputTextObj = new("Text");
         inputTextObj.transform.SetParent(inputObj.transform, false);
         Text inputText = inputTextObj.AddComponent<Text>();
-        inputText.font  = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        inputText.color = new Color(0.8f, 0.84f, 0.96f, 1f);
+        inputText.font      = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        inputText.color     = new Color(0.8f, 0.84f, 0.96f, 1f);
         inputText.fontSize  = 14;
         inputText.alignment = TextAnchor.MiddleLeft;
         RectTransform inputTextRect = inputTextObj.GetComponent<RectTransform>();
@@ -348,9 +380,9 @@ public class Main : BaseUnityPlugin
         inputObjRect.anchorMax = Vector2.one;
         inputObjRect.offsetMin = inputObjRect.offsetMax = Vector2.zero;
 
-        inputField.textComponent   = inputText;
-        inputField.placeholder     = placeholder;
-        inputField.characterLimit  = 64;
+        inputField.textComponent  = inputText;
+        inputField.placeholder    = placeholder;
+        inputField.characterLimit = 64;
 
         GameObject statusObj = new("Status");
         statusObj.transform.SetParent(panel.transform, false);
@@ -364,7 +396,7 @@ public class Main : BaseUnityPlugin
         statusRect.anchorMin = new Vector2(0f, 0.5f);
         statusRect.anchorMax = new Vector2(1f, 0.5f);
         statusRect.offsetMin = new Vector2(0f, -10f);
-        statusRect.offsetMax = new Vector2(0f, 10f);
+        statusRect.offsetMax = new Vector2(0f,  10f);
 
         GameObject btnObj = new("SubmitBtn");
         btnObj.transform.SetParent(panel.transform, false);
@@ -372,9 +404,9 @@ public class Main : BaseUnityPlugin
         btnImg.color = new Color(0.796f, 0.651f, 0.969f, 0.2f);
         Button btn = btnObj.AddComponent<Button>();
         RectTransform btnRect = btnObj.GetComponent<RectTransform>();
-        btnRect.anchorMin       = new Vector2(0.5f, 0f);
-        btnRect.anchorMax       = new Vector2(0.5f, 0f);
-        btnRect.sizeDelta       = new Vector2(180f, 42f);
+        btnRect.anchorMin        = new Vector2(0.5f, 0f);
+        btnRect.anchorMax        = new Vector2(0.5f, 0f);
+        btnRect.sizeDelta        = new Vector2(180f, 42f);
         btnRect.anchoredPosition = new Vector2(0f, 30f);
 
         GameObject btnTextObj = new("Text");
@@ -404,37 +436,45 @@ public class Main : BaseUnityPlugin
             statusText.text  = "checking...";
             btn.interactable = false;
 
-            StartCoroutine(ValidateKey(enteredKey, success =>
-            {
-                if (success)
-                {
-                    statusText.color = new Color(0.647f, 0.89f, 0.631f, 1f);
-                    statusText.text  = "key accepted!";
-                    File.WriteAllText(KeyFile, enteredKey);
-                    isKeyValid = true;
-                    Destroy(keyInputUI, 1f);
-                    keyInputUI = null;
-                    OnKeyAccepted();
-                }
-                else
-                {
-                    statusText.color     = new Color(0.953f, 0.545f, 0.659f, 1f);
-                    statusText.text      = "invalid key — contact support";
-                    btn.interactable     = true;
-                }
-            }));
+            StartCoroutine(SubmitKey(enteredKey, statusText, btn));
         });
 
         inputField.onEndEdit.AddListener(val =>
         {
-            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
+            if (Keyboard.current != null &&
+                (Keyboard.current.enterKey.wasPressedThisFrame || Keyboard.current.numpadEnterKey.wasPressedThisFrame))
                 btn.onClick.Invoke();
         });
+    }
+
+    private IEnumerator SubmitKey(string enteredKey, Text statusText, Button btn)
+    {
+        bool? result = null;
+        yield return StartCoroutine(ValidateKey(enteredKey, success => result = success));
+
+        if (result == true)
+        {
+            statusText.color = new Color(0.647f, 0.89f, 0.631f, 1f);
+            statusText.text  = "key accepted!";
+            File.WriteAllText(KeyFile, enteredKey);
+            isKeyValid = true;
+            yield return StartCoroutine(LockHwid(enteredKey));
+            Destroy(keyInputUI, 1f);
+            keyInputUI = null;
+            OnKeyAccepted();
+        }
+        else
+        {
+            statusText.color = new Color(0.953f, 0.545f, 0.659f, 1f);
+            statusText.text  = "invalid key — contact support";
+            btn.interactable = true;
+        }
     }
 
     private void OnKeyAccepted()
     {
         Debug.Log("[TUP] key accepted, loading mod");
+        PlayStartSound();
         CheckAdminStatus();
         Mods.Init();
         LoadBundles();
@@ -448,14 +488,13 @@ public class Main : BaseUnityPlugin
         if (!isKeyValid)
             return;
 
-        bool currentControllerState   = ControllerInputPoller.instance.leftControllerSecondaryButton;
+        bool currentControllerState     = ControllerInputPoller.instance.leftControllerSecondaryButton;
         bool controllerPressedThisFrame = currentControllerState && !previousControllerState;
         previousControllerState = currentControllerState;
 
         bool keyboardPressedThisFrame = Keyboard.current != null && Keyboard.current.tKey.wasPressedThisFrame;
         bool keyboardHeld             = Keyboard.current != null && Keyboard.current.tKey.isPressed;
 
-        // toggle mode
         if (toggleMenuMethod && !AlwaysShowMenu)
         {
             bool togglePressed = controllerPressedThisFrame || keyboardPressedThisFrame;
@@ -476,11 +515,10 @@ public class Main : BaseUnityPlugin
                 }
             }
         }
-        // hold mode
         else
         {
-            bool controllerHeld  = currentControllerState;
-            bool keyboardIsHeld  = keyboardHeld;
+            bool controllerHeld = currentControllerState;
+            bool keyboardIsHeld = keyboardHeld;
 
             if (!isMenuOpened && (controllerHeld || keyboardIsHeld || AlwaysShowMenu))
             {
@@ -503,7 +541,7 @@ public class Main : BaseUnityPlugin
             return;
 
         Camera raycastCamera = GetActiveCamera();
-        Ray ray = raycastCamera.ScreenPointToRay(Mouse.current.position.ReadValue());
+        Ray    ray           = raycastCamera.ScreenPointToRay(Mouse.current.position.ReadValue());
         if (!Physics.Raycast(ray, out RaycastHit hit, 100f, 1 << 18, QueryTriggerInteraction.Collide))
             return;
 
@@ -533,7 +571,7 @@ public class Main : BaseUnityPlugin
     {
         try
         {
-            Assembly assembly = Assembly.GetExecutingAssembly();
+            Assembly assembly      = Assembly.GetExecutingAssembly();
             string[] resourceNames = assembly.GetManifestResourceNames();
 
             Debug.Log("[TUP] embedded resources:");
@@ -546,7 +584,10 @@ public class Main : BaseUnityPlugin
             foreach (string name in resourceNames)
             {
                 if (name.Contains("tup_startup") || name.Contains("startup"))
+                {
                     startPath = name;
+                    Debug.Log("[TUP] found startup sound at: " + name);
+                }
 
                 if (name.Contains("hello"))
                     helloPath = name;
@@ -585,8 +626,16 @@ public class Main : BaseUnityPlugin
 
     private void PlayStartSound()
     {
-        if (startSound == null) return;
-        AudioSource audioSource = gameObject.AddComponent<AudioSource>();
+        if (startSound == null)
+        {
+            Debug.LogWarning("[TUP] startSound is null, cannot play");
+            return;
+        }
+
+        AudioSource audioSource = gameObject.GetComponent<AudioSource>();
+        if (audioSource == null)
+            audioSource = gameObject.AddComponent<AudioSource>();
+
         audioSource.PlayOneShot(startSound);
     }
 
@@ -669,11 +718,10 @@ public class Main : BaseUnityPlugin
             {
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                 {
-                    FileName  = "powershell",
-                    Arguments = $"-Command \"Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.SelectVoiceByHints([System.Speech.Synthesis.VoiceGender]::Male); $s.Speak('Welcome to That Utils Pad, {name}')\"",
-                    UseShellExecute  = false,
-                    CreateNoWindow   = true,
-                    // method made by me(jelly)
+                    FileName        = "powershell",
+                    Arguments       = $"-Command \"Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.SelectVoiceByHints([System.Speech.Synthesis.VoiceGender]::Male); $s.Speak('Welcome to That Utils Pad, {name}')\"",
+                    UseShellExecute = false,
+                    CreateNoWindow  = true,
                 });
             });
         }
@@ -709,7 +757,7 @@ public class Main : BaseUnityPlugin
             : "assets/prefabs/tup-modelsmooth.prefab";
 
         AssetBundle bundle = UseSakuraTheme ? menuPanelExpansionBundle : menuBundle;
-        GameObject   prefab = bundle.LoadAsset<GameObject>(prefabPath);
+        GameObject  prefab = bundle.LoadAsset<GameObject>(prefabPath);
 
         Transform parent = currentOpenType == MenuOpenType.Head
             ? GetActiveCamera().transform
@@ -720,7 +768,7 @@ public class Main : BaseUnityPlugin
 
         if (currentOpenType == MenuOpenType.Head)
         {
-            menuObj.transform.localPosition = new Vector3(-0.15f, -0.07f, 1.2f); //middle axis perfected 🤑 (by me (kwyf))
+            menuObj.transform.localPosition = new Vector3(-0.15f, -0.07f, 1.2f);
             menuObj.transform.localRotation = Quaternion.Euler(0f, 270f, 0f);
         }
         else
@@ -729,9 +777,9 @@ public class Main : BaseUnityPlugin
             menuObj.transform.localRotation = Quaternion.Euler(270f, 180f, 0f);
         }
 
-        Rigidbody?  rb       = menuObj.GetComponent<Rigidbody>();
-        Collider?   collider = menuObj.GetComponent<Collider>();
-        Renderer?   renderer = menuObj.GetComponentInChildren<Renderer>();
+        Rigidbody? rb       = menuObj.GetComponent<Rigidbody>();
+        Collider?  collider = menuObj.GetComponent<Collider>();
+        Renderer?  renderer = menuObj.GetComponentInChildren<Renderer>();
 
         if (rb       != null) Destroy(rb);
         if (collider != null) Destroy(collider);
@@ -747,11 +795,11 @@ public class Main : BaseUnityPlugin
         else
             MenuTheme.Assign(menuObj, mainColor, borderColor, buttonColor, accentColor);
     }
-    
+
     private void CreateButton(float zOffset, string btnName)
     {
-        GameObject btn        = Instantiate(btnPrefab, menuObj.transform);
-        GameObject btnOutline = Instantiate(btnPrefab, menuObj.transform);
+        GameObject btn         = Instantiate(btnPrefab, menuObj.transform);
+        GameObject btnOutline  = Instantiate(btnPrefab, menuObj.transform);
         GameObject btnCollider = GameObject.CreatePrimitive(PrimitiveType.Cube);
 
         var colliderFollow    = btnCollider.AddComponent<FollowMenu>();
@@ -775,7 +823,7 @@ public class Main : BaseUnityPlugin
         btnCollider.layer = 18;
 
         ButtonTrigger trigger = btnCollider.AddComponent<ButtonTrigger>();
-        trigger.BtnIdentifier       = btnName;
+        trigger.BtnIdentifier         = btnName;
         trigger.pressButtonSoundIndex = 28;
 
         btnCollider.GetComponent<Collider>().isTrigger = true;
@@ -796,9 +844,9 @@ public class Main : BaseUnityPlugin
         }
 
         Renderer rendererCollider = btnCollider.GetComponentInChildren<Renderer>();
-        rendererCollider.material.shader  = ShaderCache.TextShader;
-        rendererCollider.material.color   = new Color32(255, 0, 0, 50);
-        rendererCollider.enabled          = false;
+        rendererCollider.material.shader = ShaderCache.TextShader;
+        rendererCollider.material.color  = new Color32(255, 0, 0, 50);
+        rendererCollider.enabled         = false;
 
         GameObject textObj = new("ButtonLabel");
         textObj.transform.SetParent(btn.transform, false);
@@ -806,11 +854,11 @@ public class Main : BaseUnityPlugin
         textObj.transform.localRotation = Quaternion.Euler(0f, 270f, 180f);
 
         TextMeshPro text = textObj.AddComponent<TextMeshPro>();
-        text.text           = btnName.ToUpper();
-        text.fontSize       = 20;
-        text.alignment      = TextAlignmentOptions.Center;
-        text.color          = Color.white;
-        text.font           = VRRig.LocalRig.playerText1.font;
+        text.text             = btnName.ToUpper();
+        text.fontSize         = 20;
+        text.alignment        = TextAlignmentOptions.Center;
+        text.color            = Color.white;
+        text.font             = VRRig.LocalRig.playerText1.font;
         text.enableAutoSizing = false;
         text.transform.localScale = Vector3.one * 0.02f;
 
@@ -829,23 +877,20 @@ public class Main : BaseUnityPlugin
     private void LoadBundles()
     {
         Assembly assembly = Assembly.GetExecutingAssembly();
-        
+
         foreach (var name in assembly.GetManifestResourceNames())
-        {
             Debug.Log("[TUP RESOURCE] " + name);
-        }
-        
-        menuBundle   = LoadBundle(assembly, "ThatUtilsPad.Assets.tup-prefab");
-        sakuraBundle = LoadBundle(assembly, "ThatUtilsPad.Assets.tupsakura-prefab");
+
+        menuBundle               = LoadBundle(assembly, "ThatUtilsPad.Assets.tup-prefab");
+        sakuraBundle             = LoadBundle(assembly, "ThatUtilsPad.Assets.tupsakura-prefab");
         menuPanelExpansionBundle = LoadBundle(assembly, "ThatUtilsPad.Assets.tupmenu-panelexpansion");
-        buttonBundle = LoadBundle(assembly, "ThatUtilsPad.Assets.tupbutton-prefab");
+        buttonBundle             = LoadBundle(assembly, "ThatUtilsPad.Assets.tupbutton-prefab");
     }
 
     private AssetBundle LoadBundle(Assembly assembly, string resourceName)
     {
         using Stream? stream = assembly.GetManifestResourceStream(resourceName);
         byte[] buffer = new byte[stream.Length];
-        // ReSharper disable once MustUseReturnValue
         stream.Read(buffer, 0, buffer.Length);
         return AssetBundle.LoadFromMemory(buffer);
     }
@@ -861,24 +906,33 @@ public static class WavUtility
 {
     public static AudioClip ToAudioClip(byte[] fileBytes, string name = "wav")
     {
-        const int HeaderSize = 44;
-        int   subchunk1  = BitConverter.ToInt32(fileBytes, 16);
-        ushort audioFormat = BitConverter.ToUInt16(fileBytes, 20);
-        ushort numChannels = BitConverter.ToUInt16(fileBytes, 22);
-        int   sampleRate   = BitConverter.ToInt32(fileBytes, 24);
-        ushort bitDepth    = BitConverter.ToUInt16(fileBytes, 34);
+        int channels   = BitConverter.ToInt16(fileBytes, 22);
+        int sampleRate = BitConverter.ToInt32(fileBytes, 24);
+        int bitDepth   = BitConverter.ToInt16(fileBytes, 34);
 
-        int     dataSize = BitConverter.ToInt32(fileBytes, 40);
-        float[] data     = new float[dataSize / (bitDepth / 8)];
-
-        for (int i = 0; i < data.Length; i++)
+        int dataIndex = 12;
+        while (dataIndex < fileBytes.Length - 8)
         {
-            int offset = HeaderSize + i * 2;
-            data[i] = BitConverter.ToInt16(fileBytes, offset) / 32768.0f;
+            string chunkId = System.Text.Encoding.ASCII.GetString(fileBytes, dataIndex, 4);
+            int chunkSize  = BitConverter.ToInt32(fileBytes, dataIndex + 4);
+            if (chunkId == "data") break;
+            dataIndex += 8 + chunkSize;
+        }
+        dataIndex += 8;
+
+        int     sampleCount = (fileBytes.Length - dataIndex) / (bitDepth / 8);
+        float[] data        = new float[sampleCount];
+
+        for (int i = 0; i < sampleCount; i++)
+        {
+            int offset = dataIndex + i * (bitDepth / 8);
+            data[i] = bitDepth == 16
+                ? BitConverter.ToInt16(fileBytes, offset) / 32768f
+                : (fileBytes[offset] - 128) / 128f;
         }
 
-        AudioClip audioClip = AudioClip.Create(name, data.Length / numChannels, numChannels, sampleRate, false);
-        audioClip.SetData(data, 0);
-        return audioClip;
+        AudioClip clip = AudioClip.Create(name, sampleCount / channels, channels, sampleRate, false);
+        clip.SetData(data, 0);
+        return clip;
     }
 }
