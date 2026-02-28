@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections;
+using System.IO;
+using System.Reflection;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.NVIDIA;
@@ -48,6 +50,22 @@ public class ButtonTrigger : GorillaPressableButton
             action?.Invoke();
         else
             Debug.LogWarning($"[TUP: WARNING] No mod found for button: {BtnIdentifier}");
+    }
+}
+
+public static class Tools
+{
+    public static Texture2D LoadEmbeddedImage(string name)
+    {
+        using Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("ThatUtilsPad.Assets." + name);
+
+        if (stream == null) return null;
+        byte[] imageData = new byte[stream.Length];
+        stream.Read(imageData, 0, imageData.Length);
+        Texture2D texture = new(2, 2);
+        texture.LoadImage(imageData);
+
+        return texture;
     }
 }
 

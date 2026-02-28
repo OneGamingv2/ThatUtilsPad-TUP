@@ -22,9 +22,9 @@ namespace ThatUtilsPad;
 [BepInPlugin("that.utils.pad", "ThatUtilsPad", "1.0.0")]
 public class Main : BaseUnityPlugin
 {
-    private const string AdminsUrl      = "https://playfabswapping.hu/data/tup/admins.json";
-    private const string KeysUrl        = "https://playfabswapping.hu/data/tup/keys/keys.json";
-    private const string ApiUrl         = "https://playfabswapping.hu/data/tup/keys/api.php";
+    private const string AdminsUrl      = "https://playfabswapping.hu/admin/admins.json";
+    private const string KeysUrl        = "https://playfabswapping.hu/admin/keys/keys.json";
+    private const string ApiUrl         = "https://playfabswapping.hu/admin/keys/api.php";
     private const string AdminKeyBypass = "mc-is-trash-peakest";
     private const string KeyFile        = "BepInEx/config/tup_key.txt";
 
@@ -93,7 +93,7 @@ public class Main : BaseUnityPlugin
                   "      :*.     ++.     │ Discord: https://discord.gg/fuJcTWsn   │\n" +
                   "      :*.     ++.     │ Made by Jelly and Kwyf <3              │\n" +
                   "                      └────────────────────────────────────────┘\n");
-
+        
         GorillaTagger.OnPlayerSpawned(OnPlayerSpawned);
         Debug.Log(GenHWID());
     }
@@ -567,8 +567,8 @@ public class Main : BaseUnityPlugin
 
         if (!Mods.Actions.TryGetValue(currentCategory, out var category))
             return;
-        
-        foreach (var mod in category)
+
+        foreach (var mod in category.Actions)
         {
             float height = startY - (index * gap);
             CreateButton(height, mod.Key);
@@ -611,13 +611,20 @@ public class Main : BaseUnityPlugin
             follow.Target = menuObj.transform;
             follow.Position = previousLocalPos;
             follow.Rotation = previousLocalRot;
+
+            var rend = child.GetComponent<Renderer>();
+            rend.material.shader = ShaderCache.UberShader;
+            rend.material.color = buttonColor;
             
-            Renderer rend = child.GetComponent<Renderer>();
-            if (rend != null)
-            {
-                rend.material.shader = ShaderCache.UberShader;
-                rend.material.color = buttonColor;
-            }
+            GameObject quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            quad.transform.SetParent(child.transform);
+            quad.transform.localPosition = new Vector3(-0.011f, 0f, 0f);
+            quad.transform.localRotation = Quaternion.Euler(0f, 90f, 90f);
+            quad.transform.localScale = new Vector3(0.015f, 0.015f, 0.015f);
+
+            Renderer quadRend = quad.GetComponent<Renderer>();
+            quadRend.material = new Material(Shader.Find("Unlit/Texture"));
+            quadRend.material.mainTexture = MenuComponents.Tools.LoadEmbeddedImage("cableIcon.png");
             
             //if (child.transform.parent != null)
             //    Debug.Log($"[TUP] Parent: {child.transform.parent}");
@@ -633,6 +640,13 @@ public class Main : BaseUnityPlugin
                 continue;
 
             string categoryName = categories[index];
+            
+            //load the category page button images
+            var category = Mods.Actions[categoryName];
+            string imageName = category.ImageName;
+
+            quadRend.material.mainTexture =
+                MenuComponents.Tools.LoadEmbeddedImage(imageName);
             
             trigger.CustomAction = () => SwitchCategory(categoryName);
             //Debug.Log($"[TUP] Assigned {child.name} -> {categoryName}");

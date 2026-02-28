@@ -10,13 +10,25 @@ using Object = UnityEngine.Object;
 
 namespace ThatUtilsPad;
 
+public class ModCategory
+{
+    public string ImageName;
+    public Dictionary<string, Action> Actions;
+
+    public ModCategory(string imageName)
+    {
+        ImageName = imageName;
+        Actions = new Dictionary<string, Action>();
+    }
+}
+
 public static class Mods
 {
     private static Coroutine? queueCoroutine;
     public static  int        ReconnectDelay = 1;
 
-    public static Dictionary<string, Dictionary<string, Action>> Actions;
-
+    public static Dictionary<string, ModCategory> Actions;
+    
     private static bool        checkerEnabled;
     private static GameObject? checkerLine;
     private static VRRig?      lastTargetRig;
@@ -26,7 +38,7 @@ public static class Mods
     {
         foreach (var category in Actions.Values)
         {
-            if (category.TryGetValue(identifier, out action))
+            if (category.Actions.TryGetValue(identifier, out action))
                 return true;
         }
 
@@ -36,48 +48,76 @@ public static class Mods
 
     public static void Init()
     {
-        Actions = new Dictionary<string, Dictionary<string, Action>>
+        Actions = new Dictionary<string, ModCategory>
         {
             {
-                "Networking", new Dictionary<string, Action>
+                "Networking",
+                new ModCategory("cableIcon.png")
                 {
-                    { "Disconnect", Disconnect },
-                    { "Join Random", JoinRandom },
-                    { "Lobby Hop", LobbyHop },
+                    Actions =
+                    {
+                        { "Disconnect", Disconnect },
+                        { "Join Random", JoinRandom },
+                        { "Lobby Hop", LobbyHop },
+                    }
                 }
             },
             {
-                "Room", new Dictionary<string, Action>
+                "Room",
+                new ModCategory("roomIcon.png")
                 {
-                    { "Copy Room", CopyRoomCode },
+                    Actions =
+                    {
+                        { "Copy Room", CopyRoomCode },
+                    }
                 }
             },
             {
-                "Cosmetics", new Dictionary<string, Action>
+                "Cosmetics",
+                new ModCategory("shirtIcon.png")
                 {
-                    { "Rotate Outfit", RotateOutfits },
+                    Actions =
+                    {
+                        { "Rotate Outfit", RotateOutfits },
+                    }
                 }
             },
             {
-                "PlaceHolder1", new Dictionary<string, Action>
+                "Placeholder-4",
+                new ModCategory("trevis-placeholder.png")
                 {
+                    Actions =
+                    {
+                    }
                 }
             },
             {
-                "PlaceHolder2", new Dictionary<string, Action>
+                "Placeholder-5",
+                new ModCategory("trevis-placeholder.png")
                 {
+                    Actions =
+                    {
+                    }
                 }
             },
             {
-                "PlaceHolder3", new Dictionary<string, Action>
+                "Placeholder-6",
+                new ModCategory("trevis-placeholder.png")
                 {
+                    Actions =
+                    {
+                    }
                 }
             },
             {
-                "PlaceHolder4", new Dictionary<string, Action>
+                "Placeholder-7",
+                new ModCategory("trevis-placeholder.png")
                 {
+                    Actions =
+                    {
+                    }
                 }
-            },
+            }
         };
     }
 

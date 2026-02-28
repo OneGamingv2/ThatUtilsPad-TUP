@@ -19,6 +19,17 @@
         <EmbeddedResource Include="Assets\hello.wav" />
         <None Remove="Assets\tupmenu-panelexpansion" />
         <EmbeddedResource Include="Assets\tupmenu-panelexpansion" />
+        <None Remove="Assets\cable.png" />
+        <None Remove="Assets\trevis-placeholder.png" />
+        <EmbeddedResource Include="Assets\trevis-placeholder.png" />
+        <None Remove="Assets\cable-white.png" />
+        <None Remove="Assets\cableIcon.png" />
+        <EmbeddedResource Include="Assets\cableIcon.png" />
+        <None Remove="Assets\cableIcon-NoBG.png" />
+        <None Remove="Assets\shirtIcon.png" />
+        <EmbeddedResource Include="Assets\shirtIcon.png" />
+        <None Remove="Assets\roomIcon.png" />
+        <EmbeddedResource Include="Assets\roomIcon.png" />
     </ItemGroup>
 
     <ItemGroup>
