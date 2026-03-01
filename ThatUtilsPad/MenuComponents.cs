@@ -1,10 +1,14 @@
 ﻿using System;
 using System.Collections;
 using System.IO;
+using System.Numerics;
 using System.Reflection;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.NVIDIA;
+using UnityEngine.UIElements;
+using Quaternion = UnityEngine.Quaternion;
+using Vector3 = UnityEngine.Vector3;
 
 namespace ThatUtilsPad.MenuComponents;
 
@@ -71,6 +75,28 @@ public static class Tools
 
 public static class MenuEffects
 {
+    public static IEnumerator PopMenu(GameObject menuObj, Vector3 targetScale, Vector3 startScale, bool useEaseOut)
+    {
+        float duration = 0.25f;
+        float time = 0f;
+        
+        while (time < duration)
+        {
+            float t = time / duration;
+            float easeT;
+            
+            if (useEaseOut)
+                easeT = 1f - Mathf.Pow(1f - t, 3);   
+            else
+                easeT = Mathf.Pow(t, 3);
+            
+            menuObj.transform.localScale = Vector3.Lerp(startScale, targetScale, easeT);
+
+            time += Time.deltaTime;
+            yield return null;
+        }
+    }
+
     public static IEnumerator SpawnHitCircle(Vector3 position, Transform hit)
     {
         GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);

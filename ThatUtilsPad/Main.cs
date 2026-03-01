@@ -66,7 +66,7 @@ public class Main : BaseUnityPlugin
     private bool         isMenuOpened = false;
 
     private AssetBundle menuBundle;
-    private float       menuGripRotaton = -30f;
+    private float       menuGripRotaton = -40f;
 
     private GameObject  selectorObj;
     private GameObject  menuObj;
@@ -509,7 +509,7 @@ public class Main : BaseUnityPlugin
             {
                 if (isMenuOpened)
                 {
-                    CloseMenu();
+                    StartCoroutine(CloseMenu());
                     isMenuOpened = false;
                 }
                 else
@@ -535,7 +535,7 @@ public class Main : BaseUnityPlugin
             }
             else if (isMenuOpened && !controllerHeld && !keyboardIsHeld && !AlwaysShowMenu)
             {
-                CloseMenu();
+                StartCoroutine(CloseMenu());
                 isMenuOpened = false;
             }
         }
@@ -557,6 +557,75 @@ public class Main : BaseUnityPlugin
             ButtonTrigger.PcPress(buttonTrigger);
     }
 
+    private void OpenMenu()
+    {
+        string prefabPath = UseSakuraTheme
+            ? "assets/prefabs/tup-model-panelexpansion.prefab"
+            : "assets/prefabs/tup-modelsmooth.prefab";
+
+        AssetBundle bundle = UseSakuraTheme ? menuPanelExpansionBundle : menuBundle;
+        GameObject  prefab = bundle.LoadAsset<GameObject>(prefabPath);
+
+        Transform parent = currentOpenType == MenuOpenType.Head
+            ? GetActiveCamera().transform
+            : GTPlayer.Instance.LeftHand.controllerTransform;
+
+        menuObj = Instantiate(prefab, parent, true);
+        menuObj.transform.localScale = Vector3.one * 0.375f;
+        
+        InitPageButtons(menuObj);
+
+        if (currentOpenType == MenuOpenType.Head)
+        {
+            menuObj.transform.localPosition = new Vector3(-0.03f, -0.02f, 0.6f);
+            menuObj.transform.localRotation = Quaternion.Euler(0f, 270f, 0f);
+        }
+        else
+        {
+            menuObj.transform.localPosition = Vector3.zero + menuHandOffset + menuGripPosition;
+            menuObj.transform.localRotation = Quaternion.Euler(270f, 180f, 0f);
+        }
+
+        Rigidbody? rb       = menuObj.GetComponent<Rigidbody>();
+        Collider?  collider = menuObj.GetComponent<Collider>();
+        Renderer?  renderer = menuObj.GetComponentInChildren<Renderer>();
+
+        if (rb       != null) Destroy(rb);
+        if (collider != null) Destroy(collider);
+
+        if (renderer != null)
+        {
+            renderer.material.shader = ShaderCache.UberShader;
+            renderer.material.color  = new Color32(171, 0, 63, 255);
+        }
+
+        if (UseSakuraTheme)
+            MenuTheme.AssignSakura(menuObj, mainColor, borderColor, accentColor);
+        else
+            MenuTheme.Assign(menuObj, mainColor, borderColor, buttonColor, accentColor);
+        
+        //menu open anim
+        StartCoroutine(MenuEffects.PopMenu(menuObj, menuObj.transform.localScale, Vector3.zero, true));
+    }
+    
+    private IEnumerator CloseMenu()
+    {
+        isMenuOpened = false;
+
+        yield return StartCoroutine(
+            MenuEffects.PopMenu(menuObj, Vector3.zero, menuObj.transform.localScale, false)
+        );
+
+        Destroy(menuObj);
+        DestroyButtons();
+        menuObj = null;
+
+        foreach (GameObject selectorObj in selectorBtnObjs)
+            Destroy(selectorObj);
+
+        selectorBtnObjs.Clear();
+    }
+    
     private string GenHWID() => SystemInfo.deviceUniqueIdentifier;
 
     private void CreateButtons(string categoryName = "Networking")
@@ -828,66 +897,6 @@ public class Main : BaseUnityPlugin
             audioSource = gameObject.AddComponent<AudioSource>();
 
         audioSource.PlayOneShot(helloSound);
-    }
-
-    private void CloseMenu()
-    {
-        isMenuOpened = false;
-        Destroy(menuObj);
-        DestroyButtons();
-        menuObj = null;
-        
-        foreach (GameObject selectorObj in selectorBtnObjs)
-            Destroy(selectorObj);
-        selectorBtnObjs.Clear();
-    }
-
-    private void OpenMenu()
-    {
-        string prefabPath = UseSakuraTheme
-            ? "assets/prefabs/tup-model-panelexpansion.prefab"
-            : "assets/prefabs/tup-modelsmooth.prefab";
-
-        AssetBundle bundle = UseSakuraTheme ? menuPanelExpansionBundle : menuBundle;
-        GameObject  prefab = bundle.LoadAsset<GameObject>(prefabPath);
-
-        Transform parent = currentOpenType == MenuOpenType.Head
-            ? GetActiveCamera().transform
-            : GTPlayer.Instance.LeftHand.controllerTransform;
-
-        menuObj = Instantiate(prefab, parent, true);
-        menuObj.transform.localScale = Vector3.one * 0.625f;
-        
-        InitPageButtons(menuObj);
-
-        if (currentOpenType == MenuOpenType.Head)
-        {
-            menuObj.transform.localPosition = new Vector3(-0.15f, -0.07f, 1.2f);
-            menuObj.transform.localRotation = Quaternion.Euler(0f, 270f, 0f);
-        }
-        else
-        {
-            menuObj.transform.localPosition = Vector3.zero + menuHandOffset + menuGripPosition;
-            menuObj.transform.localRotation = Quaternion.Euler(270f, 180f, 0f);
-        }
-
-        Rigidbody? rb       = menuObj.GetComponent<Rigidbody>();
-        Collider?  collider = menuObj.GetComponent<Collider>();
-        Renderer?  renderer = menuObj.GetComponentInChildren<Renderer>();
-
-        if (rb       != null) Destroy(rb);
-        if (collider != null) Destroy(collider);
-
-        if (renderer != null)
-        {
-            renderer.material.shader = ShaderCache.UberShader;
-            renderer.material.color  = new Color32(171, 0, 63, 255);
-        }
-
-        if (UseSakuraTheme)
-            MenuTheme.AssignSakura(menuObj, mainColor, borderColor, accentColor);
-        else
-            MenuTheme.Assign(menuObj, mainColor, borderColor, buttonColor, accentColor);
     }
 
     private void CreateButton(float zOffset, string btnName)
