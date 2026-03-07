@@ -928,7 +928,7 @@ public class Main : BaseUnityPlugin
 
         ButtonTrigger trigger = btnCollider.AddComponent<ButtonTrigger>();
         trigger.BtnIdentifier         = btnName;
-        trigger.pressButtonSoundIndex = 28;
+        trigger.pressButtonSoundIndex = -1;//28;
 
         btnCollider.GetComponent<Collider>().isTrigger = true;
         Destroy(btnCollider.GetComponent<Rigidbody>());
