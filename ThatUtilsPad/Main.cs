@@ -52,6 +52,9 @@ public class Main : BaseUnityPlugin
     private readonly Color32 buttonOutlineColor = new(18, 18, 36, 255);
 
     private bool previousControllerState;
+    
+    private Coroutine buttonRoutine;
+    private Coroutine categoryRoutine;
 
     private readonly Color32 mainColor = new(17, 17, 27, 255);
 
@@ -63,6 +66,9 @@ public class Main : BaseUnityPlugin
 
     private MenuOpenType currentOpenType;
     private AudioClip    helloSound;
+    private AudioClip    menuOpenSound;
+    private AudioClip    btnEnterSound;
+    private AudioClip    clickSound;
     private bool         isMenuOpened = false;
 
     private AssetBundle menuBundle;
@@ -71,6 +77,7 @@ public class Main : BaseUnityPlugin
     private GameObject  selectorObj;
     private GameObject  menuObj;
     private AssetBundle sakuraBundle;
+    private AssetBundle minecraftiaBundle;
     private AssetBundle menuPanelExpansionBundle;
 
     private List<string> categories;
@@ -517,7 +524,7 @@ public class Main : BaseUnityPlugin
                     currentOpenType = currentControllerState ? MenuOpenType.Hand : MenuOpenType.Head;
                     OpenMenu();
                     isMenuOpened = true;
-                    CreateButtons();
+                    buttonRoutine = StartCoroutine(CreateButtons());
                 }
             }
         }
@@ -531,7 +538,7 @@ public class Main : BaseUnityPlugin
                 currentOpenType = controllerHeld ? MenuOpenType.Hand : MenuOpenType.Head;
                 OpenMenu();
                 isMenuOpened = true;
-                CreateButtons();
+                buttonRoutine = StartCoroutine(CreateButtons());
             }
             else if (isMenuOpened && !controllerHeld && !keyboardIsHeld && !AlwaysShowMenu)
             {
@@ -556,7 +563,7 @@ public class Main : BaseUnityPlugin
         if (hit.collider.TryGetComponent(out ButtonTrigger buttonTrigger))
             ButtonTrigger.PcPress(buttonTrigger);
     }
-
+    
     private void OpenMenu()
     {
         string prefabPath = UseSakuraTheme
@@ -604,12 +611,19 @@ public class Main : BaseUnityPlugin
         else
             MenuTheme.Assign(menuObj, mainColor, borderColor, buttonColor, accentColor);
         
+        AudioSource audioSource = gameObject.GetComponent<AudioSource>();
+        if (audioSource == null)
+            audioSource = gameObject.AddComponent<AudioSource>();
+
+        audioSource.PlayOneShot(menuOpenSound);
+        
         //menu open anim
         StartCoroutine(MenuEffects.PopMenu(menuObj, menuObj.transform.localScale, Vector3.zero, true));
     }
     
     private IEnumerator CloseMenu()
     {
+        Tools.StopCoroutine(ref buttonRoutine);
         isMenuOpened = false;
 
         yield return StartCoroutine(
@@ -628,29 +642,33 @@ public class Main : BaseUnityPlugin
     
     private string GenHWID() => SystemInfo.deviceUniqueIdentifier;
 
-    private void CreateButtons(string categoryName = "Networking")
+    private IEnumerator CreateButtons(string categoryName = "Networking")
     {
         const float startY = 0.38f;
         const float gap    = 0.13f;
+
         int index = 0;
 
         if (!Mods.Actions.TryGetValue(currentCategory, out var category))
-            return;
+            yield break;
 
         foreach (var mod in category.Actions)
         {
             float height = startY - (index * gap);
+
             CreateButton(height, mod.Key);
             index++;
+            yield return new WaitForSeconds(0.15f);
         }
     }
     
     private void SwitchCategory(string categoryName)
     {
+        Tools.StopCoroutine(ref buttonRoutine);
         currentCategory = categoryName;
 
         DestroyButtons();
-        CreateButtons();
+        buttonRoutine = StartCoroutine(CreateButtons());
     }
 
     private void InitPageButtons(GameObject menuObj)
@@ -724,46 +742,24 @@ public class Main : BaseUnityPlugin
         }
     }
 
-    private void LoadAudio()
+    void LoadAudio()
     {
-        try
-        {
-            Assembly assembly      = Assembly.GetExecutingAssembly();
-            string[] resourceNames = assembly.GetManifestResourceNames();
+        Assembly assembly = Assembly.GetExecutingAssembly();
 
-            Debug.Log("[TUP] embedded resources:");
-            foreach (string name in resourceNames)
-                Debug.Log("[TUP] - " + name);
+        clickSound    = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.creamy.wav");
+        startSound    = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.tup_startup.wav");
+        helloSound    = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.hello.wav");
+        menuOpenSound = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.UiEnter.wav");
+        btnEnterSound = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.btnEnter.wav");
 
-            string startPath = null;
-            string helloPath = null;
+        if (clickSound == null)
+            Debug.LogError("[TUP] Failed to load click sound!");
 
-            foreach (string name in resourceNames)
-            {
-                if (name.Contains("tup_startup") || name.Contains("startup"))
-                {
-                    startPath = name;
-                    Debug.Log("[TUP] found startup sound at: " + name);
-                }
+        if (startSound == null)
+            Debug.LogError("[TUP] Failed to load startup sound!");
 
-                if (name.Contains("hello"))
-                    helloPath = name;
-            }
-
-            if (startPath != null)
-                startSound = LoadAudioClip(assembly, startPath);
-            else
-                Debug.LogWarning("[TUP] could not find startup sound");
-
-            if (helloPath != null)
-                helloSound = LoadAudioClip(assembly, helloPath);
-            else
-                Debug.LogWarning("[TUP] could not find hello sound");
-        }
-        catch (Exception e)
-        {
-            Debug.LogWarning("[TUP] failed to load audio: " + e.Message);
-        }
+        if (helloSound == null)
+            Debug.LogError("[TUP] Failed to load hello sound!");
     }
 
     private AudioClip LoadAudioClip(Assembly assembly, string resourceName)
@@ -901,6 +897,11 @@ public class Main : BaseUnityPlugin
 
     private void CreateButton(float zOffset, string btnName)
     {
+        string prefabPath = "assets/fonts/minecraftia.asset";
+
+        AssetBundle bundle = minecraftiaBundle;
+        TMP_FontAsset minecraftiaFont = bundle.LoadAsset<TMP_FontAsset>(prefabPath);
+        
         GameObject btn         = Instantiate(btnPrefab, menuObj.transform);
         GameObject btnOutline  = Instantiate(btnPrefab, menuObj.transform);
         GameObject btnCollider = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -916,9 +917,9 @@ public class Main : BaseUnityPlugin
         btn.transform.localRotation        = buttonBaseRotation;
         btn.transform.localScale           = buttonBaseScale;
 
-        btnOutline.transform.localPosition = stackedPos;
+        btnOutline.transform.localPosition = stackedPos - new Vector3(-0.002f, 0f, 0f);
         btnOutline.transform.localRotation = buttonBaseRotation;
-        btnOutline.transform.localScale    = buttonBaseScale * 1.05f;
+        btnOutline.transform.localScale    = buttonBaseScale * 1.001f;
 
         btnCollider.transform.localPosition = stackedPos;
         btnCollider.transform.localRotation = Quaternion.Euler(0f, 0f, 0f);
@@ -957,17 +958,36 @@ public class Main : BaseUnityPlugin
         textObj.transform.localRotation = Quaternion.Euler(0f, 270f, 180f);
 
         TextMeshPro text = textObj.AddComponent<TextMeshPro>();
-        text.text             = btnName.ToUpper();
-        text.fontSize         = 20;
+        text.text             = btnName;
+        text.fontSize         = 17;
         text.alignment        = TextAlignmentOptions.Center;
         text.color            = Color.white;
-        text.font             = VRRig.LocalRig.playerText1.font;
+        text.font             = minecraftiaFont; //VRRig.LocalRig.playerText1.font;
         text.enableAutoSizing = false;
         text.transform.localScale = Vector3.one * 0.02f;
+        
+        //button open wave anim thingy buh
+        StartCoroutine(MenuEffects.PopButton(btn, btnOutline, buttonBaseScale, Vector3.zero, true));
+        
+        AudioSource audioSource = gameObject.GetComponent<AudioSource>();
+        if (audioSource == null)
+            audioSource = gameObject.AddComponent<AudioSource>();
 
+        audioSource.volume = 0.1f;
+        audioSource.PlayOneShot(btnEnterSound);
+        
         btnObjs.Add(btn);
         btnObjs.Add(btnOutline);
         btnObjs.Add(btnCollider);
+    }
+
+    public void PlayBtnCickSound()
+    {
+        AudioSource audioSource = gameObject.GetComponent<AudioSource>();
+        if (audioSource == null)
+            audioSource = gameObject.AddComponent<AudioSource>();
+
+        audioSource.PlayOneShot(clickSound);
     }
 
     private void DestroyButtons()
@@ -988,6 +1008,7 @@ public class Main : BaseUnityPlugin
         sakuraBundle             = LoadBundle(assembly, "ThatUtilsPad.Assets.tupsakura-prefab");
         menuPanelExpansionBundle = LoadBundle(assembly, "ThatUtilsPad.Assets.tupmenu-panelexpansion");
         buttonBundle             = LoadBundle(assembly, "ThatUtilsPad.Assets.tupbutton-prefab");
+        minecraftiaBundle        = LoadBundle(assembly, "ThatUtilsPad.Assets.Fonts.minecraftia");
     }
 
     private AssetBundle LoadBundle(Assembly assembly, string resourceName)

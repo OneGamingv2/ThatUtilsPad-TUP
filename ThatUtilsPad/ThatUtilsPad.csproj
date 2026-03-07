@@ -12,11 +12,11 @@
     </ItemGroup>
 
     <ItemGroup>
+        <EmbeddedResource Include="Assets\Sounds\hello.wav" />
+        <EmbeddedResource Include="Assets\Sounds\tup_startup.wav" />
         <EmbeddedResource Include="Assets\tup-prefab" />
         <EmbeddedResource Include="Assets\tupbutton-prefab" />
         <EmbeddedResource Include="Assets\tupsakura-prefab" />
-        <EmbeddedResource Include="Assets\tup_startup.wav" />
-        <EmbeddedResource Include="Assets\hello.wav" />
         <None Remove="Assets\tupmenu-panelexpansion" />
         <EmbeddedResource Include="Assets\tupmenu-panelexpansion" />
         <None Remove="Assets\cable.png" />
@@ -30,6 +30,16 @@
         <EmbeddedResource Include="Assets\shirtIcon.png" />
         <None Remove="Assets\roomIcon.png" />
         <EmbeddedResource Include="Assets\roomIcon.png" />
+        <None Remove="Assets\Fonts\minecraftia" />
+        <EmbeddedResource Include="Assets\Fonts\minecraftia" />
+        <None Remove="Assets\Sounds\SmoothClick.wav" />
+        <EmbeddedResource Include="Assets\Sounds\SmoothClick.wav" />
+        <None Remove="Assets\Sounds\UiEnter.wav" />
+        <EmbeddedResource Include="Assets\Sounds\UiEnter.wav" />
+        <None Remove="Assets\Sounds\creamy.wav" />
+        <EmbeddedResource Include="Assets\Sounds\creamy.wav" />
+        <None Remove="Assets\Sounds\btnEnter.wav" />
+        <EmbeddedResource Include="Assets\Sounds\btnEnter.wav" />
     </ItemGroup>
 
     <ItemGroup>

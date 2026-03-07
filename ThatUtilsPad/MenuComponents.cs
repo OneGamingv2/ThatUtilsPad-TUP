@@ -22,6 +22,7 @@ public class ButtonTrigger : GorillaPressableButton
         if (button == null) return;
         
         Debug.Log("ButtonActivationPC");
+        Main.Instance.PlayBtnCickSound();
         
         if (button.CustomAction != null)
         {
@@ -71,6 +72,15 @@ public static class Tools
 
         return texture;
     }
+    
+    public static void StopCoroutine(ref Coroutine routine)
+    {
+        if (routine != null)
+        {
+            CoroutineHandler.Instance.StopCoroutine(routine);
+            routine = null;
+        }
+    }
 }
 
 public static class MenuEffects
@@ -97,11 +107,37 @@ public static class MenuEffects
         }
     }
 
+    public static IEnumerator PopButton(GameObject btnObj, GameObject btnOutline, Vector3 targetScale, Vector3 startScale, bool useEaseOut)
+    {
+        float duration = 0.5f;
+        float time = 0f;
+        
+        while (time < duration)
+        {
+            if (btnObj == null || btnOutline == null)
+                yield break;
+            
+            float t = time / duration;
+            float easeT;
+            
+            if (useEaseOut)
+                easeT = 1f - Mathf.Pow(1f - t, 3);   
+            else
+                easeT = Mathf.Pow(t, 3);
+            
+            btnObj.transform.localScale = Vector3.Lerp(startScale, targetScale, easeT);
+            btnOutline.transform.localScale = Vector3.Lerp(startScale, targetScale * 1.001f, easeT);
+
+            time += Time.deltaTime;
+            yield return null;
+        }
+    }
+
     public static IEnumerator SpawnHitCircle(Vector3 position, Transform hit)
     {
         GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         sphere.transform.position = position;
-        sphere.transform.localScale = Vector3.one * 0.02f;
+        sphere.transform.localScale = Vector3.one * 0.01f;
         
         GameObject.Destroy(sphere.GetComponent<Collider>());
         GameObject.Destroy(sphere.GetComponent<Rigidbody>());
@@ -114,8 +150,8 @@ public static class MenuEffects
         float duration = 0.4f;
         float time = 0f;
 
-        Vector3 startScale = Vector3.one * 0.02f;
-        Vector3 endScale = Vector3.one * 0.055f;
+        Vector3 startScale = Vector3.one * 0.01f;
+        Vector3 endScale = Vector3.one * 0.02f;
 
         while (time < duration)
         {
