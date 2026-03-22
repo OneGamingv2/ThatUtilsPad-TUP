@@ -3,6 +3,7 @@ using System.Collections;
 using System.IO;
 using System.Numerics;
 using System.Reflection;
+using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.NVIDIA;
@@ -12,7 +13,7 @@ using Vector3 = UnityEngine.Vector3;
 
 namespace ThatUtilsPad.MenuComponents;
 
-public class ButtonTrigger : GorillaPressableButton
+public class ButtonTrigger : MonoBehaviour
 {
     public string BtnIdentifier;
     public Action? CustomAction;
@@ -20,6 +21,7 @@ public class ButtonTrigger : GorillaPressableButton
     public static void PcPress(ButtonTrigger button)
     {
         if (button == null) return;
+        Debug.Log("Pressed: " + button.BtnIdentifier);
         
         Debug.Log("ButtonActivationPC");
         Main.Instance.PlayBtnCickSound();
@@ -36,33 +38,75 @@ public class ButtonTrigger : GorillaPressableButton
             Debug.LogWarning($"[TUP: WARNING] No mod found for button: {button.BtnIdentifier}");
     }
     
-    public override void ButtonActivationWithHand(bool isLeftHand)
+    //public override void ButtonActivationWithHand(bool isLeftHand)
+    //{
+        //base.ButtonActivationWithHand(isLeftHand);
+
+        //if (isLeftHand)
+        //    return;
+
+        //Debug.Log("ButtonActivationWithHand");
+        
+        //if (CustomAction != null)
+        //{
+        //    CustomAction.Invoke();
+        //     return;
+        //}
+        
+        //if (Mods.TryGetAction(BtnIdentifier, out var action))
+        //    action?.Invoke();
+        //else
+        //    Debug.LogWarning($"[TUP: WARNING] No mod found for button: {BtnIdentifier}");
+    //}
+}
+
+public class ButtonPresser : MonoBehaviour
+{
+    public bool isLeft = false;
+}
+
+public class ButtonCollider : MonoBehaviour
+{
+    private static float lastGlobalTime;
+    private float lastLocalTime;
+
+    public ButtonTrigger trigger; // reference to your existing script
+
+    private void Awake()
     {
-        base.ButtonActivationWithHand(isLeftHand);
+        gameObject.layer = 2; // you already did this 👍
 
-        if (isLeftHand)
+        if (trigger == null)
+            trigger = GetComponent<ButtonTrigger>();
+    }
+
+    private void OnTriggerEnter(Collider other)
+    {
+        // cooldown (prevents spam)
+        if (Time.time - lastGlobalTime < 0.1f || Time.time - lastLocalTime < 0.2f)
             return;
 
-        Debug.Log("ButtonActivationWithHand");
-        
-        if (CustomAction != null)
+        ButtonPresser presser = other.GetComponent<ButtonPresser>();
+        if (presser == null)
+            return;
+
+        if (trigger != null)
         {
-            CustomAction.Invoke();
-            return;
+            ButtonTrigger.PcPress(trigger);
+            GorillaTagger.Instance.StartVibration(presser.isLeft, 0.1f, 0.1f);
         }
-        
-        if (Mods.TryGetAction(BtnIdentifier, out var action))
-            action?.Invoke();
-        else
-            Debug.LogWarning($"[TUP: WARNING] No mod found for button: {BtnIdentifier}");
+
+        lastGlobalTime = Time.time;
+        lastLocalTime = Time.time;
     }
 }
+
 
 public static class Tools
 {
     public static Texture2D LoadEmbeddedImage(string name)
     {
-        using Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("ThatUtilsPad.Assets." + name);
+        using Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("ThatUtilsPad.Assets.Icons." + name);
 
         if (stream == null) return null;
         byte[] imageData = new byte[stream.Length];
@@ -105,6 +149,9 @@ public static class MenuEffects
             time += Time.deltaTime;
             yield return null;
         }
+        
+        menuObj.transform.localScale = targetScale;
+        Debug.Log("Menu Size: " + menuObj.transform.localScale);
     }
 
     public static IEnumerator PopButton(GameObject btnObj, GameObject btnOutline, Vector3 targetScale, Vector3 startScale, bool useEaseOut)
@@ -131,6 +178,9 @@ public static class MenuEffects
             time += Time.deltaTime;
             yield return null;
         }
+        
+        btnObj.transform.localScale = targetScale;
+        btnOutline.transform.localScale = targetScale * 1.001f;
     }
 
     public static IEnumerator SpawnHitCircle(Vector3 position, Transform hit)
@@ -206,17 +256,20 @@ public static class MenuTheme
     public static void Assign(GameObject menuObj, Color32 mainColor, Color32 borderColor, Color32 buttonColor, Color32 accentColor)
     {
         Transform root = menuObj.transform;
+        Transform side = menuObj.transform.Find("SideHolder");
+        
         ApplyColor(root, "Main",       mainColor);
         ApplyColor(root, "MainBorder", borderColor);
         ApplyColor(root, "GripPipe",   mainColor);
         ApplyColor(root, "GripAccent", accentColor);
-        ApplyColor(root, "SideMain", mainColor);
-        ApplyColor(root, "SideBorder", borderColor);
-        ApplyColor(root, "PanelConnector1", borderColor);
-        ApplyColor(root, "PanelConnector2", borderColor);
+        ApplyColor(side, "SideMain", mainColor);
+        ApplyColor(side, "SideBorder", borderColor);
         
         ApplyColor(root, "SelectorBorder", borderColor);
         ApplyColor(root, "SelectorMain", mainColor);
+        
+        ApplyColor(root, "SelectorMainSide", mainColor);
+        ApplyColor(root, "SelectorBorderSide", borderColor);
         
         ApplyColor(root, "SelectorBtn1", buttonColor);
         ApplyColor(root, "SelectorBtn2", buttonColor);
@@ -225,6 +278,30 @@ public static class MenuTheme
         ApplyColor(root, "SelectorBtn5", buttonColor);
         ApplyColor(root, "SelectorBtn6", buttonColor);
         ApplyColor(root, "SelectorBtn7", buttonColor);
+        ApplyColor(root, "SelectorBtn8", buttonColor);
+        ApplyColor(root, "SelectorBtn9", buttonColor);
+        ApplyColor(root, "SelectorBtn10", buttonColor);
+        ApplyColor(root, "SelectorBtn11", buttonColor);
+        ApplyColor(root, "SelectorBtn12", buttonColor);
+        ApplyColor(root, "SelectorBtn13", buttonColor);
+        ApplyColor(root, "SelectorBtn14", buttonColor);
+
+        ApplyColor(side, "ReportHateSpeech", buttonColor);
+        ApplyColor(side, "ReportCheating", buttonColor);
+        ApplyColor(side, "ReportToxicity", buttonColor);
+        
+        ApplyColor(side, "VolumeUp", buttonColor);
+        ApplyColor(side, "VolumeDown", buttonColor);
+        ApplyColor(side, "Mute", buttonColor);
+        ApplyColor(side, "MuteElse", buttonColor);
+        
+        ApplyColor(root, "BackPage", buttonColor);
+        ApplyColor(root, "NextPage", buttonColor);
+        ApplyColor(root, "HomeBtn", buttonColor);
+        
+        ApplyColor(side, "Mods", buttonColor);
+        ApplyColor(side, "Cheats", buttonColor);
+        ApplyColor(side, "User", buttonColor);
     }
 
     public static void AssignSakura(GameObject menuObj, Color32 mainColor, Color32 borderColor, Color32 accentColor)
@@ -235,7 +312,8 @@ public static class MenuTheme
         Assign(menuObj, mainColor, borderColor, buttonColor, accentColor);
 
         Transform root = menuObj.transform;
-
+        Transform side = menuObj.transform.Find("SideHolder");
+        
         // Extra sakura parts
         ApplyColor(root, "Pole1",        mainColor);
         ApplyColor(root, "Pole2",        mainColor);
@@ -246,13 +324,13 @@ public static class MenuTheme
         ApplyColor(root, "TopBarUnder",  mainColor);
         ApplyColor(root, "TopBar",       accentColor);
         
-        ApplyColor(root, "PoleSide1",        mainColor);
-        ApplyColor(root, "PoleSide2",        mainColor);
-        ApplyColor(root, "PipeTopSide1",     borderColor);
-        ApplyColor(root, "PipeTopSide2",     borderColor);
-        ApplyColor(root, "UnderBarSide",     borderColor);
-        ApplyColor(root, "BarConnectorSide", mainColor);
-        ApplyColor(root, "TopBarUnderSide",  mainColor);
-        ApplyColor(root, "TopBarSide",       accentColor);
+        ApplyColor(side, "PoleSide1",        mainColor);
+        ApplyColor(side, "PoleSide2",        mainColor);
+        ApplyColor(side, "PipeTopSide1",     borderColor);
+        ApplyColor(side, "PipeTopSide2",     borderColor);
+        ApplyColor(side, "UnderBarSide",     borderColor);
+        ApplyColor(side, "BarConnectorSide", mainColor);
+        ApplyColor(side, "TopBarUnderSide",  mainColor);
+        ApplyColor(side, "TopBarSide",       accentColor);
     }
 }

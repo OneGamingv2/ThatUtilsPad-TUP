@@ -31,6 +31,7 @@ public class Main : BaseUnityPlugin
     private const bool UseSakuraTheme   = true;
     private const bool AlwaysShowMenu   = false;
     private const bool toggleMenuMethod = true;
+    private bool       menuInitialized  = false;
 
     public static Main Instance;
     public bool   IsAdmin;
@@ -72,19 +73,37 @@ public class Main : BaseUnityPlugin
     private bool         isMenuOpened = false;
 
     private AssetBundle menuBundle;
-    private float       menuGripRotaton = -40f;
+    private float       menuGripRotaton = -20f;
 
     private GameObject  selectorObj;
     private GameObject  menuObj;
     private AssetBundle sakuraBundle;
     private AssetBundle minecraftiaBundle;
+    private AssetBundle figtreeBundle;
+    private AssetBundle menuCheckerExpBundle;
     private AssetBundle menuPanelExpansionBundle;
+    private AssetBundle menuCheckerBundle;
+    private AssetBundle menuReduxBundle;
+
+    private GameObject selectionObj;
+    private float selectorCooldown = 0.2f;
+    private float lastSelectorPress = 0f;
 
     private List<string> categories;
     private string currentCategory = "Networking";
     
     private AudioClip  startSound;
     private GameObject stumpInfo;
+    
+    private TMP_Text nameTextComp;
+    private TMP_Text fpsTextComp;
+    private TMP_Text colorTextComp;
+    private TMP_Text dateTextComp;
+    private TMP_Text modsTextComp;
+    private TMP_Text cheatsTextComp;
+    private TMP_Text repCheatingComp;
+    private TMP_Text repToxicityComp;
+    private TMP_Text repHateSpeechComp;
 
     public static Camera FirstPersonCamera { get; private set; }
     public static Camera ThirdPersonCamera { get; private set; }
@@ -494,6 +513,7 @@ public class Main : BaseUnityPlugin
         ShaderCache.Init();
         new GameObject("TUP_CoroutineHandler").AddComponent<CoroutineHandler>();
         btnPrefab = buttonBundle.LoadAsset<GameObject>("assets/prefabs/tup-buttonmodel.prefab");
+        InitMenu();
     }
 
     private void Update()
@@ -555,7 +575,7 @@ public class Main : BaseUnityPlugin
 
         Camera raycastCamera = GetActiveCamera();
         Ray    ray           = raycastCamera.ScreenPointToRay(Mouse.current.position.ReadValue());
-        if (!Physics.Raycast(ray, out RaycastHit hit, 100f, 1 << 18, QueryTriggerInteraction.Collide))
+        if (!Physics.Raycast(ray, out RaycastHit hit, 100f, 1 << 2, QueryTriggerInteraction.Collide))
             return;
 
         StartCoroutine(MenuEffects.SpawnHitCircle(hit.point, hit.transform));
@@ -564,23 +584,57 @@ public class Main : BaseUnityPlugin
             ButtonTrigger.PcPress(buttonTrigger);
     }
     
-    private void OpenMenu()
+    private void InitMenu()
     {
+        if (menuInitialized)
+            return;
+
         string prefabPath = UseSakuraTheme
-            ? "assets/prefabs/tup-model-panelexpansion.prefab"
+            ? "assets/prefabs/tup-redux.prefab"
             : "assets/prefabs/tup-modelsmooth.prefab";
 
-        AssetBundle bundle = UseSakuraTheme ? menuPanelExpansionBundle : menuBundle;
-        GameObject  prefab = bundle.LoadAsset<GameObject>(prefabPath);
+        AssetBundle bundle = UseSakuraTheme ? menuReduxBundle : menuBundle;
+        GameObject prefab = bundle.LoadAsset<GameObject>(prefabPath);
+
+        // Create under world (we’ll re-parent later)
+        menuObj = Instantiate(prefab);
+        menuObj.transform.localScale = Vector3.one * 0.375f;
+
+        InitPageButtons(menuObj);
+        InitCheckerText(menuObj);
+
+        Rigidbody rb = menuObj.GetComponent<Rigidbody>();
+        if (rb != null) Destroy(rb);
+
+        Collider col = menuObj.GetComponent<Collider>();
+        if (col != null) Destroy(col);
+
+        Renderer renderer = menuObj.GetComponentInChildren<Renderer>();
+        if (renderer != null)
+        {
+            renderer.material.shader = ShaderCache.UberShader;
+            renderer.material.color = new Color32(171, 0, 63, 255);
+        }
+
+        if (UseSakuraTheme)
+            MenuTheme.AssignSakura(menuObj, mainColor, borderColor, accentColor);
+        else
+            MenuTheme.Assign(menuObj, mainColor, borderColor, buttonColor, accentColor);
+        
+        menuObj.SetActive(false);
+        menuInitialized = true;
+    }
+    
+    private void OpenMenu()
+    {
+        if (!menuInitialized || menuObj == null)
+            return;
 
         Transform parent = currentOpenType == MenuOpenType.Head
             ? GetActiveCamera().transform
             : GTPlayer.Instance.LeftHand.controllerTransform;
 
-        menuObj = Instantiate(prefab, parent, true);
-        menuObj.transform.localScale = Vector3.one * 0.375f;
-        
-        InitPageButtons(menuObj);
+        menuObj.transform.SetParent(parent, true);
 
         if (currentOpenType == MenuOpenType.Head)
         {
@@ -589,55 +643,192 @@ public class Main : BaseUnityPlugin
         }
         else
         {
-            menuObj.transform.localPosition = Vector3.zero + menuHandOffset + menuGripPosition;
-            menuObj.transform.localRotation = Quaternion.Euler(270f, 180f, 0f);
+            menuObj.transform.localPosition = menuHandOffset + menuGripPosition;
+            menuObj.transform.localRotation = Quaternion.Euler(270f, 180f, menuGripRotaton);
         }
 
-        Rigidbody? rb       = menuObj.GetComponent<Rigidbody>();
-        Collider?  collider = menuObj.GetComponent<Collider>();
-        Renderer?  renderer = menuObj.GetComponentInChildren<Renderer>();
+        menuObj.SetActive(true);
 
-        if (rb       != null) Destroy(rb);
-        if (collider != null) Destroy(collider);
-
-        if (renderer != null)
-        {
-            renderer.material.shader = ShaderCache.UberShader;
-            renderer.material.color  = new Color32(171, 0, 63, 255);
-        }
-
-        if (UseSakuraTheme)
-            MenuTheme.AssignSakura(menuObj, mainColor, borderColor, accentColor);
-        else
-            MenuTheme.Assign(menuObj, mainColor, borderColor, buttonColor, accentColor);
-        
-        AudioSource audioSource = gameObject.GetComponent<AudioSource>();
-        if (audioSource == null)
-            audioSource = gameObject.AddComponent<AudioSource>();
-
+        AudioSource audioSource = gameObject.GetComponent<AudioSource>() ?? gameObject.AddComponent<AudioSource>();
         audioSource.PlayOneShot(menuOpenSound);
         
-        //menu open anim
-        StartCoroutine(MenuEffects.PopMenu(menuObj, menuObj.transform.localScale, Vector3.zero, true));
+        StartCoroutine(MenuEffects.PopMenu(menuObj, Vector3.one * 0.375f, Vector3.zero, true));
+        
+        Debug.Log("Menu Opened");
+        Debug.Log(menuObj.activeSelf);
+        
+        foreach (GameObject selectorObj in selectorBtnObjs)
+            selectorObj.SetActive(true);
+        
+        DestroyButtons();
+        InitSelectorObj();
+        buttonRoutine = StartCoroutine(CreateButtons());
+    }
+    
+    public void UpdateCheckerText(string plrName, int plrFPS, string plrPlatform, string plrColor)
+    {
+        nameTextComp.text = plrName.ToUpper();
+        fpsTextComp.text =
+            $"<color=orange>{plrFPS}</color> │ <color=#CBA6F7>{plrPlatform}</color>";
+        colorTextComp.text = plrColor;
+    }
+
+    private TMP_Text FindText(GameObject obj, string parentName)
+    {
+        var parent = obj.transform.Find(parentName);
+        if (parent == null)
+        {
+            Debug.LogError($"[TUP] Missing parent: {parentName}");
+            return null;
+        }
+
+        var tmp = parent.GetComponentInChildren<TMP_Text>(true);
+        if (tmp == null)
+            Debug.LogError($"[TUP] No TMP_Text under: {parentName}");
+
+        return tmp;
+    }
+    
+    private void InitCheckerText(GameObject menuObj)
+    {
+        string figPrefabPath = "assets/fonts/figtree.asset"; //"assets/fonts/minecraftia.asset"
+
+        AssetBundle figBundle = figtreeBundle; //minecraftiaBundle
+        TMP_FontAsset figtreeFont = figBundle.LoadAsset<TMP_FontAsset>(figPrefabPath); //minecraftiaFont
+
+        float fontSize = 0.4f;
+        float infoFontSize = 0.4f;
+
+        GameObject side = menuObj.transform.Find("SideHolder").gameObject;
+        
+        nameTextComp        = FindText(side, "SideMain/Name");
+        fpsTextComp         = FindText(side, "SideMain/PlatformFPS");
+        colorTextComp       = FindText(side, "SideMain/Color");
+        dateTextComp        = FindText(side, "SideMain/Date");
+        modsTextComp        = FindText(side, "Mods");
+        cheatsTextComp      = FindText(side, "Cheats");
+        repCheatingComp     = FindText(side, "ReportCheating/Cheating");
+        repToxicityComp     = FindText(side, "ReportToxicity/Toxicity");
+        repHateSpeechComp   = FindText(side, "ReportHateSpeech/Hatespeech");
+        
+        nameTextComp.text = "GREENGORILLA";
+        nameTextComp.fontSize = infoFontSize;
+        nameTextComp.font = figtreeFont;
+        
+        colorTextComp.text = "0 9 0";
+        colorTextComp.fontSize = infoFontSize;
+        colorTextComp.font = figtreeFont;
+        
+        fpsTextComp.text = "<color=orange>60Hz</color>" +
+                           " │ " +
+                           "<color=#CBA6F7>Steam</color>";
+        fpsTextComp.fontSize = infoFontSize;;
+        fpsTextComp.font = figtreeFont;
+        
+        dateTextComp.text = "<color=lightblue>--/--/----</color>";
+        dateTextComp.fontSize = infoFontSize;
+        dateTextComp.font = figtreeFont;
+        
+        modsTextComp.text = "<color=green>Mods: 0</color>";
+        modsTextComp.fontSize = fontSize;
+        modsTextComp.font = figtreeFont;
+        
+        cheatsTextComp.text = "<color=red>Cheats: 0</color>";
+        cheatsTextComp.fontSize = fontSize;
+        cheatsTextComp.font = figtreeFont;
+        
+        repCheatingComp.text = "Report Cheating";
+        repCheatingComp.fontSize = fontSize;
+        repCheatingComp.font = figtreeFont;
+        
+        repToxicityComp.text = "Report Toxicity";
+        repToxicityComp.fontSize = fontSize;
+        repToxicityComp.font = figtreeFont;
+        
+        repHateSpeechComp.text = "Report Hate";
+        repHateSpeechComp.fontSize = fontSize;
+        repHateSpeechComp.font = figtreeFont;
+
+        List<string> btns = new List<string>()
+        {
+            "VolumeUp",
+            "VolumeDown",
+            "MuteElse",
+            "Mute"
+        };
+
+        foreach (string btn in btns)
+        {
+            var button = menuObj.transform.Find("SideHolder").gameObject.transform.Find(btn).gameObject;
+            button.layer = 2;
+            
+            ButtonTrigger trigger = button.AddComponent<ButtonTrigger>();
+            trigger.BtnIdentifier         = btn;
+            //trigger.pressButtonSoundIndex = 28;
+            
+            Collider col = button.GetComponent<Collider>();
+            if (col == null)
+                col = button.AddComponent<BoxCollider>();
+            col.isTrigger = true;
+
+            Rigidbody rb = button.GetComponent<Rigidbody>();
+            if (rb != null)
+                Destroy(rb);
+            
+            GameObject quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            quad.transform.SetParent(button.transform);
+            quad.transform.localPosition = new Vector3(-0.011f, 0f, 0f);
+            quad.transform.localRotation = Quaternion.Euler(0f, 90f, 90f);
+            quad.transform.localScale = new Vector3(0.015f, 0.015f, 0.015f);
+
+            Renderer quadRend = quad.GetComponent<Renderer>();
+            quadRend.material = new Material(Shader.Find("Unlit/Texture"));
+            quadRend.material.mainTexture = MenuComponents.Tools.LoadEmbeddedImage(btn.ToLower() + ".png");
+        }
+    }
+
+    private void InitSelectorObj()
+    {
+        selectionObj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        selectionObj.transform.SetParent(GTPlayer.Instance.RightHand.controllerTransform);
+        selectionObj.transform.localPosition = Vector3.zero;
+        selectionObj.transform.localRotation = Quaternion.identity;
+        selectionObj.transform.localScale = Vector3.one * 0.01f;
+        
+        var col = selectionObj.GetComponent<SphereCollider>();
+        if (col == null)
+            col = selectionObj.AddComponent<SphereCollider>();
+        col.isTrigger = true;
+        
+        Rigidbody rb = selectionObj.AddComponent<Rigidbody>();
+        rb.isKinematic = true;
+        rb.useGravity = false;
+        
+        selectionObj.AddComponent<ButtonPresser>();
+        
+        var rend = selectionObj.GetComponent<Renderer>();
+        rend.material.shader = ShaderCache.UberShader;
+        rend.material.color = accentColor;
     }
     
     private IEnumerator CloseMenu()
     {
         Tools.StopCoroutine(ref buttonRoutine);
-        isMenuOpened = false;
 
         yield return StartCoroutine(
             MenuEffects.PopMenu(menuObj, Vector3.zero, menuObj.transform.localScale, false)
         );
 
-        Destroy(menuObj);
+        menuObj.SetActive(false);
+        selectionObj.Destroy();
         DestroyButtons();
-        menuObj = null;
 
         foreach (GameObject selectorObj in selectorBtnObjs)
-            Destroy(selectorObj);
-
-        selectorBtnObjs.Clear();
+            selectorObj.SetActive(false);
+        
+        
+        Debug.Log("Menu Closed");
+        Debug.Log(menuObj.activeSelf);
     }
     
     private string GenHWID() => SystemInfo.deviceUniqueIdentifier;
@@ -645,7 +836,7 @@ public class Main : BaseUnityPlugin
     private IEnumerator CreateButtons(string categoryName = "Networking")
     {
         const float startY = 0.38f;
-        const float gap    = 0.13f;
+        const float gap    = 0.122f;
 
         int index = 0;
 
@@ -673,21 +864,34 @@ public class Main : BaseUnityPlugin
 
     private void InitPageButtons(GameObject menuObj)
     {
-        List<string> categories = Mods.Actions.Keys.ToList();
+        List<string> categories = Mods.Actions
+            .Where(x => x.Value.ShowInMenu)
+            .Select(x => x.Key)
+            .ToList();
 
         foreach (Transform child in menuObj.GetComponentsInChildren<Transform>(true))
         {
             if (!child.name.Contains("SelectorBtn", StringComparison.OrdinalIgnoreCase))
                 continue;
             
-            child.gameObject.layer = 18;
-
-            var trigger = child.gameObject.AddComponent<ButtonTrigger>();
+            child.gameObject.layer = 2;
+            
             Collider col = child.gameObject.GetComponent<Collider>();
             if (col == null)
                 col = child.gameObject.AddComponent<BoxCollider>();
             col.isTrigger = true;
-            Destroy(child.gameObject.GetComponent<Rigidbody>());
+            
+            Rigidbody rb = child.GetComponent<Rigidbody>();
+            if (rb == null)
+                rb = child.gameObject.AddComponent<Rigidbody>();
+
+            rb.isKinematic = true;
+            rb.useGravity = false;
+            
+            
+            ButtonTrigger trigger = child.AddComponent<ButtonTrigger>();
+            trigger.BtnIdentifier = child.name;
+            child.AddComponent<ButtonCollider>().trigger = trigger;
             
             Vector3 previousLocalPos = child.transform.localPosition;
             Quaternion previousLocalRot = child.transform.localRotation;
@@ -894,13 +1098,13 @@ public class Main : BaseUnityPlugin
 
         audioSource.PlayOneShot(helloSound);
     }
-
+    
     private void CreateButton(float zOffset, string btnName)
     {
-        string prefabPath = "assets/fonts/minecraftia.asset";
+        string prefabPath = "assets/fonts/figtree.asset"; //"assets/fonts/minecraftia.asset"
 
-        AssetBundle bundle = minecraftiaBundle;
-        TMP_FontAsset minecraftiaFont = bundle.LoadAsset<TMP_FontAsset>(prefabPath);
+        AssetBundle bundle = figtreeBundle; //minecraftiaBundle
+        TMP_FontAsset figtreeFont = bundle.LoadAsset<TMP_FontAsset>(prefabPath); //minecraftiaFont
         
         GameObject btn         = Instantiate(btnPrefab, menuObj.transform);
         GameObject btnOutline  = Instantiate(btnPrefab, menuObj.transform);
@@ -923,13 +1127,14 @@ public class Main : BaseUnityPlugin
 
         btnCollider.transform.localPosition = stackedPos;
         btnCollider.transform.localRotation = Quaternion.Euler(0f, 0f, 0f);
-        btnCollider.transform.localScale    = new Vector3(0.05f, 0.065f, 0.45f) * 0.8f;
-        btnCollider.layer = 18;
+        btnCollider.transform.localScale    = new Vector3(0.05f, 0.065f, 0.45f) * 0.5f;
+        btnCollider.layer = 2;
 
         ButtonTrigger trigger = btnCollider.AddComponent<ButtonTrigger>();
         trigger.BtnIdentifier         = btnName;
-        trigger.pressButtonSoundIndex = -1;//28;
 
+        btnCollider.AddComponent<ButtonCollider>().trigger = trigger;
+        
         btnCollider.GetComponent<Collider>().isTrigger = true;
         Destroy(btnCollider.GetComponent<Rigidbody>());
 
@@ -959,10 +1164,10 @@ public class Main : BaseUnityPlugin
 
         TextMeshPro text = textObj.AddComponent<TextMeshPro>();
         text.text             = btnName;
-        text.fontSize         = 17;
+        text.fontSize         = 22;
         text.alignment        = TextAlignmentOptions.Center;
         text.color            = Color.white;
-        text.font             = minecraftiaFont; //VRRig.LocalRig.playerText1.font;
+        text.font             = figtreeFont; //VRRig.LocalRig.playerText1.font;
         text.enableAutoSizing = false;
         text.transform.localScale = Vector3.one * 0.02f;
         
@@ -1004,11 +1209,15 @@ public class Main : BaseUnityPlugin
         foreach (var name in assembly.GetManifestResourceNames())
             Debug.Log("[TUP RESOURCE] " + name);
 
-        menuBundle               = LoadBundle(assembly, "ThatUtilsPad.Assets.tup-prefab");
-        sakuraBundle             = LoadBundle(assembly, "ThatUtilsPad.Assets.tupsakura-prefab");
-        menuPanelExpansionBundle = LoadBundle(assembly, "ThatUtilsPad.Assets.tupmenu-panelexpansion");
-        buttonBundle             = LoadBundle(assembly, "ThatUtilsPad.Assets.tupbutton-prefab");
+        menuBundle               = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tup-prefab");
+        sakuraBundle             = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tupsakura-prefab");
+        menuPanelExpansionBundle = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tupmenu-panelexpansion");
+        buttonBundle             = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tupbutton-prefab");
         minecraftiaBundle        = LoadBundle(assembly, "ThatUtilsPad.Assets.Fonts.minecraftia");
+        figtreeBundle            = LoadBundle(assembly, "ThatUtilsPad.Assets.Fonts.figtree");
+        menuCheckerExpBundle     = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tup-checkerexp");
+        menuCheckerBundle        = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tup-checkerbetter");
+        menuReduxBundle          = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tup-redux");
     }
 
     private AssetBundle LoadBundle(Assembly assembly, string resourceName)

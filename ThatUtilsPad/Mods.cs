@@ -5,7 +5,9 @@ using System.Reflection;
 using GorillaLocomotion;
 using GorillaNetworking;
 using Photon.Pun;
+using UnityEngine.XR;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using Object = UnityEngine.Object;
 
 namespace ThatUtilsPad;
@@ -14,10 +16,12 @@ public class ModCategory
 {
     public string ImageName;
     public Dictionary<string, Action> Actions;
+    public bool ShowInMenu;
 
-    public ModCategory(string imageName)
+    public ModCategory(string imageName, bool showInMenu = true)
     {
         ImageName = imageName;
+        ShowInMenu = showInMenu;
         Actions = new Dictionary<string, Action>();
     }
 }
@@ -31,8 +35,16 @@ public static class Mods
     
     private static bool        checkerEnabled;
     private static GameObject? checkerLine;
+    private static GameObject? checkerSphere;
     private static VRRig?      lastTargetRig;
     private static bool        isMutingAll;
+    
+    private static Vector3 currentBeamEnd;
+    private static Vector3 beamVelocity;
+
+    private static VRRig snappedRig;
+    private static VRRig selectedRig;
+    private const float SNAP_RADIUS = 0.25f;
     
     public static bool TryGetAction(string identifier, out Action? action)
     {
@@ -59,6 +71,9 @@ public static class Mods
                         { "Disconnect", Disconnect },
                         { "Join Random", JoinRandom },
                         { "Lobby Hop", LobbyHop },
+                        { "Placeholder", Disconnect },
+                        { "Placeholder2", JoinRandom },
+                        { "Placeholder3", LobbyHop },
                     }
                 }
             },
@@ -78,22 +93,23 @@ public static class Mods
                 {
                     Actions =
                     {
-                        { "Rotate Outfit", RotateOutfits },
+                        //{ "Rotate Outfit", RotateOutfits },
                     }
                 }
             },
             {
-                "Placeholder-4",
-                new ModCategory("trevis-placeholder.png")
+                "SelectUser",
+                new ModCategory("selectuser.png")
                 {
                     Actions =
                     {
+                        { "Select User", ToggleChecker },
                     }
                 }
             },
             {
-                "Placeholder-5",
-                new ModCategory("trevis-placeholder.png")
+                "Settings",
+                new ModCategory("settings.png")
                 {
                     Actions =
                     {
@@ -117,26 +133,168 @@ public static class Mods
                     {
                     }
                 }
+            },
+            {
+                "Placeholder-8",
+                new ModCategory("trevis-placeholder.png")
+                {
+                    Actions =
+                    {
+                    }
+                }
+            },
+            {
+                "Placeholder-9",
+                new ModCategory("trevis-placeholder.png")
+                {
+                    Actions =
+                    {
+                    }
+                }
+            },
+            {
+                "Placeholder-10",
+                new ModCategory("trevis-placeholder.png")
+                {
+                    Actions =
+                    {
+                    }
+                }
+            },
+            {
+                "Placeholder-11",
+                new ModCategory("trevis-placeholder.png")
+                {
+                    Actions =
+                    {
+                    }
+                }
+            },
+            {
+                "Placeholder-12",
+                new ModCategory("trevis-placeholder.png")
+                {
+                    Actions =
+                    {
+                    }
+                }
+            },
+            {
+                "Placeholder-13",
+                new ModCategory("trevis-placeholder.png")
+                {
+                    Actions =
+                    {
+                    }
+                }
+            },
+            {
+                "Placeholder-14",
+                new ModCategory("trevis-placeholder.png")
+                {
+                    Actions =
+                    {
+                    }
+                }
+            },
+            
+            
+            //Checker (hidden)
+            {
+                "ModChecker",
+                new ModCategory("trevis-placeholder.png", false)
+                {
+                    Actions =
+                    {
+                        { "VolumeUp", VolumeUp },
+                        { "VolumeDown", VolumeDown },
+                        { "Mute", Mute },
+                        { "MuteElse", MuteElse },
+                    }
+                }
             }
         };
     }
 
+    private static void VolumeUp()
+    {
+        Debug.Log("VolumeUp");
+    }
+    
+    private static void VolumeDown()
+    {
+        Debug.Log("VolumeDown");
+    }
+    
+    private static void Mute()
+    {
+        Debug.Log("Mute");
+    }
+    
+    private static void MuteElse()
+    {
+        Debug.Log("MuteElse");
+    }
+    
+    
+    private static bool SnapHeld()
+    {
+        if (XRSettings.isDeviceActive)
+            return ControllerInputPoller.instance.rightControllerGripFloat > 0.75f;
+
+        return Mouse.current != null && Mouse.current.rightButton.isPressed;
+    }
+
+    private static bool SelectPressed()
+    {
+        if (XRSettings.isDeviceActive)
+            return ControllerInputPoller.instance.rightControllerIndexFloat > 0.75f;
+
+        return Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame;
+    }
+    
+    
+    private static Coroutine? checkerCoroutine;
+    private static IEnumerator CheckerLoop()
+    {
+        while (checkerEnabled)
+        {
+            UpdateChecker();
+            yield return null;
+        }
+        if (checkerLine != null)
+        {
+            Object.Destroy(checkerLine);
+            checkerLine = null;
+        }
+        if (checkerSphere != null)
+        {
+            Object.Destroy(checkerSphere);
+            checkerSphere = null;
+        }
+        if (lastTargetRig != null)
+        {
+            //ResetRigMaterial(lastTargetRig);
+            lastTargetRig = null;
+        }
+        checkerCoroutine = null;
+    }
+    
     private static void ToggleChecker()
     {
         checkerEnabled = !checkerEnabled;
         Debug.Log($"[TUP] Checker: {(checkerEnabled ? "ON" : "OFF")}");
 
-        if (checkerEnabled || checkerLine == null)
-            return;
-
-        Object.Destroy(checkerLine);
-        checkerLine = null;
-
-        if (lastTargetRig == null)
-            return;
-
-        ResetRigMaterial(lastTargetRig);
-        lastTargetRig = null;
+        if (checkerEnabled)
+        {
+            if (checkerCoroutine == null)
+                checkerCoroutine = CoroutineHandler.Instance.StartCoroutine(CheckerLoop());
+        }
+        else
+        {
+            // Coroutine will automatically exit on next frame
+            // Cleanup handled in CheckerLoop
+        }
     }
 
     private static void CopyRoomCode()
@@ -153,86 +311,241 @@ public static class Mods
         }
     }
 
-    public static void UpdateChecker()
+    private static int? noInvisLayerMask;
+    public static int NoInvisLayerMask()
     {
-        if (!checkerEnabled)
+        noInvisLayerMask ??= ~(
+            1 << LayerMask.NameToLayer("TransparentFX") |
+            1 << LayerMask.NameToLayer("Ignore Raycast") | 
+            1 << LayerMask.NameToLayer("Zone") |
+            1 << LayerMask.NameToLayer("Gorilla Trigger") |
+            1 << LayerMask.NameToLayer("Gorilla Boundary") |
+            1 << LayerMask.NameToLayer("GorillaCosmetics") |
+            1 << LayerMask.NameToLayer("GorillaParticle"));
+
+        return noInvisLayerMask ?? GTPlayer.Instance.locomotionEnabledLayers;
+    }
+    
+    private static bool IsRigValid(VRRig rig)
+    {
+        return rig != null && rig.gameObject != null;
+    }
+    
+public static void UpdateChecker()
+{
+    if (!checkerEnabled)
+        return;
+
+    Vector3 startPos;
+    Vector3 forward;
+    Ray ray;
+
+    bool snapHeld;
+    bool selectPressed;
+
+    // VR / PC input
+    if (XRSettings.isDeviceActive)
+    {
+        snapHeld = ControllerInputPoller.instance.rightControllerGripFloat > 0.75f;
+        selectPressed = ControllerInputPoller.instance.rightControllerIndexFloat > 0.75f;
+    }
+    else
+    {
+        snapHeld = Mouse.current != null && Mouse.current.rightButton.isPressed;
+        selectPressed = Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame;
+    }
+
+    // ray origin
+    if (XRSettings.isDeviceActive)
+    {
+        startPos = GTPlayer.Instance.RightHand.controllerTransform.position +
+                   GTPlayer.Instance.RightHand.controllerTransform.rotation *
+                   GTPlayer.Instance.RightHand.handOffset;
+
+        Quaternion handRot =
+            GTPlayer.Instance.RightHand.controllerTransform.rotation *
+            GTPlayer.Instance.RightHand.handRotOffset;
+
+        forward = handRot * Vector3.forward;
+        ray = new Ray(startPos, forward);
+    }
+    else
+    {
+        Camera cam = Camera.main;
+        if (cam == null || Mouse.current == null)
             return;
 
-        Vector3 startPos = GTPlayer.Instance.RightHand.controllerTransform.position +
-                           GTPlayer.Instance.RightHand.controllerTransform.rotation *
-                           GTPlayer.Instance.RightHand.handOffset;
+        ray = cam.ScreenPointToRay(Mouse.current.position.ReadValue());
 
-        Quaternion handRot = GTPlayer.Instance.RightHand.controllerTransform.rotation *
-                             GTPlayer.Instance.RightHand.handRotOffset;
+        Vector3 bodyBottom =
+            GTPlayer.Instance.bodyCollider.transform.position - Vector3.up * 0.25f;
 
-        Vector3 forward = handRot * Vector3.forward;
+        startPos = bodyBottom;
+        forward = ray.direction;
+    }
 
-        if (checkerLine == null)
-            checkerLine = new GameObject("CheckerLine");
+    // --- VALIDATION (prevents softlock) ---
+    if (snappedRig != null && (snappedRig.gameObject == null))
+        snappedRig = null;
 
-        LineRenderer line = checkerLine.GetComponent<LineRenderer>();
-        if (line == null)
+    if (selectedRig != null && (selectedRig.gameObject == null))
+        selectedRig = null;
+
+    // line renderer setup
+    if (checkerLine == null)
+        checkerLine = new GameObject("CheckerLine");
+
+    LineRenderer line = checkerLine.GetComponent<LineRenderer>();
+    if (line == null)
+    {
+        line = checkerLine.AddComponent<LineRenderer>();
+        line.material = new Material(ShaderCache.TextShader);
+        line.startWidth = 0.0065f;
+        line.endWidth = 0.0045f;
+        line.positionCount = 2;
+        line.startColor = new Color32(161, 98, 237, 255);
+        line.endColor = new Color32(203, 166, 247, 255);
+    }
+
+    // raycast
+    RaycastHit[] hits = Physics.RaycastAll(ray, 512f, NoInvisLayerMask());
+
+    float minDistance = float.MaxValue;
+    VRRig targetRig = null;
+
+    RaycastHit firstHit = default;
+    bool firstHitFound = false;
+
+    foreach (RaycastHit h in hits)
+    {
+        if (!firstHitFound || h.distance < firstHit.distance)
         {
-            line               = checkerLine.AddComponent<LineRenderer>();
-            line.material      = new Material(ShaderCache.TextShader);
-            line.startWidth    = 0.01f;
-            line.endWidth      = 0.01f;
-            line.positionCount = 2;
-            line.startColor    = Color.cyan;
-            line.endColor      = Color.cyan;
+            firstHit = h;
+            firstHitFound = true;
         }
 
-        Ray ray = new(startPos, forward);
-        RaycastHit[] hits = Physics.RaycastAll(ray, 100f);
+        VRRig rig = h.collider.GetComponentInParent<VRRig>();
+        if (rig == null || rig.isOfflineVRRig)
+            continue;
 
-        RaycastHit closestHit  = default;
-        float      minDistance = float.MaxValue;
-        VRRig      targetRig   = null;
-
-        foreach (RaycastHit h in hits)
+        if (h.distance < minDistance)
         {
-            VRRig rig = h.collider.GetComponentInParent<VRRig>();
-
-            if (rig == null || rig.isOfflineVRRig)
-                continue;
-
-            if (!(h.distance < minDistance))
-                continue;
-
             minDistance = h.distance;
-            closestHit  = h;
-            targetRig   = rig;
-        }
-
-        Vector3 endPos;
-
-        if (targetRig != null)
-            endPos = closestHit.point;
-        else
-            endPos = startPos + forward * 100f;
-
-        line.SetPosition(0, startPos);
-        line.SetPosition(1, endPos);
-
-        if (targetRig != null && !targetRig.isLocal)
-        {
-            if (lastTargetRig != null && lastTargetRig != targetRig)
-                ResetRigMaterial(lastTargetRig);
-
-            if (lastTargetRig == targetRig)
-                return;
-
-            HighlightRig(targetRig);
-            ShowPlayerInfo(targetRig);
-            lastTargetRig = targetRig;
-        }
-        else if (lastTargetRig != null)
-        {
-            ResetRigMaterial(lastTargetRig);
-            lastTargetRig = null;
+            targetRig = rig;
         }
     }
 
+    Vector3 endPos = firstHitFound
+        ? firstHit.point
+        : startPos + forward * 100f;
+
+    // snapping
+    if (snapHeld)
+    {
+        if (snappedRig == null && targetRig != null && !targetRig.isLocal)
+        {
+            snappedRig = targetRig;
+        }
+
+        if (snappedRig != null)
+        {
+            Transform head =
+                snappedRig.headMesh != null
+                    ? snappedRig.headMesh.transform
+                    : snappedRig.transform;
+
+            endPos = head.position;
+
+            // select player (one frame trigger)
+            if (selectPressed)
+            {
+                selectedRig = snappedRig;
+                ShowPlayerInfo(snappedRig);
+            }
+        }
+    }
+    else
+    {
+        snappedRig = null;
+    }
+
+
+    if (selectedRig != null && selectedRig.gameObject != null && !selectedRig.isOfflineVRRig)
+    {
+        string name  = selectedRig.playerNameVisible;
+        Color  color = selectedRig.playerColor;
+        
+        int fps = RigHelper.GetFPS(selectedRig);
+        string platform = "Unknown";
+        try
+        {
+            platform = GetPlatform(selectedRig);
+        }
+        catch
+        {
+            platform = "Unknown";
+        }
+
+        string colorStr =
+            $"RGB({Mathf.RoundToInt(color.r * 9)}, {Mathf.RoundToInt(color.g * 9)}, {Mathf.RoundToInt(color.b * 9)})";
+
+        ThatUtilsPad.Main.Instance.UpdateCheckerText(name, fps, platform, colorStr);
+    }
+    else
+    {
+        selectedRig = null;
+    }
+
+    // beam smoothing
+    if (currentBeamEnd == Vector3.zero)
+        currentBeamEnd = endPos;
+
+    currentBeamEnd = Vector3.Lerp(currentBeamEnd, endPos, 15f * Time.deltaTime);
+
+    line.SetPosition(0, startPos);
+    line.SetPosition(1, currentBeamEnd);
+
+    // sphere
+    if (checkerSphere == null)
+    {
+        checkerSphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        checkerSphere.transform.localScale = Vector3.one * 0.02f;
+
+        var collider = checkerSphere.GetComponent<Collider>();
+        if (collider != null)
+            Object.Destroy(collider);
+
+        var rend = checkerSphere.GetComponent<Renderer>();
+        if (rend != null)
+        {
+            rend.material.shader = ShaderCache.TextShader;
+            rend.material.color = new Color32(203, 166, 247, 255);
+        }
+    }
+
+    checkerSphere.transform.position = currentBeamEnd;
+
+    // target tracking (unchanged)
+    if (targetRig != null && !targetRig.isLocal)
+    {
+        if (lastTargetRig != null && lastTargetRig != targetRig)
+        {
+            //ResetRigMaterial(lastTargetRig);
+        }
+
+        if (lastTargetRig != targetRig)
+        {
+            //HighlightRig(targetRig);
+            lastTargetRig = targetRig;
+        }
+    }
+    else if (lastTargetRig != null)
+    {
+        //ResetRigMaterial(lastTargetRig);
+        lastTargetRig = null;
+    }
+}
+    
     private static void HighlightRig(VRRig rig)
     {
         SkinnedMeshRenderer? renderer = rig.mainSkin;
@@ -241,7 +554,7 @@ public static class Mods
             return;
 
         renderer.material.shader = ShaderCache.TextShader;
-        renderer.material.color  = Color.cyan;
+        renderer.material.color= new Color32(203, 166, 247, 255);
     }
 
     private static void ResetRigMaterial(VRRig rig)
@@ -260,12 +573,36 @@ public static class Mods
     {
         string name  = rig.playerNameVisible;
         Color  color = rig.playerColor;
-        string colorStr =
-                $"RGB({Mathf.RoundToInt(color.r * 9)}, {Mathf.RoundToInt(color.g * 9)}, {Mathf.RoundToInt(color.b * 9)})";
+        int fps = RigHelper.GetFPS(rig);
+        string platform = GetPlatform(rig);
 
-        Debug.Log($"[TUP CHECKER]\nName: {name}\nColor: {colorStr}");
+        string colorStr =
+            $"RGB({Mathf.RoundToInt(color.r * 9)}, {Mathf.RoundToInt(color.g * 9)}, {Mathf.RoundToInt(color.b * 9)})";
+
+        Debug.Log($"[TUP CHECKER]\nName: {name}\nColor: {colorStr}\nFPS: {fps}\nPlatform: {platform}");
     }
 
+    public static string GetPlatform(VRRig rig)
+    {
+        int likelySteam = 0;
+        int likelyPC = 0;
+        int likelyQuest = 0;
+
+        if (CosmeticSystemHelper.IsTemporaryCosmeticAllowed(rig, "S. FIRST LOGIN"))
+            likelySteam++;
+
+        if (CosmeticSystemHelper.IsTemporaryCosmeticAllowed(rig, "FIRST LOGIN"))
+            likelyPC++;
+
+        if (rig.Creator.GetPlayerRef().CustomProperties.Count >= 2)
+            likelyPC++;
+
+        if (likelySteam > likelyPC && likelySteam > likelyQuest) return "Steam";
+        if (likelyPC > likelySteam && likelyPC > likelyQuest) return "PC";
+
+        return "Standalone";
+    }
+    
     private static void JoinRandom()
     {
         if (PhotonNetwork.InRoom)
@@ -320,39 +657,83 @@ public static class Mods
         JoinRandom();
     }
 
-    private static void RotateOutfits()
+    //private static void RotateOutfits()
+    //{
+    //    CosmeticsController controller = CosmeticsController.instance;
+    //    if (controller == null)
+    //    {
+    //        Debug.Log("[TUP] CosmeticsController not found");
+    //        return;
+    //    }
+    //
+    //    FieldInfo configField = typeof(CosmeticsController).GetField("outfitSystemConfig", 
+    //       BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+    //   FieldInfo selectedField = typeof(CosmeticsController).GetField("selectedOutfit", 
+    //       BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+    //
+    //  if (configField == null || selectedField == null)
+    //  {
+    //      Debug.Log("[TUP] Could not find outfit fields");
+    //      return;
+    //  }
+
+    //  var config = (CosmeticOutfitSystemConfig)configField.GetValue(controller);
+    //   int currentSelected = (int)selectedField.GetValue(controller);
+
+    //   if (config == null)
+    //  {
+    //      Debug.Log("[TUP] Outfit config not found");
+    //      return;
+    //    }
+    //
+    //   int nextOutfit = (currentSelected + 1) % config.maxOutfits;
+    //   controller.LoadSavedOutfit(nextOutfit);
+    //
+    //    Debug.Log($"[TUP] Swapped to Outfit Slot: {nextOutfit + 1}");
+    //}
+}
+
+public static class CosmeticSystemHelper
+{
+    private static MethodInfo isTempCosmeticAllowed;
+
+    static CosmeticSystemHelper()
     {
-        CosmeticsController controller = CosmeticsController.instance;
-        if (controller == null)
-        {
-            Debug.Log("[TUP] CosmeticsController not found");
-            return;
-        }
+        Assembly assembly = typeof(VRRig).Assembly;
+        Type cosmeticsType = assembly.GetType("PlayerCosmeticsSystem");
+        
+        isTempCosmeticAllowed = cosmeticsType.GetMethod(
+            "IsTemporaryCosmeticAllowed",
+            BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic
+        );
+    }
 
-        FieldInfo configField = typeof(CosmeticsController).GetField("outfitSystemConfig", 
-            BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
-        FieldInfo selectedField = typeof(CosmeticsController).GetField("selectedOutfit", 
-            BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+    public static bool IsTemporaryCosmeticAllowed(VRRig rig, string cosmetic)
+    {
+        if (isTempCosmeticAllowed == null) return false;
 
-        if (configField == null || selectedField == null)
-        {
-            Debug.Log("[TUP] Could not find outfit fields");
-            return;
-        }
+        object result = isTempCosmeticAllowed.Invoke(null, new object[] { rig, cosmetic });
+        return (bool)result;
+    }
+}
 
-        var config = (CosmeticOutfitSystemConfig)configField.GetValue(controller);
-        int currentSelected = (int)selectedField.GetValue(controller);
+public static class RigHelper
+{
+    private static FieldInfo fpsField;
 
-        if (config == null)
-        {
-            Debug.Log("[TUP] Outfit config not found");
-            return;
-        }
+    static RigHelper()
+    {
+        fpsField = typeof(VRRig).GetField(
+            "fps",
+            BindingFlags.Instance | BindingFlags.NonPublic
+        );
+    }
 
-        int nextOutfit = (currentSelected + 1) % config.maxOutfits;
-        controller.LoadSavedOutfit(nextOutfit);
+    public static int GetFPS(VRRig rig)
+    {
+        if (fpsField == null) return -1;
 
-        Debug.Log($"[TUP] Swapped to Outfit Slot: {nextOutfit + 1}");
+        return (int)fpsField.GetValue(rig);
     }
 }
 
