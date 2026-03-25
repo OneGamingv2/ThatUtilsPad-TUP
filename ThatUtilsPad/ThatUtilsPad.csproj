@@ -16,11 +16,6 @@
         <EmbeddedResource Include="Assets\Icons\roomIcon.png" />
         <EmbeddedResource Include="Assets\Icons\shirtIcon.png" />
         <EmbeddedResource Include="Assets\Icons\trevis-placeholder.png" />
-        <EmbeddedResource Include="Assets\Models\tup-checkerexp" />
-        <EmbeddedResource Include="Assets\Models\tup-prefab" />
-        <EmbeddedResource Include="Assets\Models\tupbutton-prefab" />
-        <EmbeddedResource Include="Assets\Models\tupmenu-panelexpansion" />
-        <EmbeddedResource Include="Assets\Models\tupsakura-prefab" />
         <EmbeddedResource Include="Assets\Sounds\hello.wav" />
         <EmbeddedResource Include="Assets\Sounds\tup_startup.wav" />
         <None Remove="Assets\tupmenu-panelexpansion" />
@@ -53,19 +48,18 @@
         <None Remove="Assets\Icons\mute.png" />
         <EmbeddedResource Include="Assets\Icons\mute.png" />
         <None Remove="Assets\Models\tup-checker" />
-        <EmbeddedResource Include="Assets\Models\tup-checker" />
         <None Remove="Assets\Models\tup-checkerfix" />
-        <EmbeddedResource Include="Assets\Models\tup-checkerfix" />
         <None Remove="Assets\Models\tup-checkerplus" />
-        <EmbeddedResource Include="Assets\Models\tup-checkerplus" />
         <None Remove="Assets\Models\tup-checkerbetter" />
-        <EmbeddedResource Include="Assets\Models\tup-checkerbetter" />
         <None Remove="Assets\Icons\selectuser.png" />
         <EmbeddedResource Include="Assets\Icons\selectuser.png" />
         <None Remove="Assets\Icons\settings.png" />
         <EmbeddedResource Include="Assets\Icons\settings.png" />
         <None Remove="Assets\Models\tup-redux" />
-        <EmbeddedResource Include="Assets\Models\tup-redux" />
+        <None Remove="Assets\Models\tup-reduxv2" />
+        <EmbeddedResource Include="Assets\Models\tup-reduxv2" />
+        <None Remove="Assets\Models\tupbutton-prefab" />
+        <EmbeddedResource Include="Assets\Models\tupbutton-prefab" />
     </ItemGroup>
 
     <ItemGroup>

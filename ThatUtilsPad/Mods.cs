@@ -1,14 +1,18 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using GorillaLocomotion;
 using GorillaNetworking;
 using Photon.Pun;
+using Photon.Realtime;
 using UnityEngine.XR;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using Object = UnityEngine.Object;
+using PlayFab;
+using PlayFab.ClientModels;
 
 namespace ThatUtilsPad;
 
@@ -371,7 +375,7 @@ public static void UpdateChecker()
     }
     else
     {
-        Camera cam = Camera.main;
+        Camera cam = Main.ThirdPersonCamera;
         if (cam == null || Mouse.current == null)
             return;
 
@@ -568,7 +572,7 @@ public static void UpdateChecker()
         if (renderer.material.name.Contains("gorilla_body"))
             renderer.material.color = rig.playerColor;
     }
-
+    
     private static void ShowPlayerInfo(VRRig rig)
     {
         string name  = rig.playerNameVisible;
@@ -581,24 +585,49 @@ public static void UpdateChecker()
 
         Debug.Log($"[TUP CHECKER]\nName: {name}\nColor: {colorStr}\nFPS: {fps}\nPlatform: {platform}");
     }
+    
+    private static FieldInfo rigSerializerField = typeof(VRRig).GetField(
+        "rigSerializer",
+        BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy
+    );
 
-    public static string GetPlatform(VRRig rig)
+    public static object GetRigSerializer(this VRRig rig)
     {
-        int likelySteam = 0;
-        int likelyPC = 0;
-        int likelyQuest = 0;
+        if (rigSerializerField == null) return null;
+        return rigSerializerField.GetValue(rig);
+    }
+    
+    public static Photon.Realtime.Player GetPhotonPlayer(this VRRig rig) =>
+        NetPlayerToPlayer(GetPlayerFromVRRig(rig));
+    
+    public static NetPlayer GetPlayerFromVRRig(VRRig p) =>
+        p.Creator ?? NetworkSystem.Instance.GetPlayer(NetworkSystem.Instance.GetOwningPlayerID(p.GetRigSerializer() is Component serializerComponent ? serializerComponent.gameObject : null));
+    
+    public static Player NetPlayerToPlayer(NetPlayer p) =>
+        p.GetPlayerRef();
+    
+    public static string GetPlatform(this VRRig rig)
+    {
+        int suspiciouslySteam = 0;
+        int suspiciouslyPC = 0;
+        int suspiciouslyQuest = 0;
+        string concatStringOfCosmeticsAllowed = rig.Cosmetics();
 
-        if (CosmeticSystemHelper.IsTemporaryCosmeticAllowed(rig, "S. FIRST LOGIN"))
-            likelySteam++;
+        if (concatStringOfCosmeticsAllowed.Contains("S. FIRST LOGIN"))
+            suspiciouslySteam++;
 
-        if (CosmeticSystemHelper.IsTemporaryCosmeticAllowed(rig, "FIRST LOGIN"))
-            likelyPC++;
+        if (concatStringOfCosmeticsAllowed.Contains("FIRST LOGIN") || rig.GetPhotonPlayer().CustomProperties.Count >= 2)
+            suspiciouslyPC++;
 
-        if (rig.Creator.GetPlayerRef().CustomProperties.Count >= 2)
-            likelyPC++;
+        if (RigHelper.GetPCTier(rig) > 0)
+            suspiciouslySteam++;
+        else if (RigHelper.GetQuestTier(rig) > 0)
+            suspiciouslyQuest++;
 
-        if (likelySteam > likelyPC && likelySteam > likelyQuest) return "Steam";
-        if (likelyPC > likelySteam && likelyPC > likelyQuest) return "PC";
+
+        if (suspiciouslySteam > suspiciouslyPC && suspiciouslySteam > suspiciouslyQuest) return "Steam";
+        if (suspiciouslyPC > suspiciouslySteam && suspiciouslyPC > suspiciouslyQuest) return "PC";
+        if (suspiciouslyQuest > suspiciouslySteam && suspiciouslyQuest > suspiciouslyPC) return "Standalone";
 
         return "Standalone";
     }
@@ -717,6 +746,29 @@ public static class CosmeticSystemHelper
     }
 }
 
+public static class VRRigCosmeticsExtensions
+{
+    private static FieldInfo cosmeticsField = typeof(VRRig).GetField(
+        "_playerOwnedCosmetics",
+        BindingFlags.Instance | BindingFlags.NonPublic
+    );
+
+    public static string Cosmetics(this VRRig rig)
+    {
+        if (cosmeticsField == null) return "";
+        object value = cosmeticsField.GetValue(rig);
+        if (value == null) return "";
+        
+        if (value is System.Collections.IEnumerable enumerable)
+        {
+            return string.Join(",", enumerable.Cast<object>());
+        }
+
+        return value.ToString();
+    }
+}
+
+
 public static class RigHelper
 {
     private static FieldInfo fpsField;
@@ -734,6 +786,26 @@ public static class RigHelper
         if (fpsField == null) return -1;
 
         return (int)fpsField.GetValue(rig);
+    }
+    
+    private static FieldInfo pcTierField = typeof(VRRig).GetField(
+        "currentRankedSubTierPC",
+        BindingFlags.Instance | BindingFlags.NonPublic
+    );
+
+    private static FieldInfo questTierField = typeof(VRRig).GetField(
+        "currentRankedSubTierQuest",
+        BindingFlags.Instance | BindingFlags.NonPublic
+    );
+
+    public static int GetPCTier(VRRig rig)
+    {
+        return pcTierField != null ? (int)pcTierField.GetValue(rig) : 0;
+    }
+
+    public static int GetQuestTier(VRRig rig)
+    {
+        return questTierField != null ? (int)questTierField.GetValue(rig) : 0;
     }
 }
 

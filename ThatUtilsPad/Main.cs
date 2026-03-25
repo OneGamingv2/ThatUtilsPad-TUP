@@ -8,6 +8,7 @@ using System.Text;
 using System.Linq;
 using BepInEx;
 using GorillaLocomotion;
+using HarmonyLib;
 using Newtonsoft.Json.Linq;
 using PlayFab;
 using ThatUtilsPad.MenuComponents;
@@ -108,7 +109,10 @@ public class Main : BaseUnityPlugin
     public static Camera FirstPersonCamera { get; private set; }
     public static Camera ThirdPersonCamera { get; private set; }
 
-    private void Awake() => Instance = this;
+    private void Awake()
+    {
+        Instance = this;
+    }
 
     private void Start()
     {
@@ -590,7 +594,7 @@ public class Main : BaseUnityPlugin
             return;
 
         string prefabPath = UseSakuraTheme
-            ? "assets/prefabs/tup-redux.prefab"
+            ? "assets/prefabs/tup-reduxv2.prefab"
             : "assets/prefabs/tup-modelsmooth.prefab";
 
         AssetBundle bundle = UseSakuraTheme ? menuReduxBundle : menuBundle;
@@ -1101,86 +1105,86 @@ public class Main : BaseUnityPlugin
     
     private void CreateButton(float zOffset, string btnName)
     {
-        string prefabPath = "assets/fonts/figtree.asset"; //"assets/fonts/minecraftia.asset"
-
-        AssetBundle bundle = figtreeBundle; //minecraftiaBundle
-        TMP_FontAsset figtreeFont = bundle.LoadAsset<TMP_FontAsset>(prefabPath); //minecraftiaFont
-        
-        GameObject btn         = Instantiate(btnPrefab, menuObj.transform);
-        GameObject btnOutline  = Instantiate(btnPrefab, menuObj.transform);
+        string prefabPath = "assets/fonts/figtree.asset"; // "assets/fonts/minecraftia.asset"
+        AssetBundle bundle = figtreeBundle; // minecraftiaBundle
+        TMP_FontAsset figtreeFont = bundle.LoadAsset<TMP_FontAsset>(prefabPath); // minecraftiaFont
+    
+        GameObject btn = Instantiate(btnPrefab, menuObj.transform);
+        GameObject btnOutline = Instantiate(btnPrefab, menuObj.transform);
         GameObject btnCollider = GameObject.CreatePrimitive(PrimitiveType.Cube);
 
-        var colliderFollow    = btnCollider.AddComponent<FollowMenu>();
-        colliderFollow.Target   = btn.transform;
+        Debug.Log($"[TUP] Creating button: {btnName}");
+        Debug.Log($"Button prefab: {btnPrefab}");
+        Debug.Log($"Buttons parent: {btn.transform.parent}");
+    
+        var colliderFollow = btnCollider.AddComponent<FollowMenu>();
+        colliderFollow.Target = btn.transform;
         colliderFollow.Rotation = Quaternion.identity;
         colliderFollow.Position = Vector3.zero;
-
+    
         Vector3 stackedPos = buttonBasePosition + new Vector3(0f, zOffset, 0f);
-
-        btn.transform.localPosition        = stackedPos;
-        btn.transform.localRotation        = buttonBaseRotation;
-        btn.transform.localScale           = buttonBaseScale;
-
+    
+        btn.transform.localPosition = stackedPos;
+        btn.transform.localRotation = buttonBaseRotation;
+        btn.transform.localScale = buttonBaseScale;
+    
         btnOutline.transform.localPosition = stackedPos - new Vector3(-0.002f, 0f, 0f);
         btnOutline.transform.localRotation = buttonBaseRotation;
-        btnOutline.transform.localScale    = buttonBaseScale * 1.001f;
-
+        btnOutline.transform.localScale = buttonBaseScale * 1.001f;
+    
         btnCollider.transform.localPosition = stackedPos;
         btnCollider.transform.localRotation = Quaternion.Euler(0f, 0f, 0f);
-        btnCollider.transform.localScale    = new Vector3(0.05f, 0.065f, 0.45f) * 0.5f;
+        btnCollider.transform.localScale = new Vector3(0.05f, 0.065f, 0.45f) * 0.5f;
         btnCollider.layer = 2;
-
+    
         ButtonTrigger trigger = btnCollider.AddComponent<ButtonTrigger>();
-        trigger.BtnIdentifier         = btnName;
-
+        trigger.BtnIdentifier = btnName;
         btnCollider.AddComponent<ButtonCollider>().trigger = trigger;
-        
         btnCollider.GetComponent<Collider>().isTrigger = true;
         Destroy(btnCollider.GetComponent<Rigidbody>());
-
+    
         Renderer renderer = btn.GetComponentInChildren<Renderer>();
         if (renderer != null)
         {
             renderer.material.shader = ShaderCache.UberShader;
-            renderer.material.color  = buttonColor;
+            renderer.material.color = buttonColor;
         }
 
         Renderer rendererOutline = btnOutline.GetComponentInChildren<Renderer>();
         if (rendererOutline != null)
         {
             rendererOutline.material.shader = ShaderCache.UberShader;
-            rendererOutline.material.color  = buttonOutlineColor;
+            rendererOutline.material.color = buttonOutlineColor;
         }
 
         Renderer rendererCollider = btnCollider.GetComponentInChildren<Renderer>();
         rendererCollider.material.shader = ShaderCache.TextShader;
-        rendererCollider.material.color  = new Color32(255, 0, 0, 50);
-        rendererCollider.enabled         = false;
-
+        rendererCollider.material.color = new Color32(255, 0, 0, 50);
+        rendererCollider.enabled = false;
+    
         GameObject textObj = new("ButtonLabel");
         textObj.transform.SetParent(btn.transform, false);
         textObj.transform.localPosition = new Vector3(0.02f, 0.003f, 0f);
         textObj.transform.localRotation = Quaternion.Euler(0f, 270f, 180f);
 
         TextMeshPro text = textObj.AddComponent<TextMeshPro>();
-        text.text             = btnName;
-        text.fontSize         = 22;
-        text.alignment        = TextAlignmentOptions.Center;
-        text.color            = Color.white;
-        text.font             = figtreeFont; //VRRig.LocalRig.playerText1.font;
+        text.text = btnName;
+        text.fontSize = 22;
+        text.alignment = TextAlignmentOptions.Center;
+        text.color = Color.white;
+        text.font = figtreeFont; // VRRig.LocalRig.playerText1.font;
         text.enableAutoSizing = false;
         text.transform.localScale = Vector3.one * 0.02f;
-        
-        //button open wave anim thingy buh
+    
         StartCoroutine(MenuEffects.PopButton(btn, btnOutline, buttonBaseScale, Vector3.zero, true));
-        
+    
         AudioSource audioSource = gameObject.GetComponent<AudioSource>();
         if (audioSource == null)
             audioSource = gameObject.AddComponent<AudioSource>();
 
         audioSource.volume = 0.1f;
         audioSource.PlayOneShot(btnEnterSound);
-        
+    
         btnObjs.Add(btn);
         btnObjs.Add(btnOutline);
         btnObjs.Add(btnCollider);
@@ -1208,16 +1212,11 @@ public class Main : BaseUnityPlugin
 
         foreach (var name in assembly.GetManifestResourceNames())
             Debug.Log("[TUP RESOURCE] " + name);
-
-        menuBundle               = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tup-prefab");
-        sakuraBundle             = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tupsakura-prefab");
-        menuPanelExpansionBundle = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tupmenu-panelexpansion");
+        
         buttonBundle             = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tupbutton-prefab");
         minecraftiaBundle        = LoadBundle(assembly, "ThatUtilsPad.Assets.Fonts.minecraftia");
         figtreeBundle            = LoadBundle(assembly, "ThatUtilsPad.Assets.Fonts.figtree");
-        menuCheckerExpBundle     = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tup-checkerexp");
-        menuCheckerBundle        = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tup-checkerbetter");
-        menuReduxBundle          = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tup-redux");
+        menuReduxBundle          = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tup-reduxv2");
     }
 
     private AssetBundle LoadBundle(Assembly assembly, string resourceName)

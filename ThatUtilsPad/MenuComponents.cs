@@ -70,11 +70,11 @@ public class ButtonCollider : MonoBehaviour
     private static float lastGlobalTime;
     private float lastLocalTime;
 
-    public ButtonTrigger trigger; // reference to your existing script
+    public ButtonTrigger trigger;
 
     private void Awake()
     {
-        gameObject.layer = 2; // you already did this 👍
+        gameObject.layer = 2;
 
         if (trigger == null)
             trigger = GetComponent<ButtonTrigger>();
@@ -82,7 +82,6 @@ public class ButtonCollider : MonoBehaviour
 
     private void OnTriggerEnter(Collider other)
     {
-        // cooldown (prevents spam)
         if (Time.time - lastGlobalTime < 0.1f || Time.time - lastLocalTime < 0.2f)
             return;
 
@@ -239,18 +238,33 @@ public class FollowMenu : MonoBehaviour
 
 public static class MenuTheme
 {
+    private static Transform FindDeepChild(Transform parent, string name)
+    {
+        foreach (Transform child in parent)
+        {
+            if (child.name == name)
+                return child;
+
+            var result = FindDeepChild(child, name);
+            if (result != null)
+                return result;
+        }
+        return null;
+    }
+    
     private static void ApplyColor(Transform parent, string name, Color32 color)
     {
-        Transform t = parent.Find(name);
-
+        Transform t = FindDeepChild(parent, name);
         if (t == null) return;
 
-        Renderer? rend = t.GetComponent<Renderer>();
-
+        Renderer rend = t.GetComponentInChildren<Renderer>();
         if (rend == null) return;
 
-        rend.material.shader = ShaderCache.UberShader;
-        rend.material.color  = color;
+        foreach (var mat in rend.materials)
+        {
+            mat.shader = ShaderCache.UberShader;
+            mat.color  = color;
+        }
     }
 
     public static void Assign(GameObject menuObj, Color32 mainColor, Color32 borderColor, Color32 buttonColor, Color32 accentColor)
@@ -323,6 +337,9 @@ public static class MenuTheme
         ApplyColor(root, "BarConnector", mainColor);
         ApplyColor(root, "TopBarUnder",  mainColor);
         ApplyColor(root, "TopBar",       accentColor);
+        
+        ApplyColor(root, "GripPipe",   mainColor);
+        ApplyColor(root, "GripAccent", accentColor);
         
         ApplyColor(side, "PoleSide1",        mainColor);
         ApplyColor(side, "PoleSide2",        mainColor);
