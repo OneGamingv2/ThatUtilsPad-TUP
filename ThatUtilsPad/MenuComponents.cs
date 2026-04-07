@@ -153,14 +153,14 @@ public static class MenuEffects
         Debug.Log("Menu Size: " + menuObj.transform.localScale);
     }
 
-    public static IEnumerator PopButton(GameObject btnObj, GameObject btnOutline, Vector3 targetScale, Vector3 startScale, bool useEaseOut)
+    public static IEnumerator PopButton(GameObject btnObj, Vector3 targetScale, Vector3 startScale, bool useEaseOut)
     {
         float duration = 0.5f;
         float time = 0f;
         
         while (time < duration)
         {
-            if (btnObj == null || btnOutline == null)
+            if (btnObj == null)
                 yield break;
             
             float t = time / duration;
@@ -172,14 +172,12 @@ public static class MenuEffects
                 easeT = Mathf.Pow(t, 3);
             
             btnObj.transform.localScale = Vector3.Lerp(startScale, targetScale, easeT);
-            btnOutline.transform.localScale = Vector3.Lerp(startScale, targetScale * 1.001f, easeT);
 
             time += Time.deltaTime;
             yield return null;
         }
         
         btnObj.transform.localScale = targetScale;
-        btnOutline.transform.localScale = targetScale * 1.001f;
     }
 
     public static IEnumerator SpawnHitCircle(Vector3 position, Transform hit)
@@ -274,7 +272,8 @@ public static class MenuTheme
         
         ApplyColor(root, "Main",       mainColor);
         ApplyColor(root, "MainBorder", borderColor);
-        ApplyColor(root, "GripPipe",   mainColor);
+        ApplyColor(root, "GripMain",   mainColor);
+        ApplyColor(root, "GripConnect",   borderColor);
         ApplyColor(root, "GripAccent", accentColor);
         ApplyColor(side, "SideMain", mainColor);
         ApplyColor(side, "SideBorder", borderColor);
@@ -292,17 +291,34 @@ public static class MenuTheme
         ApplyColor(root, "SelectorBtn5", buttonColor);
         ApplyColor(root, "SelectorBtn6", buttonColor);
         ApplyColor(root, "SelectorBtn7", buttonColor);
-        ApplyColor(root, "SelectorBtn8", buttonColor);
-        ApplyColor(root, "SelectorBtn9", buttonColor);
-        ApplyColor(root, "SelectorBtn10", buttonColor);
-        ApplyColor(root, "SelectorBtn11", buttonColor);
-        ApplyColor(root, "SelectorBtn12", buttonColor);
-        ApplyColor(root, "SelectorBtn13", buttonColor);
-        ApplyColor(root, "SelectorBtn14", buttonColor);
 
+        Color32 midColor = new(15, 15, 25, 255);
+        Color32 midDarkColor = new(14, 14, 24, 255);
+        Color32 darkAccentColor = new(113, 88, 143, 255);
+        Color32 lightMainColor = new(18, 18, 26, 255);
+        ApplyColor(root, "TopHolder", midColor);
+        ApplyColor(root, "BottomHolderLight", midColor);
+        ApplyColor(root, "BottomHolderDark", midDarkColor);
+        ApplyColor(root, "Discord", borderColor);
+        
         ApplyColor(side, "ReportHateSpeech", buttonColor);
         ApplyColor(side, "ReportCheating", buttonColor);
         ApplyColor(side, "ReportToxicity", buttonColor);
+        
+        ApplyColor(root, "Seperator1", lightMainColor);
+        ApplyColor(root, "Seperator2", lightMainColor);
+        
+        ApplyColor(root, "PageNext", buttonColor);
+        ApplyColor(root, "PageBack", buttonColor);
+        ApplyColor(root, "PageVis1", darkAccentColor);
+        ApplyColor(root, "PageVis2", accentColor);
+        ApplyColor(root, "PageVis3", darkAccentColor);
+        
+        ApplyColor(side, "ComScoreUp", buttonColor);
+        ApplyColor(side, "ComScoreDown", buttonColor);
+        
+        ApplyColor(menuObj.transform.Find("SideHolder/SusBar"), "SusBarOutline", buttonColor);
+        ApplyColor(menuObj.transform.Find("SideHolder"), "SusBar", lightMainColor);
         
         ApplyColor(side, "VolumeUp", buttonColor);
         ApplyColor(side, "VolumeDown", buttonColor);

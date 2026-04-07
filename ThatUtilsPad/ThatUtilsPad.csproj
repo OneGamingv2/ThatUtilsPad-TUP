@@ -57,9 +57,12 @@
         <EmbeddedResource Include="Assets\Icons\settings.png" />
         <None Remove="Assets\Models\tup-redux" />
         <None Remove="Assets\Models\tup-reduxv2" />
-        <EmbeddedResource Include="Assets\Models\tup-reduxv2" />
         <None Remove="Assets\Models\tupbutton-prefab" />
-        <EmbeddedResource Include="Assets\Models\tupbutton-prefab" />
+        <None Remove="Assets\Models\buttonmodel" />
+        <EmbeddedResource Include="Assets\Models\buttonmodel" />
+        <None Remove="Assets\Models\tup-reimagined" />
+        <None Remove="Assets\Models\tup-overhaul" />
+        <EmbeddedResource Include="Assets\Models\tup-overhaul" />
     </ItemGroup>
 
     <ItemGroup>

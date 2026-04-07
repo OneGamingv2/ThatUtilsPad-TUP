@@ -78,6 +78,7 @@ public static class Mods
                         { "Placeholder", Disconnect },
                         { "Placeholder2", JoinRandom },
                         { "Placeholder3", LobbyHop },
+                        { "Placeholder4", Disconnect },
                     }
                 }
             },
@@ -294,11 +295,7 @@ public static class Mods
             if (checkerCoroutine == null)
                 checkerCoroutine = CoroutineHandler.Instance.StartCoroutine(CheckerLoop());
         }
-        else
-        {
-            // Coroutine will automatically exit on next frame
-            // Cleanup handled in CheckerLoop
-        }
+        else {}
     }
 
     private static void CopyRoomCode()
@@ -387,8 +384,8 @@ public static void UpdateChecker()
         startPos = bodyBottom;
         forward = ray.direction;
     }
-
-    // --- VALIDATION (prevents softlock) ---
+    
+    
     if (snappedRig != null && (snappedRig.gameObject == null))
         snappedRig = null;
 
@@ -460,7 +457,7 @@ public static void UpdateChecker()
 
             endPos = head.position;
 
-            // select player (one frame trigger)
+            // select player
             if (selectPressed)
             {
                 selectedRig = snappedRig;
@@ -529,7 +526,7 @@ public static void UpdateChecker()
 
     checkerSphere.transform.position = currentBeamEnd;
 
-    // target tracking (unchanged)
+
     if (targetRig != null && !targetRig.isLocal)
     {
         if (lastTargetRig != null && lastTargetRig != targetRig)

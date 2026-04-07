@@ -48,7 +48,7 @@ public class Main : BaseUnityPlugin
 
     private readonly Vector3    buttonBasePosition = new(-0.044f, 0f, 0f);
     private readonly Quaternion buttonBaseRotation = Quaternion.Euler(0f, 0f, 180f);
-    private readonly Vector3    buttonBaseScale    = Vector3.one * 1.2f;
+    private readonly Vector3    buttonBaseScale = new Vector3(1.91f, 33.75f, 3.61f);
 
     private readonly Color32 buttonColor        = new(30, 30, 46, 255);
     private readonly Color32 buttonOutlineColor = new(18, 18, 36, 255);
@@ -516,7 +516,7 @@ public class Main : BaseUnityPlugin
         LoadBundles();
         ShaderCache.Init();
         new GameObject("TUP_CoroutineHandler").AddComponent<CoroutineHandler>();
-        btnPrefab = buttonBundle.LoadAsset<GameObject>("assets/prefabs/tup-buttonmodel.prefab");
+        btnPrefab = buttonBundle.LoadAsset<GameObject>("assets/prefabs/buttonmodel.prefab");
         InitMenu();
     }
 
@@ -594,7 +594,7 @@ public class Main : BaseUnityPlugin
             return;
 
         string prefabPath = UseSakuraTheme
-            ? "assets/prefabs/tup-reduxv2.prefab"
+            ? "assets/prefabs/tup-overhaul.prefab"
             : "assets/prefabs/tup-modelsmooth.prefab";
 
         AssetBundle bundle = UseSakuraTheme ? menuReduxBundle : menuBundle;
@@ -705,52 +705,43 @@ public class Main : BaseUnityPlugin
 
         GameObject side = menuObj.transform.Find("SideHolder").gameObject;
         
-        nameTextComp        = FindText(side, "SideMain/Name");
-        fpsTextComp         = FindText(side, "SideMain/PlatformFPS");
-        colorTextComp       = FindText(side, "SideMain/Color");
-        dateTextComp        = FindText(side, "SideMain/Date");
+        nameTextComp        = FindText(side, "Name");
+        fpsTextComp         = FindText(side, "PlatformFPS");
+        colorTextComp       = FindText(side, "Color");
+        dateTextComp        = FindText(side, "Date");
         modsTextComp        = FindText(side, "Mods");
         cheatsTextComp      = FindText(side, "Cheats");
         repCheatingComp     = FindText(side, "ReportCheating/Cheating");
         repToxicityComp     = FindText(side, "ReportToxicity/Toxicity");
-        repHateSpeechComp   = FindText(side, "ReportHateSpeech/Hatespeech");
+        repHateSpeechComp   = FindText(side, "ReportHateSpeech/Hate");
         
         nameTextComp.text = "GREENGORILLA";
-        nameTextComp.fontSize = infoFontSize;
         nameTextComp.font = figtreeFont;
         
         colorTextComp.text = "0 9 0";
-        colorTextComp.fontSize = infoFontSize;
         colorTextComp.font = figtreeFont;
         
         fpsTextComp.text = "<color=orange>60Hz</color>" +
                            " │ " +
                            "<color=#CBA6F7>Steam</color>";
-        fpsTextComp.fontSize = infoFontSize;;
         fpsTextComp.font = figtreeFont;
         
         dateTextComp.text = "<color=lightblue>--/--/----</color>";
-        dateTextComp.fontSize = infoFontSize;
         dateTextComp.font = figtreeFont;
         
         modsTextComp.text = "<color=green>Mods: 0</color>";
-        modsTextComp.fontSize = fontSize;
         modsTextComp.font = figtreeFont;
         
         cheatsTextComp.text = "<color=red>Cheats: 0</color>";
-        cheatsTextComp.fontSize = fontSize;
         cheatsTextComp.font = figtreeFont;
         
         repCheatingComp.text = "Report Cheating";
-        repCheatingComp.fontSize = fontSize;
         repCheatingComp.font = figtreeFont;
         
         repToxicityComp.text = "Report Toxicity";
-        repToxicityComp.fontSize = fontSize;
         repToxicityComp.font = figtreeFont;
         
         repHateSpeechComp.text = "Report Hate";
-        repHateSpeechComp.fontSize = fontSize;
         repHateSpeechComp.font = figtreeFont;
 
         List<string> btns = new List<string>()
@@ -839,8 +830,8 @@ public class Main : BaseUnityPlugin
 
     private IEnumerator CreateButtons(string categoryName = "Networking")
     {
-        const float startY = 0.38f;
-        const float gap    = 0.122f;
+        const float startY = 0.31f;
+        const float gap    = 0.09f;
 
         int index = 0;
 
@@ -1110,7 +1101,6 @@ public class Main : BaseUnityPlugin
         TMP_FontAsset figtreeFont = bundle.LoadAsset<TMP_FontAsset>(prefabPath); // minecraftiaFont
     
         GameObject btn = Instantiate(btnPrefab, menuObj.transform);
-        GameObject btnOutline = Instantiate(btnPrefab, menuObj.transform);
         GameObject btnCollider = GameObject.CreatePrimitive(PrimitiveType.Cube);
 
         Debug.Log($"[TUP] Creating button: {btnName}");
@@ -1119,22 +1109,17 @@ public class Main : BaseUnityPlugin
     
         var colliderFollow = btnCollider.AddComponent<FollowMenu>();
         colliderFollow.Target = btn.transform;
-        colliderFollow.Rotation = Quaternion.identity;
+        colliderFollow.Rotation = Quaternion.Euler(90f, 0f, 0f);
         colliderFollow.Position = Vector3.zero;
     
         Vector3 stackedPos = buttonBasePosition + new Vector3(0f, zOffset, 0f);
     
         btn.transform.localPosition = stackedPos;
-        btn.transform.localRotation = buttonBaseRotation;
-        btn.transform.localScale = buttonBaseScale;
-    
-        btnOutline.transform.localPosition = stackedPos - new Vector3(-0.002f, 0f, 0f);
-        btnOutline.transform.localRotation = buttonBaseRotation;
-        btnOutline.transform.localScale = buttonBaseScale * 1.001f;
+        btn.transform.localRotation = Quaternion.Euler(-90f, 0f, 0f);
     
         btnCollider.transform.localPosition = stackedPos;
-        btnCollider.transform.localRotation = Quaternion.Euler(0f, 0f, 0f);
-        btnCollider.transform.localScale = new Vector3(0.05f, 0.065f, 0.45f) * 0.5f;
+        btnCollider.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+        btnCollider.transform.localScale = new Vector3(0.05f, 0.065f, 0.55f) * 0.35f;
         btnCollider.layer = 2;
     
         ButtonTrigger trigger = btnCollider.AddComponent<ButtonTrigger>();
@@ -1150,23 +1135,17 @@ public class Main : BaseUnityPlugin
             renderer.material.color = buttonColor;
         }
 
-        Renderer rendererOutline = btnOutline.GetComponentInChildren<Renderer>();
-        if (rendererOutline != null)
-        {
-            rendererOutline.material.shader = ShaderCache.UberShader;
-            rendererOutline.material.color = buttonOutlineColor;
-        }
-
         Renderer rendererCollider = btnCollider.GetComponentInChildren<Renderer>();
         rendererCollider.material.shader = ShaderCache.TextShader;
         rendererCollider.material.color = new Color32(255, 0, 0, 50);
         rendererCollider.enabled = false;
-    
+        
+        /*
         GameObject textObj = new("ButtonLabel");
         textObj.transform.SetParent(btn.transform, false);
         textObj.transform.localPosition = new Vector3(0.02f, 0.003f, 0f);
         textObj.transform.localRotation = Quaternion.Euler(0f, 270f, 180f);
-
+        
         TextMeshPro text = textObj.AddComponent<TextMeshPro>();
         text.text = btnName;
         text.fontSize = 22;
@@ -1175,8 +1154,15 @@ public class Main : BaseUnityPlugin
         text.font = figtreeFont; // VRRig.LocalRig.playerText1.font;
         text.enableAutoSizing = false;
         text.transform.localScale = Vector3.one * 0.02f;
+        */
+        
+        TextMeshPro text = btn.transform.Find("ButtonText").GetComponent<TextMeshPro>();
+        if (text != null) 
+            text.text = btnName;
+        else
+            Debug.LogError("[TUP] Text not found: " + btnName);
     
-        StartCoroutine(MenuEffects.PopButton(btn, btnOutline, buttonBaseScale, Vector3.zero, true));
+        StartCoroutine(MenuEffects.PopButton(btn, buttonBaseScale, Vector3.zero, true));
     
         AudioSource audioSource = gameObject.GetComponent<AudioSource>();
         if (audioSource == null)
@@ -1186,7 +1172,6 @@ public class Main : BaseUnityPlugin
         audioSource.PlayOneShot(btnEnterSound);
     
         btnObjs.Add(btn);
-        btnObjs.Add(btnOutline);
         btnObjs.Add(btnCollider);
     }
 
@@ -1213,10 +1198,10 @@ public class Main : BaseUnityPlugin
         foreach (var name in assembly.GetManifestResourceNames())
             Debug.Log("[TUP RESOURCE] " + name);
         
-        buttonBundle             = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tupbutton-prefab");
+        buttonBundle             = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.buttonmodel");
         minecraftiaBundle        = LoadBundle(assembly, "ThatUtilsPad.Assets.Fonts.minecraftia");
         figtreeBundle            = LoadBundle(assembly, "ThatUtilsPad.Assets.Fonts.figtree");
-        menuReduxBundle          = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tup-reduxv2");
+        menuReduxBundle          = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tup-overhaul");
     }
 
     private AssetBundle LoadBundle(Assembly assembly, string resourceName)
