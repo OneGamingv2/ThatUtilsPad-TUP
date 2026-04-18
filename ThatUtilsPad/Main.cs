@@ -79,8 +79,6 @@ public class Main : BaseUnityPlugin
     private GameObject  selectorObj;
     private GameObject  menuObj;
     private AssetBundle sakuraBundle;
-    private AssetBundle minecraftiaBundle;
-    private AssetBundle figtreeBundle;
     private AssetBundle menuCheckerExpBundle;
     private AssetBundle menuPanelExpansionBundle;
     private AssetBundle menuCheckerBundle;
@@ -108,6 +106,8 @@ public class Main : BaseUnityPlugin
 
     public static Camera FirstPersonCamera { get; private set; }
     public static Camera ThirdPersonCamera { get; private set; }
+    
+    public static Dictionary<string, float> VolumeByPlayerID = new Dictionary<string, float>();
 
     private void Awake()
     {
@@ -131,12 +131,17 @@ public class Main : BaseUnityPlugin
     private void OnPlayerSpawned()
     {
         FirstPersonCamera = GTPlayer.Instance.mainCamera;
-        ThirdPersonCamera = GorillaTagger.Instance.thirdPersonCamera.transform.GetChild(0).GetComponent<Camera>();
+    
+        var tpCam = GorillaTagger.Instance.thirdPersonCamera?.transform;
+        if (tpCam != null && tpCam.childCount > 0)
+            ThirdPersonCamera = tpCam.GetChild(0).GetComponent<Camera>();
+        else
+            ThirdPersonCamera = FirstPersonCamera;
 
         LoadAudio();
-
         StartCoroutine(InitKeySystem());
     }
+
 
     private IEnumerator InitKeySystem()
     {
@@ -514,6 +519,7 @@ public class Main : BaseUnityPlugin
         Mods.Init();
         categories = Mods.Actions.Keys.ToList();
         LoadBundles();
+        FontCache.LoadFonts();
         ShaderCache.Init();
         new GameObject("TUP_CoroutineHandler").AddComponent<CoroutineHandler>();
         btnPrefab = buttonBundle.LoadAsset<GameObject>("assets/prefabs/buttonmodel.prefab");
@@ -598,9 +604,9 @@ public class Main : BaseUnityPlugin
             : "assets/prefabs/tup-modelsmooth.prefab";
 
         AssetBundle bundle = UseSakuraTheme ? menuReduxBundle : menuBundle;
-        GameObject prefab = bundle.LoadAsset<GameObject>(prefabPath);
-
-        // Create under world (we’ll re-parent later)
+        GameObject  prefab = bundle.LoadAsset<GameObject>(prefabPath);
+        
+        
         menuObj = Instantiate(prefab);
         menuObj.transform.localScale = Vector3.one * 0.375f;
 
@@ -697,7 +703,7 @@ public class Main : BaseUnityPlugin
     {
         string figPrefabPath = "assets/fonts/figtree.asset"; //"assets/fonts/minecraftia.asset"
 
-        AssetBundle figBundle = figtreeBundle; //minecraftiaBundle
+        AssetBundle figBundle = FontCache.figtreeBundle; //minecraftiaBundle
         TMP_FontAsset figtreeFont = figBundle.LoadAsset<TMP_FontAsset>(figPrefabPath); //minecraftiaFont
 
         float fontSize = 0.4f;
@@ -772,10 +778,14 @@ public class Main : BaseUnityPlugin
             
             GameObject quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
             quad.transform.SetParent(button.transform);
-            quad.transform.localPosition = new Vector3(-0.011f, 0f, 0f);
-            quad.transform.localRotation = Quaternion.Euler(0f, 90f, 90f);
-            quad.transform.localScale = new Vector3(0.015f, 0.015f, 0.015f);
+            quad.transform.localPosition = new Vector3(0f, 0f, 0.011f);
+            quad.transform.localRotation = Quaternion.Euler(0f, 180f, 90f);
+            quad.transform.localScale = new Vector3(0.012f, 0.012f, 0.012f);
 
+            var quadCol = quad.GetComponent<Collider>();
+            if (quadCol != null)
+                Destroy(quadCol);
+            
             Renderer quadRend = quad.GetComponent<Renderer>();
             quadRend.material = new Material(Shader.Find("Unlit/Texture"));
             quadRend.material.mainTexture = MenuComponents.Tools.LoadEmbeddedImage(btn.ToLower() + ".png");
@@ -907,6 +917,10 @@ public class Main : BaseUnityPlugin
             quad.transform.localPosition = new Vector3(-0.011f, 0f, 0f);
             quad.transform.localRotation = Quaternion.Euler(0f, 90f, 90f);
             quad.transform.localScale = new Vector3(0.015f, 0.015f, 0.015f);
+            
+            Collider quadCol = quad.GetComponent<Collider>();
+            if (quadCol != null)
+                Destroy(quadCol);
 
             Renderer quadRend = quad.GetComponent<Renderer>();
             quadRend.material = new Material(Shader.Find("Unlit/Texture"));
@@ -1097,7 +1111,7 @@ public class Main : BaseUnityPlugin
     private void CreateButton(float zOffset, string btnName)
     {
         string prefabPath = "assets/fonts/figtree.asset"; // "assets/fonts/minecraftia.asset"
-        AssetBundle bundle = figtreeBundle; // minecraftiaBundle
+        AssetBundle bundle = FontCache.figtreeBundle; // minecraftiaBundle
         TMP_FontAsset figtreeFont = bundle.LoadAsset<TMP_FontAsset>(prefabPath); // minecraftiaFont
     
         GameObject btn = Instantiate(btnPrefab, menuObj.transform);
@@ -1199,8 +1213,6 @@ public class Main : BaseUnityPlugin
             Debug.Log("[TUP RESOURCE] " + name);
         
         buttonBundle             = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.buttonmodel");
-        minecraftiaBundle        = LoadBundle(assembly, "ThatUtilsPad.Assets.Fonts.minecraftia");
-        figtreeBundle            = LoadBundle(assembly, "ThatUtilsPad.Assets.Fonts.figtree");
         menuReduxBundle          = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tup-overhaul");
     }
 

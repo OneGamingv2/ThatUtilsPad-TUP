@@ -36,7 +36,8 @@ public static class Mods
     public static  int        ReconnectDelay = 1;
 
     public static Dictionary<string, ModCategory> Actions;
-    
+
+    private static Coroutine   pulseRoutine;
     private static bool        checkerEnabled;
     private static GameObject? checkerLine;
     private static GameObject? checkerSphere;
@@ -48,6 +49,7 @@ public static class Mods
 
     private static VRRig snappedRig;
     private static VRRig selectedRig;
+    private static string selectedUserId;
     private const float SNAP_RADIUS = 0.25f;
     
     public static bool TryGetAction(string identifier, out Action? action)
@@ -99,6 +101,7 @@ public static class Mods
                     Actions =
                     {
                         //{ "Rotate Outfit", RotateOutfits },
+                        { "Open Outfit Changer", OutfitSpinner }
                     }
                 }
             },
@@ -223,24 +226,108 @@ public static class Mods
 
     private static void VolumeUp()
     {
-        Debug.Log("VolumeUp");
+        if (string.IsNullOrEmpty(selectedUserId))
+        {
+            Debug.Log("[TUP] No player selected");
+            return;
+        }
+
+        if (!Main.VolumeByPlayerID.ContainsKey(selectedUserId))
+            Main.VolumeByPlayerID[selectedUserId] = 1f;
+
+        Main.VolumeByPlayerID[selectedUserId] =
+            Mathf.Clamp(Main.VolumeByPlayerID[selectedUserId] + 0.1f, 0f, 2f);
+
+        Debug.Log($"[TUP] Volume Up: {selectedUserId} -> {Main.VolumeByPlayerID[selectedUserId]}");
     }
     
     private static void VolumeDown()
     {
-        Debug.Log("VolumeDown");
+        if (string.IsNullOrEmpty(selectedUserId))
+        {
+            Debug.Log("[TUP] No player selected");
+            return;
+        }
+
+        if (!Main.VolumeByPlayerID.ContainsKey(selectedUserId))
+            Main.VolumeByPlayerID[selectedUserId] = 1f;
+
+        Main.VolumeByPlayerID[selectedUserId] =
+            Mathf.Clamp(Main.VolumeByPlayerID[selectedUserId] - 0.1f, 0f, 2f);
+
+        Debug.Log($"[TUP] Volume Down: {selectedUserId} -> {Main.VolumeByPlayerID[selectedUserId]}");
     }
     
+    private static bool muteToggled;
+
     private static void Mute()
     {
-        Debug.Log("Mute");
+        if (string.IsNullOrEmpty(selectedUserId))
+        {
+            Debug.Log("[TUP] No player selected");
+            return;
+        }
+
+        if (!Main.VolumeByPlayerID.ContainsKey(selectedUserId))
+            Main.VolumeByPlayerID[selectedUserId] = 1f;
+
+        muteToggled = !muteToggled;
+
+        Main.VolumeByPlayerID[selectedUserId] = muteToggled ? 0f : 1f;
+
+        Debug.Log(muteToggled
+            ? $"[TUP] Muted: {selectedUserId}"
+            : $"[TUP] Unmuted: {selectedUserId}");
     }
     
+    private static bool muteElseToggled;
+
     private static void MuteElse()
     {
-        Debug.Log("MuteElse");
+        if (string.IsNullOrEmpty(selectedUserId))
+        {
+            Debug.Log("[TUP] No player selected");
+            return;
+        }
+
+        foreach (VRRig rig in UnityEngine.Object.FindObjectsOfType<VRRig>())
+        {
+            if (rig == null || rig.isOfflineVRRig || rig.isLocal)
+                continue;
+
+            if (!GetRigID(rig, out string id))
+                continue;
+
+            if (!Main.VolumeByPlayerID.ContainsKey(id))
+                Main.VolumeByPlayerID[id] = 1f;
+
+            if (!muteElseToggled)
+            {
+                Main.VolumeByPlayerID[id] = (id == selectedUserId) ? 1f : 0f;
+            }
+            else
+            {
+                Main.VolumeByPlayerID[id] = 1f;
+            }
+        }
+
+        muteElseToggled = !muteElseToggled;
+
+        Debug.Log(muteElseToggled
+            ? $"[TUP] Muted everyone except: {selectedUserId}"
+            : "[TUP] Restored all voices");
     }
     
+    public static bool GetRigID(VRRig rig, out string userId)
+    {
+        userId = null;
+
+        if (rig == null || rig.OwningNetPlayer == null)
+            return false;
+
+        userId = rig.OwningNetPlayer.UserId;
+        return true;
+    }
     
     private static bool SnapHeld()
     {
@@ -279,7 +366,7 @@ public static class Mods
         }
         if (lastTargetRig != null)
         {
-            //ResetRigMaterial(lastTargetRig);
+            //removeSkeletonHighlight(lastTargetRig);
             lastTargetRig = null;
         }
         checkerCoroutine = null;
@@ -426,7 +513,7 @@ public static void UpdateChecker()
         }
 
         VRRig rig = h.collider.GetComponentInParent<VRRig>();
-        if (rig == null || rig.isOfflineVRRig)
+        if (rig == null || rig.isOfflineVRRig || rig.isLocal)
             continue;
 
         if (h.distance < minDistance)
@@ -450,6 +537,9 @@ public static void UpdateChecker()
 
         if (snappedRig != null)
         {
+            BoneHighlight(snappedRig, new Color32(203, 166, 247, 255), 0.005f);
+            skeletonHighlight(snappedRig);
+            
             Transform head =
                 snappedRig.headMesh != null
                     ? snappedRig.headMesh.transform
@@ -457,17 +547,23 @@ public static void UpdateChecker()
 
             endPos = head.position;
 
-            // select player
             if (selectPressed)
             {
                 selectedRig = snappedRig;
+                if (GetRigID(snappedRig, out string id))
+                    selectedUserId = id;
                 ShowPlayerInfo(snappedRig);
             }
         }
     }
     else
     {
-        snappedRig = null;
+        if (snappedRig != null)
+        {
+            DisableBoneHighlight(snappedRig);
+            removeSkeletonHighlight(snappedRig);
+            snappedRig = null;
+        }
     }
 
 
@@ -501,7 +597,10 @@ public static void UpdateChecker()
     if (currentBeamEnd == Vector3.zero)
         currentBeamEnd = endPos;
 
-    currentBeamEnd = Vector3.Lerp(currentBeamEnd, endPos, 15f * Time.deltaTime);
+    if (snappedRig != null)
+        currentBeamEnd = endPos;
+    else
+        currentBeamEnd = Vector3.Lerp(currentBeamEnd, endPos, 15f * Time.deltaTime);
 
     line.SetPosition(0, startPos);
     line.SetPosition(1, currentBeamEnd);
@@ -531,21 +630,109 @@ public static void UpdateChecker()
     {
         if (lastTargetRig != null && lastTargetRig != targetRig)
         {
-            //ResetRigMaterial(lastTargetRig);
+            //removeSkeletonHighlight(lastTargetRig);
         }
 
         if (lastTargetRig != targetRig)
         {
-            //HighlightRig(targetRig);
+            //skeletonHighlight(targetRig);
             lastTargetRig = targetRig;
         }
     }
     else if (lastTargetRig != null)
     {
-        //ResetRigMaterial(lastTargetRig);
+        //removeSkeletonHighlight(lastTargetRig);
         lastTargetRig = null;
     }
 }
+
+private static readonly Dictionary<VRRig, List<LineRenderer>> boneESP 
+    = new Dictionary<VRRig, List<LineRenderer>>();
+
+public static readonly int[] bones = {
+    4, 3, 5, 4, 19, 18, 20, 19, 3, 18,
+    21, 20, 22, 21, 25, 21, 29, 21, 31, 29,
+    27, 25, 24, 22, 6, 5, 7, 6, 10, 6,
+    14, 6, 16, 14, 12, 10, 9, 7
+};
+private static void BoneHighlight(VRRig rig, Color color, float width = 0.02f)
+{
+    if (rig == null || rig.isLocal) return;
+
+    if (!boneESP.TryGetValue(rig, out List<LineRenderer> lines))
+    {
+        lines = new List<LineRenderer>();
+
+        // Head line
+        //LineRenderer headLine = rig.head.rigTarget.gameObject.GetOrAddComponent<LineRenderer>();
+        //headLine.material = new Material(Shader.Find("GUI/Text Shader"));
+        //lines.Add(headLine);
+
+        // Bone lines
+        for (int i = 0; i < 19; i++)
+        {
+            LineRenderer line = rig.mainSkin.bones[bones[i * 2]].gameObject.GetOrAddComponent<LineRenderer>();
+            line.material = new Material(Shader.Find("GUI/Text Shader"));
+            lines.Add(line);
+        }
+
+        boneESP.Add(rig, lines);
+    }
+
+    // HEAD
+    //LineRenderer head = lines[0];
+    //head.startWidth = width;
+    //head.endWidth = width;
+    //head.startColor = color;
+    //head.endColor = color;
+
+    //head.SetPosition(0, rig.head.rigTarget.position + new Vector3(0f, 0.16f, 0f));
+    //head.SetPosition(1, rig.head.rigTarget.position - new Vector3(0f, 0.4f, 0f));
+
+    // BONES
+    for (int i = 0; i < 19; i++)
+    {
+        LineRenderer line = lines[i];
+
+        line.startWidth = width;
+        line.endWidth = width;
+        line.startColor = color;
+        line.endColor = color;
+
+        line.SetPosition(0, rig.mainSkin.bones[bones[i * 2]].position);
+        line.SetPosition(1, rig.mainSkin.bones[bones[i * 2 + 1]].position);
+    }
+}
+
+public static void DisableBoneHighlight(VRRig rig)
+{
+    foreach (var renderer in boneESP.SelectMany(bones => bones.Value))
+        Object.Destroy(renderer);
+
+    boneESP.Clear();
+}
+
+    private static void skeletonHighlight(VRRig rig)
+    {
+        if (rig == null) return;
+        if (rig.skeleton == null) return;
+        if (rig.skeleton.renderer == null) return;
+        if (rig.skeleton.renderer.material == null) return;
+        
+        rig.skeleton.renderer.enabled = true;
+        rig.skeleton.renderer.material.shader = ShaderCache.TextShader;
+        rig.skeleton.renderer.material.color = rig.playerColor;
+        
+        Color skeletonColor = new Color(rig.skeleton.renderer.material.color.r, rig.skeleton.renderer.material.color.g, rig.skeleton.renderer.material.color.b, 0.3f);
+        Color themeColor = new Color(0.796f, 0.651f, 0.969f, 0.1f);
+        rig.skeleton.renderer.material.color = themeColor;
+    }
+    
+    private static void removeSkeletonHighlight(VRRig rig)
+    {
+        if (rig?.skeleton?.renderer == null) return;
+        rig.skeleton.renderer.enabled = false;
+    }
     
     private static void HighlightRig(VRRig rig)
     {
@@ -683,6 +870,40 @@ public static void UpdateChecker()
         JoinRandom();
     }
 
+    private static void OutfitSpinner()
+    {
+        var root = GameObject.Find("Environment Objects");
+        var spinner =
+            root.transform.Find("LocalObjects_Prefab/TreeRoom/TreeRoomInteractables/UI/SatelliteWardrobe/WornDisplay");
+        
+        GameObject spinnerObj = GameObject.Instantiate(spinner.gameObject);
+        spinnerObj.transform.SetParent(GTPlayer.Instance.transform);
+        spinnerObj.transform.position =
+            Camera.main.transform.position + Camera.main.transform.forward * 0.4f - Camera.main.transform.up * 0.4f;
+        spinnerObj.transform.localRotation = Quaternion.identity;
+        spinnerObj.transform.LookAt(GTPlayer.Instance.bodyCollider.transform); //GTPlayer.Instance.transform
+        spinnerObj.transform.localScale = Vector3.one;
+        
+        
+        // Switch buttons
+
+        var buttons =
+            root.transform.Find("LocalObjects_Prefab/TreeRoom/TreeRoomInteractables/UI/SatelliteWardrobe/UI/OutfitButtons/");
+        
+        GameObject btnsOj = GameObject.Instantiate(buttons.gameObject);
+        //btnsOj.transform.SetParent(GTPlayer.Instance.transform);
+        //var follow = btnsOj.transform.AddComponent<MenuComponents.FollowMenu>();
+        //follow.Target = GTPlayer.Instance.transform;
+        //follow.Position = Camera.main.transform.position + Camera.main.transform.forward * 0.4f - Camera.main.transform.up * 0.4f;
+        //follow.Rotation = Quaternion.identity;
+        
+        btnsOj.transform.position =
+            Camera.main.transform.position + Camera.main.transform.forward * 0.4f - Camera.main.transform.up * 0.4f;
+        btnsOj.transform.localRotation = Quaternion.identity;
+        btnsOj.transform.LookAt(GTPlayer.Instance.bodyCollider.transform); //GTPlayer.Instance.transform
+        btnsOj.transform.localScale = Vector3.one;
+    }
+
     //private static void RotateOutfits()
     //{
     //    CosmeticsController controller = CosmeticsController.instance;
@@ -717,6 +938,17 @@ public static void UpdateChecker()
     //
     //    Debug.Log($"[TUP] Swapped to Outfit Slot: {nextOutfit + 1}");
     //}
+}
+
+public static class ComponentExtensions
+{
+    public static T GetOrAddComponent<T>(this GameObject obj) where T : Component
+    {
+        T comp = obj.GetComponent<T>();
+        if (comp == null)
+            comp = obj.AddComponent<T>();
+        return comp;
+    }
 }
 
 public static class CosmeticSystemHelper
