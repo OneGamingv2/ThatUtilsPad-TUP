@@ -29,7 +29,6 @@
         <None Remove="Assets\Fonts\minecraftia" />
         <EmbeddedResource Include="Assets\Fonts\minecraftia" />
         <None Remove="Assets\Sounds\SmoothClick.wav" />
-        <EmbeddedResource Include="Assets\Sounds\SmoothClick.wav" />
         <None Remove="Assets\Sounds\UiEnter.wav" />
         <EmbeddedResource Include="Assets\Sounds\UiEnter.wav" />
         <None Remove="Assets\Sounds\creamy.wav" />
@@ -59,13 +58,70 @@
         <None Remove="Assets\Models\tup-reduxv2" />
         <None Remove="Assets\Models\tupbutton-prefab" />
         <None Remove="Assets\Models\buttonmodel" />
-        <EmbeddedResource Include="Assets\Models\buttonmodel" />
         <None Remove="Assets\Models\tup-reimagined" />
         <None Remove="Assets\Models\tup-overhaul" />
-        <EmbeddedResource Include="Assets\Models\tup-overhaul" />
         <None Remove="Assets\UI\notifui" />
         <None Remove="Assets\UI\notif" />
         <None Remove="Assets\UI\notifgui" />
+        <None Remove="Assets\Models\tup-new" />
+        <None Remove="Assets\Models\tup-newo" />
+        <None Remove="Assets\Models\tup-newoo" />
+        <None Remove="Assets\Models\tup-newooo" />
+        <None Remove="Assets\Models\tup-checkerrevamp" />
+        <None Remove="Assets\Models\tup-checkerrevamp2" />
+        <None Remove="Assets\Models\tup-checkerrevampv4" />
+        <None Remove="Assets\Models\tup-checkerv5" />
+        <None Remove="Assets\Models\tup-checkerv6" />
+        <None Remove="Assets\Models\tup-checkerv7" />
+        <None Remove="Assets\Models\tup-checkerv8" />
+        <None Remove="Assets\Models\tup-checkerv9" />
+        <None Remove="Assets\Models\tup-overv2" />
+        <None Remove="Assets\Shaders\tup-hologram" />
+        <None Remove="Assets\Shaders\tup-holo" />
+        <None Remove="Assets\UI\nametag" />
+        <None Remove="Assets\Models\buttonmodel-outline" />
+        <EmbeddedResource Include="Assets\Models\buttonmodel-outline" />
+        <None Remove="Assets\Models\buttonmodel-newo" />
+        <EmbeddedResource Include="Assets\Models\buttonmodel-newo" />
+        <None Remove="Assets\Models\tup-overv3" />
+        <None Remove="Assets\Models\tup-overv4" />
+        <None Remove="Assets\Models\tup-overv5" />
+        <EmbeddedResource Include="Assets\Models\tup-overv5" />
+        <None Remove="Assets\Icons\playersicon.png" />
+        <EmbeddedResource Include="Assets\Icons\playersicon.png" />
+        <None Remove="Assets\Sounds\Minecraft.wav" />
+        <EmbeddedResource Include="Assets\Sounds\minecraft.wav" />
+        <None Remove="Assets\Sounds\destiny.wav" />
+        <EmbeddedResource Include="Assets\Sounds\destiny.wav" />
+        <None Remove="Assets\Sounds\watch.wav" />
+        <EmbeddedResource Include="Assets\Sounds\watch.wav" />
+        <None Remove="Assets\Sounds\Wii.wav" />
+        <EmbeddedResource Include="Assets\Sounds\Wii.wav" />
+        <None Remove="Assets\Sounds\untitled.wav" />
+        <EmbeddedResource Include="Assets\Sounds\untitled.wav" />
+        <None Remove="Assets\UI\nametag" />
+        <EmbeddedResource Include="Assets\UI\nametag" />
+        <None Remove="Assets\UI\tup-notif" />
+        <EmbeddedResource Include="Assets\UI\tup-notif" />
+        <None Remove="Assets\Models\buttonmodel-masked" />
+        <EmbeddedResource Include="Assets\Models\buttonmodel-masked" />
+        <None Remove="Assets\Models\buttonmodel-trash" />
+        <EmbeddedResource Include="Assets\Models\buttonmodel-trash" />
+        <None Remove="Assets\Models\buttonmodel-maskfix" />
+        <EmbeddedResource Include="Assets\Models\buttonmodel-maskfix" />
+        <None Remove="Assets\Models\buttonmodel-maskfix2" />
+        <EmbeddedResource Include="Assets\Models\buttonmodel-maskfix2" />
+        <None Remove="Assets\Models\tup-overv6" />
+        <EmbeddedResource Include="Assets\Models\tup-overv6" />
+        <None Remove="Assets\Models\tup-overv7" />
+        <EmbeddedResource Include="Assets\Models\tup-overv7" />
+        <None Remove="Assets\Models\buttonmodel-rename" />
+        <EmbeddedResource Include="Assets\Models\buttonmodel-rename" />
+        <None Remove="Assets\UI\notif-compact" />
+        <EmbeddedResource Include="Assets\UI\notif-compact" />
+        <None Remove="Assets\UI\notif-sizefix" />
+        <None Remove="Assets\UI\notif-scalefix2" />
+        <EmbeddedResource Include="Assets\UI\notif-scalefix2" />
     </ItemGroup>
 
     <ItemGroup>
@@ -726,6 +782,10 @@
       <Reference Include="websocket-sharp">
         <HintPath>C:\Program Files (x86)\Steam\steamapps\common\Gorilla Tag\Gorilla Tag_Data\Managed\websocket-sharp.dll</HintPath>
       </Reference>
+    </ItemGroup>
+
+    <ItemGroup>
+      <Folder Include="Patches\" />
     </ItemGroup>
 
 </Project>

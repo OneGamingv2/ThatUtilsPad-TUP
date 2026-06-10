@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Numerics;
 using System.Reflection;
 using TMPro;
@@ -8,6 +10,8 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.NVIDIA;
 using UnityEngine.UIElements;
+using UIImage  = UnityEngine.UI.Image;
+using RawImage = UnityEngine.UI.RawImage;
 using Quaternion = UnityEngine.Quaternion;
 using Vector3 = UnityEngine.Vector3;
 
@@ -17,25 +21,140 @@ public class ButtonTrigger : MonoBehaviour
 {
     public string BtnIdentifier;
     public Action? CustomAction;
+    public Transform Slider;
+    public Transform Knob;
+    public Renderer BodyRenderer;
+    public Renderer OutlineRenderer;
+    public Renderer[] KeyboardOutlineRenderers;
+    public Coroutine KeyboardPressRoutine;
+    public Coroutine SwitchRoutine;
+    public Transform ButtonRoot;
+    public bool IsToggle = false;
+    public bool IsOn = false;
+    public float Cooldown = 0f;
+    public bool IsOnCooldown = false;
+    public bool IsKeyboardKey = false;
 
     public static void PcPress(ButtonTrigger button)
     {
         if (button == null) return;
+        if (button.IsOnCooldown) return;
+        if (Mods.IsRenaming && !button.IsKeyboardKey) return;
+
         Debug.Log("Pressed: " + button.BtnIdentifier);
-        
-        Debug.Log("ButtonActivationPC");
         Main.Instance.PlayBtnCickSound();
-        
+
+        if (button.IsKeyboardKey)
+        {
+            if (button.KeyboardPressRoutine != null)
+                CoroutineHandler.Instance.StopCoroutine(button.KeyboardPressRoutine);
+
+            button.KeyboardPressRoutine = CoroutineHandler.Instance.StartCoroutine(
+                MenuEffects.KeyboardButtonPress(
+                    button,
+                    button.BodyRenderer,
+                    button.KeyboardOutlineRenderers != null && button.KeyboardOutlineRenderers.Length > 0
+                        ? button.KeyboardOutlineRenderers
+                        : button.OutlineRenderer != null
+                            ? new[] { button.OutlineRenderer }
+                            : Array.Empty<Renderer>())
+            );
+            button.CustomAction?.Invoke();
+            return;
+        }
+
+        if (button.IsToggle)
+        {
+            if (button.SwitchRoutine != null)
+                CoroutineHandler.Instance.StopCoroutine(button.SwitchRoutine);
+
+            button.IsOn = !button.IsOn;
+            Mods.SaveToggleState(button.BtnIdentifier, button.IsOn);
+            button.SwitchRoutine = CoroutineHandler.Instance.StartCoroutine(button.IsOn
+                ? MenuEffects.ActivateSwitch(button.Knob, button.Slider, button.BodyRenderer, button.OutlineRenderer)
+                : MenuEffects.DeactivateSwitch(button.Knob, button.Slider, button.BodyRenderer, button.OutlineRenderer));
+        }
+        else
+        {
+            if (button.SwitchRoutine != null)
+                CoroutineHandler.Instance.StopCoroutine(button.SwitchRoutine);
+
+            button.SwitchRoutine = CoroutineHandler.Instance.StartCoroutine(MenuEffects.ToggleSwitch(button.Knob, button.Slider, button.BodyRenderer, button.OutlineRenderer));
+        }
+
+        if (button.Cooldown > 0f)
+            CoroutineHandler.Instance.StartCoroutine(RunCooldown(button));
+
         if (button.CustomAction != null)
         {
             button.CustomAction.Invoke();
             return;
         }
 
-        if (Mods.TryGetAction(button.BtnIdentifier, out var action))
-            action?.Invoke();
+        if (Mods.TryGetAction(button.BtnIdentifier, out var modAction))
+            modAction?.Action?.Invoke();
         else
             Debug.LogWarning($"[TUP: WARNING] No mod found for button: {button.BtnIdentifier}");
+    }
+
+    private static IEnumerator RunCooldown(ButtonTrigger button)
+    {
+        button.IsOnCooldown = true;
+
+        Transform main = button.ButtonRoot != null ? button.ButtonRoot.Find("Main") : null;
+        if (main == null) { button.IsOnCooldown = false; yield break; }
+
+        Transform overlayT = main.Find("Overlay");
+        if (overlayT == null) { button.IsOnCooldown = false; yield break; }
+
+        Transform delayT = overlayT.Find("Delay") ?? main.Find("Delay");
+
+        Vector3 delayStartScale = delayT != null ? delayT.localScale : Vector3.one;
+
+        RawImage overlayRI = overlayT.GetComponent<RawImage>();
+        RawImage delayRI   = delayT?.GetComponent<RawImage>();
+
+        // Activate the Canvas and ensure Overlay is visible
+        main.gameObject.SetActive(true);
+        overlayT.gameObject.SetActive(true);
+
+        if (overlayRI != null) overlayRI.color = new Color(overlayRI.color.r, overlayRI.color.g, overlayRI.color.b, 0f);
+        if (delayRI   != null) delayRI.color   = new Color(delayRI.color.r,   delayRI.color.g,   delayRI.color.b,   0f);
+
+        const float fadeDuration = 0.4f;
+
+        // Fade in
+        for (float t = 0f; t < fadeDuration; t += Time.deltaTime)
+        {
+            float p = t / fadeDuration;
+            if (overlayRI != null) overlayRI.color = new Color(overlayRI.color.r, overlayRI.color.g, overlayRI.color.b, Mathf.Lerp(0f, 0.2f, p));
+            if (delayRI   != null) delayRI.color   = new Color(delayRI.color.r,   delayRI.color.g,   delayRI.color.b,   Mathf.Lerp(0f, 1f,   p));
+            yield return null;
+        }
+        if (overlayRI != null) overlayRI.color = new Color(overlayRI.color.r, overlayRI.color.g, overlayRI.color.b, 0.2f);
+        if (delayRI   != null) delayRI.color   = new Color(delayRI.color.r,   delayRI.color.g,   delayRI.color.b,   1f);
+
+        // Scale bar X to 0 over cooldown duration
+        for (float t = 0f; t < button.Cooldown; t += Time.deltaTime)
+        {
+            if (delayT != null)
+                delayT.localScale = new Vector3(Mathf.Lerp(delayStartScale.x, 0f, t / button.Cooldown), delayStartScale.y, delayStartScale.z);
+            yield return null;
+        }
+        if (delayT != null) delayT.localScale = new Vector3(0f, delayStartScale.y, delayStartScale.z);
+
+        // Fade out
+        for (float t = 0f; t < fadeDuration; t += Time.deltaTime)
+        {
+            float p = t / fadeDuration;
+            if (overlayRI != null) overlayRI.color = new Color(overlayRI.color.r, overlayRI.color.g, overlayRI.color.b, Mathf.Lerp(0.2f, 0f, p));
+            if (delayRI   != null) delayRI.color   = new Color(delayRI.color.r,   delayRI.color.g,   delayRI.color.b,   Mathf.Lerp(1f,   0f, p));
+            yield return null;
+        }
+
+        main.gameObject.SetActive(false);
+        if (delayT != null) delayT.localScale = delayStartScale;
+        button.IsOnCooldown = false;
     }
     
     //public override void ButtonActivationWithHand(bool isLeftHand)
@@ -124,17 +243,371 @@ public static class Tools
             routine = null;
         }
     }
+    
+    private static readonly Dictionary<Transform, Vector3> originalScales =
+        new Dictionary<Transform, Vector3>();
+
+    /// <summary>
+    /// Stores the current scale of all checker components.
+    /// Call this once before setting their scales to Vector3.zero.
+    /// </summary>
+    public static void CacheCheckerScales(Transform menuRoot)
+    {
+        if (menuRoot == null)
+            return;
+
+        Transform sideHolder = menuRoot.Find("SideHolder");
+        if (sideHolder == null)
+            return;
+
+        string[] checkerParts =
+        {
+            "MonkeBase",
+            "MonkeColor",
+            "Name",
+            "FPS",
+            "Platform",
+            "Ping",
+            "Date",
+            "VolumeUp",
+            "VolumeDown",
+            "Volume",
+            "VolumePercent",
+            "MuteElse",
+            "Mute",
+            "AddToSaved"
+        };
+
+        foreach (string part in checkerParts)
+        {
+            Transform t = sideHolder.Find(part);
+            if (t == null)
+                continue;
+            
+            if (!originalScales.ContainsKey(t))
+                originalScales[t] = t.localScale;
+        }
+    }
+
+    public static Vector3 GetCachedScale(Transform t)
+    {
+        if (t != null && originalScales.TryGetValue(t, out Vector3 scale))
+            return scale;
+
+        return Vector3.one;
+    }
 }
 
 public static class MenuEffects
 {
+    private static float EaseOut(float t)
+    {
+        return 1f - Mathf.Pow(1f - t, 5f);
+    }
+
+    public static IEnumerator CheckerCompEnum(Transform menuObj)
+    {
+        if (menuObj == null)
+            yield break;
+
+        Transform sideHolder = menuObj.transform.Find("SideHolder");
+        if (sideHolder == null)
+            yield break;
+
+
+        string[] paths =
+        {
+            "Name",
+            "FPS",
+            "Platform",
+            "Ping",
+            "Date",
+            "VolumeUp",
+            "VolumeDown",
+            "Volume",
+            "VolumePercent",
+            "MuteElse",
+            "Mute",
+            "AddToSaved"
+        };
+
+
+        const float delayBetween = 0.06f;
+        Vector3 hiddenScale = Vector3.zero;
+
+
+        void StartPop(Transform t)
+        {
+            if (t == null) return;
+
+            t.localScale = Vector3.zero;
+
+            CoroutineHandler.Instance.StartCoroutine(
+                PopTransform(t, Tools.GetCachedScale(t))
+            );
+        }
+        
+        StartPop(sideHolder.Find("MonkeBase"));
+        StartPop(sideHolder.Find("MonkeColor"));
+        
+        yield return new WaitForSeconds(delayBetween);
+        
+        foreach (string path in paths)
+        {
+            Transform t = sideHolder.Find(path);
+            StartPop(t);
+
+            yield return new WaitForSeconds(delayBetween);
+        }
+    }
+    
+
+    private static IEnumerator PopTransform(Transform target, Vector3 targetScale)
+    {
+        if (target == null)
+            yield break;
+
+        Vector3 startScale = Vector3.zero;
+        float duration = 0.5f;
+        float time = 0f;
+
+        while (time < duration)
+        {
+            if (target == null)
+                yield break;
+
+            float t = time / duration;
+            float eased = EaseOut(t);
+
+            target.localScale = Vector3.LerpUnclamped(startScale, targetScale, eased);
+
+            time += Time.deltaTime;
+            yield return null;
+        }
+
+        if (target != null)
+            target.localScale = targetScale;
+    }
+    
+    
+    public static void SnapActivated(Transform knob, Transform slider, Renderer bodyRenderer = null, Renderer outlineRenderer = null)
+    {
+        if (knob   != null) knob.localPosition = new Vector3(-1.53f, 0f, 0f);
+        SpriteRenderer sr = slider?.GetComponent<SpriteRenderer>();
+        if (sr             != null) sr.color = MenuTheme.Current.Accent;
+        if (bodyRenderer   != null) bodyRenderer.material.color    = MenuTheme.Current.Button;
+        if (outlineRenderer!= null) outlineRenderer.material.color = MenuTheme.Current.ButtonLight;
+    }
+
+    public static IEnumerator ActivateSwitch(Transform knob, Transform slider, Renderer bodyRenderer = null, Renderer outlineRenderer = null)
+        => SliderEnumActivate(knob, slider, bodyRenderer, outlineRenderer);
+
+    public static IEnumerator DeactivateSwitch(Transform knob, Transform slider, Renderer bodyRenderer = null, Renderer outlineRenderer = null)
+        => SliderEnumDeActivate(knob, slider, bodyRenderer, outlineRenderer);
+
+    public static IEnumerator ToggleSwitch(Transform knob, Transform slider, Renderer bodyRenderer = null, Renderer outlineRenderer = null)
+    {
+        yield return CoroutineHandler.Instance.StartCoroutine(SliderEnumActivate(knob, slider, bodyRenderer, outlineRenderer));
+        yield return CoroutineHandler.Instance.StartCoroutine(SliderEnumDeActivate(knob, slider, bodyRenderer, outlineRenderer));
+    }
+
+    public static IEnumerator KeyboardButtonPress(ButtonTrigger button, Renderer bodyRenderer, Renderer[] outlineRenderers)
+    {
+        if (bodyRenderer == null && (outlineRenderers == null || outlineRenderers.Length == 0))
+            yield break;
+
+        Color bodyStart = MenuTheme.Current.Main;
+        Color outlineStart = MenuTheme.Current.Button;
+        Color bodyPressed = MenuTheme.Current.Button;
+        Color outlinePressed = MenuTheme.Current.ButtonLight;
+
+        if (bodyRenderer != null) bodyRenderer.material.color = bodyStart;
+        if (outlineRenderers != null)
+            foreach (Renderer outline in outlineRenderers)
+                if (outline != null) outline.material.color = outlineStart;
+
+        const float duration = 0.225f;
+        for (float t = 0f; t < duration; t += Time.deltaTime)
+        {
+            float p = EaseOut(t / duration);
+            if (bodyRenderer != null) bodyRenderer.material.color = Color.Lerp(bodyStart, bodyPressed, p);
+            if (outlineRenderers != null)
+                foreach (Renderer outline in outlineRenderers)
+                    if (outline != null) outline.material.color = Color.Lerp(outlineStart, outlinePressed, p);
+            yield return null;
+        }
+
+        for (float t = 0f; t < duration; t += Time.deltaTime)
+        {
+            float p = EaseOut(t / duration);
+            if (bodyRenderer != null) bodyRenderer.material.color = Color.Lerp(bodyPressed, bodyStart, p);
+            if (outlineRenderers != null)
+                foreach (Renderer outline in outlineRenderers)
+                    if (outline != null) outline.material.color = Color.Lerp(outlinePressed, outlineStart, p);
+            yield return null;
+        }
+
+        if (bodyRenderer != null) bodyRenderer.material.color = bodyStart;
+        if (outlineRenderers != null)
+            foreach (Renderer outline in outlineRenderers)
+                if (outline != null) outline.material.color = outlineStart;
+
+        if (button != null)
+            button.KeyboardPressRoutine = null;
+    }
+
+    private static IEnumerator SliderEnumActivate(Transform knob, Transform slider, Renderer bodyRenderer, Renderer outlineRenderer)
+    {
+        if (slider == null || knob == null)
+        {
+            Debug.Log("Not found knob or slider");
+            yield break;
+        }
+
+        float duration = 0.225f;
+        float time = 0f;
+
+        Vector3 startPosition = new Vector3(1.53f, 0f, 0f);
+        Vector3 endPosition   = new Vector3(-1.53f, 0f, 0f);
+
+        SpriteRenderer sr = slider.GetComponent<SpriteRenderer>();
+        if (sr == null)
+        {
+            Debug.LogError("No SpriteRenderer");
+            yield break;
+        }
+
+        Color32 sliderStart   = MenuTheme.Current.ButtonBase;
+        Color32 sliderTarget  = MenuTheme.Current.Accent;
+        Color32 bodyStart     = MenuTheme.Current.Main;
+        Color32 bodyTarget    = MenuTheme.Current.Button;
+        Color32 outlineStart  = MenuTheme.Current.Button;
+        Color32 outlineTarget = MenuTheme.Current.ButtonLight;
+
+        knob.localPosition = startPosition;
+
+        while (time < duration)
+        {
+            float easeT = EaseOut(time / duration);
+
+            knob.localPosition = Vector3.Lerp(startPosition, endPosition, easeT);
+            sr.color = Color.Lerp(sliderStart, sliderTarget, easeT);
+            if (bodyRenderer    != null) bodyRenderer.material.color    = Color.Lerp(bodyStart,    bodyTarget,    easeT);
+            if (outlineRenderer != null) outlineRenderer.material.color = Color.Lerp(outlineStart, outlineTarget, easeT);
+
+            time += Time.deltaTime;
+            yield return null;
+        }
+
+        knob.localPosition = endPosition;
+        sr.color = sliderTarget;
+        if (bodyRenderer    != null) bodyRenderer.material.color    = bodyTarget;
+        if (outlineRenderer != null) outlineRenderer.material.color = outlineTarget;
+    }
+
+    private static IEnumerator SliderEnumDeActivate(Transform knob, Transform slider, Renderer bodyRenderer, Renderer outlineRenderer)
+    {
+        if (slider == null || knob == null)
+        {
+            Debug.Log("Not found knob or slider");
+            yield break;
+        }
+
+        float duration = 0.225f;
+        float time = 0f;
+
+        Vector3 startPosition = new Vector3(-1.53f, 0f, 0f);
+        Vector3 endPosition   = new Vector3( 1.53f, 0f, 0f);
+
+        SpriteRenderer sr = slider.GetComponent<SpriteRenderer>();
+        if (sr == null)
+        {
+            Debug.LogError("No SpriteRenderer");
+            yield break;
+        }
+
+        Color32 sliderStart   = MenuTheme.Current.Accent;
+        Color32 sliderTarget  = MenuTheme.Current.ButtonBase;
+        Color32 bodyStart     = MenuTheme.Current.Button;
+        Color32 bodyTarget    = MenuTheme.Current.Main;
+        Color32 outlineStart  = MenuTheme.Current.ButtonLight;
+        Color32 outlineTarget = MenuTheme.Current.Button;
+
+        knob.localPosition = startPosition;
+
+        while (time < duration)
+        {
+            float easeT = EaseOut(time / duration);
+
+            knob.localPosition = Vector3.Lerp(startPosition, endPosition, easeT);
+            sr.color = Color.Lerp(sliderStart, sliderTarget, easeT);
+            if (bodyRenderer    != null) bodyRenderer.material.color    = Color.Lerp(bodyStart,    bodyTarget,    easeT);
+            if (outlineRenderer != null) outlineRenderer.material.color = Color.Lerp(outlineStart, outlineTarget, easeT);
+
+            time += Time.deltaTime;
+            yield return null;
+        }
+
+        knob.localPosition = endPosition;
+        sr.color = sliderTarget;
+        if (bodyRenderer    != null) bodyRenderer.material.color    = bodyTarget;
+        if (outlineRenderer != null) outlineRenderer.material.color = outlineTarget;
+    }
+    
+    public static IEnumerator TapCircleEnum(Transform circle)
+    {
+        float duration = 0.5f;
+        float time = 0f;
+
+        Vector3 startScale = new Vector3(0.0257443171f, 0.205954537f, 0);
+        Vector3 targetScale = new Vector3(0.338474751f, 2.707798f, 0f); 
+
+        SpriteRenderer sr = circle.GetComponent<SpriteRenderer>();
+        if (sr == null)
+        {
+            Debug.LogError("No SpriteRenderer");
+            yield break;
+        }
+
+        Color startColor = sr.color;
+        float startAlpha = 0.55f;
+        float targetAlpha = 0f;
+        
+        circle.localScale = startScale;
+        sr.color = new Color(startColor.r, startColor.g, startColor.b, startAlpha);
+        
+        while (time < duration)
+        {
+            float t = time / duration;
+            float easeT = EaseOut(t);
+            
+            circle.localScale = Vector3.Lerp(startScale, targetScale, easeT);
+            
+            float newAlpha = Mathf.Lerp(startAlpha, targetAlpha, easeT);
+            sr.color = new Color(startColor.r, startColor.g, startColor.b, newAlpha);
+
+            
+            time += Time.deltaTime;
+            yield return null;
+        }
+        
+        circle.localScale = targetScale;
+        sr.color = new Color(startColor.r, startColor.g, startColor.b, targetAlpha);
+    }
+    
     public static IEnumerator PopMenu(GameObject menuObj, Vector3 targetScale, Vector3 startScale, bool useEaseOut)
     {
+        if (menuObj == null)
+            yield break;
+
         float duration = 0.25f;
         float time = 0f;
         
         while (time < duration)
         {
+            if (menuObj == null)
+                yield break;
+
             float t = time / duration;
             float easeT;
             
@@ -149,8 +622,8 @@ public static class MenuEffects
             yield return null;
         }
         
-        menuObj.transform.localScale = targetScale;
-        Debug.Log("Menu Size: " + menuObj.transform.localScale);
+        if (menuObj != null)
+            menuObj.transform.localScale = targetScale;
     }
 
     public static IEnumerator PopButton(GameObject btnObj, Vector3 targetScale, Vector3 startScale, bool useEaseOut)
@@ -234,136 +707,301 @@ public class FollowMenu : MonoBehaviour
     }
 }
 
+public class SmoothFollowMenu : MonoBehaviour
+{
+    public Transform  Target;
+    public Vector3    LocalPosition;
+    public Quaternion LocalRotation = Quaternion.identity;
+    public float      Smoothing     = 6f;
+
+    private void OnEnable()
+    {
+        if (Target != null)
+            Snap();
+    }
+
+    public void Snap()
+    {
+        transform.position = Target.TransformPoint(LocalPosition);
+        transform.rotation = Target.rotation * LocalRotation;
+    }
+
+    public bool Frozen;
+
+    private void LateUpdate()
+    {
+        if (Target == null || Frozen) return;
+
+        transform.position = Vector3.Lerp(
+            transform.position,
+            Target.TransformPoint(LocalPosition),
+            Smoothing * Time.deltaTime
+        );
+        transform.rotation = Quaternion.Slerp(
+            transform.rotation,
+            Target.rotation * LocalRotation,
+            Smoothing * Time.deltaTime
+        );
+    }
+}
+
+public sealed class MenuThemePalette
+{
+    public Color32 Main         { get; set; } = new(9, 9, 14, 255);
+    public Color32 Border       { get; set; } = new(6, 6, 11, 255);
+    public Color32 Button       { get; set; } = new(15, 15, 23, 255);
+    public Color32 ButtonLight  { get; set; } = new(36, 36, 52, 255);
+    public Color32 ButtonBase   { get; set; } = new(9, 9, 18, 255);
+    public Color32 Accent       { get; set; } = new(203, 166, 247, 255);
+    public Color32 Mid          { get; set; } = new(8, 8, 13, 255);
+    public Color32 MidDark      { get; set; } = new(7, 7, 12, 255);
+    public Color32 DarkAccent   { get; set; } = new(57, 44, 72, 255);
+    public Color32 LightMain    { get; set; } = new(18, 18, 26, 255);
+    public bool    SakuraParts  { get; set; }
+}
+
 public static class MenuTheme
 {
-    private static Transform FindDeepChild(Transform parent, string name)
+    public static class Themes
     {
-        foreach (Transform child in parent)
-        {
-            if (child.name == name)
-                return child;
+        public static readonly MenuThemePalette Default = new();
+        public static readonly MenuThemePalette Sakura = new() { SakuraParts = true };
+    }
 
-            var result = FindDeepChild(child, name);
-            if (result != null)
-                return result;
+    public static MenuThemePalette Current { get; private set; } = Themes.Default;
+
+    private static readonly string[] MainParts =
+    {
+        "Main", "GripMain", "SideMain", "SelectorMain", "SelectorMainSide",
+        "SelectorBtn1", "SelectorBtn2", "SelectorBtn3", "SelectorBtn4", "SelectorBtn5",
+        "SelectorBtn6", "SelectorBtn7", "SelectorBtn8", "SelectorBtn9",
+        "PageNext", "PageBack", "VolumeUp", "VolumeDown", "Mute", "MuteElse", "AddToSaved"
+    };
+
+    private static readonly string[] BorderParts =
+    {
+        "MainBorder", "GripConnect", "SideBorder", "SelectorBorder", "SelectorBorderSide", "Discord"
+    };
+
+    private static readonly string[] MidParts =
+    {
+        "TopHolder", "BottomHolderLight", "InfoMain", "CheckerTitle"
+    };
+
+    private static readonly string[] MidDarkParts =
+    {
+        "BottomHolderDark", "ModsRating", "NameMain", "KeyboardTitle"
+    };
+
+    private static readonly string[] LightMainParts =
+    {
+        "Seperator", "Separator", "Seperator1", "Seperator2", "Seperator3", "Seperator4", "Seperator7"
+    };
+
+    private static readonly string[] DarkAccentParts =
+    {
+        "PageVis1", "PageVis3"
+    };
+
+    private static readonly string[] AccentParts =
+    {
+        "GripAccent", "PageVis2"
+    };
+
+    private static readonly string[] SakuraMainParts =
+    {
+        "Pole1", "Pole2", "BarConnector", "TopBarUnder", "GripPipe",
+        "PoleSide1", "PoleSide2", "BarConnectorSide", "TopBarUnderSide"
+    };
+
+    private static readonly string[] SakuraBorderParts =
+    {
+        "PipeTop1", "PipeTop2", "UnderBar", "PipeTopSide1", "PipeTopSide2", "UnderBarSide"
+    };
+
+    private static readonly string[] SakuraAccentParts =
+    {
+        "TopBar", "TopBarSide"
+    };
+
+    public static void Use(MenuThemePalette theme)
+    {
+        Current = theme;
+    }
+
+    public static void Assign(GameObject menuObj, MenuThemePalette theme)
+    {
+        Use(theme);
+
+        Transform root = menuObj.transform;
+        Apply(root, MainParts, theme.Main);
+        Apply(root, BorderParts, theme.Border);
+        Apply(root, MidParts, theme.Mid);
+        Apply(root, MidDarkParts, theme.MidDark);
+        Apply(root, LightMainParts, theme.LightMain);
+        Apply(root, DarkAccentParts, theme.DarkAccent);
+        Apply(root, AccentParts, theme.Accent);
+
+        ApplyOutlines(root, "SelectorBtn", 9, theme.Button);
+        ApplyOutlines(root, "PageNext", theme.Button);
+        ApplyOutlines(root, "PageBack", theme.Button);
+        ApplyOutlines(root, "VolumeUp", theme.Button);
+        ApplyOutlines(root, "VolumeDown", theme.Button);
+        ApplyOutlines(root, "Mute", theme.Button);
+        ApplyOutlines(root, "MuteElse", theme.Button);
+        ApplyOutlines(root, "AddToSaved", theme.Button);
+
+        if (!theme.SakuraParts) return;
+
+        Apply(root, SakuraMainParts, theme.Main);
+        Apply(root, SakuraBorderParts, theme.Border);
+        Apply(root, SakuraAccentParts, theme.Accent);
+    }
+
+    public static void ApplySelectorButton(Transform selectorButton)
+    {
+        ApplyRenderer(selectorButton, Current.Main);
+        ApplyChild(selectorButton, "Outline", Current.Button);
+    }
+
+    public static void ApplyNavButton(Transform navButton)
+    {
+        ApplyRenderer(navButton, Current.Main);
+        ApplyChild(navButton, "Outline", Current.Button);
+    }
+
+    public static void ApplyMenuButton(Transform button, out Renderer bodyRenderer, out Renderer outlineRenderer)
+    {
+        bodyRenderer = ApplyRenderer(button, Current.Main);
+        outlineRenderer = ApplyChild(button, "Outline", Current.Button);
+    }
+
+    public static void ApplyKeyboard(Transform keyboard)
+    {
+        Apply(keyboard, "Main", Current.Border);
+        Apply(keyboard, "Border", Current.Border);
+        ApplyDirectChildren(keyboard, "Outline", Current.Button);
+    }
+
+    public static void ApplyKeyboardKey(Transform key, out Renderer bodyRenderer, out Renderer outlineRenderer)
+    {
+        ApplyKeyboardKey(key, out bodyRenderer, out Renderer[] outlineRenderers);
+        outlineRenderer = outlineRenderers.Length > 0 ? outlineRenderers[0] : null;
+    }
+
+    public static void ApplyKeyboardKey(Transform key, out Renderer bodyRenderer, out Renderer[] outlineRenderers)
+    {
+        bodyRenderer = ApplyRenderer(key, Current.Main);
+
+        Renderer mainRenderer = ApplyChild(key, "Main", Current.Main);
+        if (mainRenderer != null)
+            bodyRenderer = mainRenderer;
+
+        List<Renderer> renderers = ApplyChildren(key, "Outline", Current.Button);
+        if (renderers.Count == 0)
+            renderers = ApplyChildren(key, "Border", Current.Button);
+
+        outlineRenderers = renderers.ToArray();
+    }
+
+    public static Renderer ApplyKeyboardOutline(Transform outline)
+        => ApplyRenderer(outline, Current.Button);
+
+    private static void Apply(Transform root, IEnumerable<string> names, Color32 color)
+    {
+        foreach (string name in names)
+            Apply(root, name, color);
+    }
+
+    private static void Apply(Transform root, string name, Color32 color)
+    {
+        if (root == null) return;
+
+        foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
+        {
+            if (child.name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                ApplyRenderer(child, color);
         }
+    }
+
+    private static void ApplyDirectChildren(Transform root, string name, Color32 color)
+    {
+        if (root == null) return;
+
+        foreach (Transform child in root)
+        {
+            if (child.name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                ApplyRenderer(child, color);
+        }
+    }
+
+    private static void ApplyOutlines(Transform root, string prefix, int count, Color32 color)
+    {
+        for (int i = 1; i <= count; i++)
+            ApplyOutlines(root, prefix + i, color);
+    }
+
+    private static void ApplyOutlines(Transform root, string parentName, Color32 color)
+    {
+        if (root == null) return;
+
+        foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
+        {
+            if (child.name.Equals(parentName, StringComparison.OrdinalIgnoreCase))
+                ApplyChild(child, "Outline", color);
+        }
+    }
+
+    private static Renderer ApplyChild(Transform parent, string childName, Color32 color)
+    {
+        Transform child = FindDirectOrDeepChild(parent, childName);
+        return child != null ? ApplyRenderer(child, color) : null;
+    }
+
+    private static List<Renderer> ApplyChildren(Transform parent, string childName, Color32 color)
+    {
+        List<Renderer> renderers = new List<Renderer>();
+        if (parent == null) return renderers;
+
+        foreach (Transform child in parent.GetComponentsInChildren<Transform>(true))
+        {
+            if (child == parent || !child.name.Equals(childName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            Renderer renderer = ApplyRenderer(child, color);
+            if (renderer != null)
+                renderers.Add(renderer);
+        }
+
+        return renderers;
+    }
+
+    private static Transform FindDirectOrDeepChild(Transform parent, string name)
+    {
+        if (parent == null) return null;
+
+        foreach (Transform child in parent.GetComponentsInChildren<Transform>(true))
+        {
+            if (child != parent && child.name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                return child;
+        }
+
         return null;
     }
-    
-    private static void ApplyColor(Transform parent, string name, Color32 color)
+
+    private static Renderer ApplyRenderer(Transform target, Color32 color)
     {
-        Transform t = FindDeepChild(parent, name);
-        if (t == null) return;
+        if (target == null) return null;
 
-        Renderer rend = t.GetComponentInChildren<Renderer>();
-        if (rend == null) return;
+        Renderer renderer = target.GetComponent<Renderer>() ?? target.GetComponentInChildren<Renderer>(true);
+        if (renderer == null) return null;
 
-        foreach (var mat in rend.materials)
+        foreach (Material mat in renderer.materials)
         {
             mat.shader = ShaderCache.UberShader;
-            mat.color  = color;
+            mat.color = color;
         }
-    }
 
-    public static void Assign(GameObject menuObj, Color32 mainColor, Color32 borderColor, Color32 buttonColor, Color32 accentColor)
-    {
-        Transform root = menuObj.transform;
-        Transform side = menuObj.transform.Find("SideHolder");
-        
-        ApplyColor(root, "Main",       mainColor);
-        ApplyColor(root, "MainBorder", borderColor);
-        ApplyColor(root, "GripMain",   mainColor);
-        ApplyColor(root, "GripConnect",   borderColor);
-        ApplyColor(root, "GripAccent", accentColor);
-        ApplyColor(side, "SideMain", mainColor);
-        ApplyColor(side, "SideBorder", borderColor);
-        
-        ApplyColor(root, "SelectorBorder", borderColor);
-        ApplyColor(root, "SelectorMain", mainColor);
-        
-        ApplyColor(root, "SelectorMainSide", mainColor);
-        ApplyColor(root, "SelectorBorderSide", borderColor);
-        
-        ApplyColor(root, "SelectorBtn1", buttonColor);
-        ApplyColor(root, "SelectorBtn2", buttonColor);
-        ApplyColor(root, "SelectorBtn3", buttonColor);
-        ApplyColor(root, "SelectorBtn4", buttonColor);
-        ApplyColor(root, "SelectorBtn5", buttonColor);
-        ApplyColor(root, "SelectorBtn6", buttonColor);
-        ApplyColor(root, "SelectorBtn7", buttonColor);
-
-        Color32 midColor = new(15, 15, 25, 255);
-        Color32 midDarkColor = new(14, 14, 24, 255);
-        Color32 darkAccentColor = new(113, 88, 143, 255);
-        Color32 lightMainColor = new(18, 18, 26, 255);
-        ApplyColor(root, "TopHolder", midColor);
-        ApplyColor(root, "BottomHolderLight", midColor);
-        ApplyColor(root, "BottomHolderDark", midDarkColor);
-        ApplyColor(root, "Discord", borderColor);
-        
-        ApplyColor(side, "ReportHateSpeech", buttonColor);
-        ApplyColor(side, "ReportCheating", buttonColor);
-        ApplyColor(side, "ReportToxicity", buttonColor);
-        
-        ApplyColor(root, "Seperator1", lightMainColor);
-        ApplyColor(root, "Seperator2", lightMainColor);
-        
-        ApplyColor(root, "PageNext", buttonColor);
-        ApplyColor(root, "PageBack", buttonColor);
-        ApplyColor(root, "PageVis1", darkAccentColor);
-        ApplyColor(root, "PageVis2", accentColor);
-        ApplyColor(root, "PageVis3", darkAccentColor);
-        
-        ApplyColor(side, "ComScoreUp", buttonColor);
-        ApplyColor(side, "ComScoreDown", buttonColor);
-        
-        ApplyColor(menuObj.transform.Find("SideHolder/SusBar"), "SusBarOutline", buttonColor);
-        ApplyColor(menuObj.transform.Find("SideHolder"), "SusBar", lightMainColor);
-        
-        ApplyColor(side, "VolumeUp", buttonColor);
-        ApplyColor(side, "VolumeDown", buttonColor);
-        ApplyColor(side, "Mute", buttonColor);
-        ApplyColor(side, "MuteElse", buttonColor);
-        
-        ApplyColor(root, "BackPage", buttonColor);
-        ApplyColor(root, "NextPage", buttonColor);
-        ApplyColor(root, "HomeBtn", buttonColor);
-        
-        ApplyColor(side, "Mods", buttonColor);
-        ApplyColor(side, "Cheats", buttonColor);
-        ApplyColor(side, "User", buttonColor);
-    }
-
-    public static void AssignSakura(GameObject menuObj, Color32 mainColor, Color32 borderColor, Color32 accentColor)
-    {
-        Color32 buttonColor = new(30, 30, 46,  255);
-        
-        // Base colors
-        Assign(menuObj, mainColor, borderColor, buttonColor, accentColor);
-
-        Transform root = menuObj.transform;
-        Transform side = menuObj.transform.Find("SideHolder");
-        
-        // Extra sakura parts
-        ApplyColor(root, "Pole1",        mainColor);
-        ApplyColor(root, "Pole2",        mainColor);
-        ApplyColor(root, "PipeTop1",     borderColor);
-        ApplyColor(root, "PipeTop2",     borderColor);
-        ApplyColor(root, "UnderBar",     borderColor);
-        ApplyColor(root, "BarConnector", mainColor);
-        ApplyColor(root, "TopBarUnder",  mainColor);
-        ApplyColor(root, "TopBar",       accentColor);
-        
-        ApplyColor(root, "GripPipe",   mainColor);
-        ApplyColor(root, "GripAccent", accentColor);
-        
-        ApplyColor(side, "PoleSide1",        mainColor);
-        ApplyColor(side, "PoleSide2",        mainColor);
-        ApplyColor(side, "PipeTopSide1",     borderColor);
-        ApplyColor(side, "PipeTopSide2",     borderColor);
-        ApplyColor(side, "UnderBarSide",     borderColor);
-        ApplyColor(side, "BarConnectorSide", mainColor);
-        ApplyColor(side, "TopBarUnderSide",  mainColor);
-        ApplyColor(side, "TopBarSide",       accentColor);
+        return renderer;
     }
 }

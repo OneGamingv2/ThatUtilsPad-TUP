@@ -8,6 +8,7 @@ using System.Text;
 using System.Linq;
 using BepInEx;
 using GorillaLocomotion;
+using GorillaNetworking;
 using HarmonyLib;
 using Newtonsoft.Json.Linq;
 using PlayFab;
@@ -33,6 +34,11 @@ public class Main : BaseUnityPlugin
     private const bool AlwaysShowMenu   = false;
     private const bool toggleMenuMethod = true;
     private bool       menuInitialized  = false;
+    private int        currentPage      = 0;
+    private const int  PageSize         = 7;
+    private static readonly MenuThemePalette Theme = UseSakuraTheme
+        ? MenuTheme.Themes.Sakura
+        : MenuTheme.Themes.Default;
 
     public static Main Instance;
     public bool   IsAdmin;
@@ -41,43 +47,48 @@ public class Main : BaseUnityPlugin
     private bool       isKeyValid = false;
     private GameObject keyInputUI;
 
-    private readonly Color32          accentColor = new(203, 166, 247, 255);
-    private readonly Color32          borderColor = new(12,  12,  22,  255);
     private readonly List<GameObject> btnObjs     = [];
     private readonly List<GameObject> selectorBtnObjs = new List<GameObject>();
+    private readonly List<GameObject> navBtnObjs      = new List<GameObject>();
 
     private readonly Vector3    buttonBasePosition = new(-0.044f, 0f, 0f);
     private readonly Quaternion buttonBaseRotation = Quaternion.Euler(0f, 0f, 180f);
     private readonly Vector3    buttonBaseScale = new Vector3(1.91f, 33.75f, 3.61f);
 
-    private readonly Color32 buttonColor        = new(30, 30, 46, 255);
-    private readonly Color32 buttonOutlineColor = new(18, 18, 36, 255);
-
     private bool previousControllerState;
     
     private Coroutine buttonRoutine;
     private Coroutine categoryRoutine;
-
-    private readonly Color32 mainColor = new(17, 17, 27, 255);
+    private static readonly Dictionary<GameObject, Vector3> KeyboardScales = new Dictionary<GameObject, Vector3>();
+    private static readonly Dictionary<GameObject, Coroutine> KeyboardScaleRoutines = new Dictionary<GameObject, Coroutine>();
 
     private readonly Vector3 menuGripPosition = new(0f, -0.17f, 0f);
     private readonly Vector3 menuHandOffset   = new(0f,  0f,    0f);
 
     private GameObject  btnPrefab;
     private AssetBundle buttonBundle;
-
+    private AssetBundle notifBundle;
+    
     private MenuOpenType currentOpenType;
-    private AudioClip    helloSound;
-    private AudioClip    menuOpenSound;
-    private AudioClip    btnEnterSound;
-    private AudioClip    clickSound;
-    private bool         isMenuOpened = false;
+
+    public AudioClip     currentClickSound;
+    
+    public AudioClip    helloSound;
+    public AudioClip    menuOpenSound;
+    public AudioClip    btnEnterSound;
+    public AudioClip    minecraftSound;
+    public AudioClip    wiiSound;
+    public AudioClip    watchSound;
+    public AudioClip    destinySound;
+    public AudioClip    untitledClickSound;
+    public AudioClip    creamySound;
+    private bool        isMenuOpened = false;
 
     private AssetBundle menuBundle;
-    private float       menuGripRotaton = -20f;
+    private float       menuGripRotaton = -60f;
 
     private GameObject  selectorObj;
-    private GameObject  menuObj;
+    public  static GameObject  menuObj;
     private AssetBundle sakuraBundle;
     private AssetBundle menuCheckerExpBundle;
     private AssetBundle menuPanelExpansionBundle;
@@ -96,19 +107,26 @@ public class Main : BaseUnityPlugin
     
     private TMP_Text nameTextComp;
     private TMP_Text fpsTextComp;
+    private TMP_Text platformTextComp;
+    private TMP_Text trustTextComp;
+    private TMP_Text pingTextComp;
     private TMP_Text colorTextComp;
     private TMP_Text dateTextComp;
     private TMP_Text modsTextComp;
     private TMP_Text cheatsTextComp;
-    private TMP_Text repCheatingComp;
-    private TMP_Text repToxicityComp;
-    private TMP_Text repHateSpeechComp;
+    
+    public static TextMeshPro queueText;
+    public static TextMeshPro modeText;
+    public static TextMeshPro clickSoundText;
+    
+    public static TMPro.TextMeshPro volumeText;
 
     public static Camera FirstPersonCamera { get; private set; }
     public static Camera ThirdPersonCamera { get; private set; }
     
     public static Dictionary<string, float> VolumeByPlayerID = new Dictionary<string, float>();
-
+    
+    
     private void Awake()
     {
         Instance = this;
@@ -121,7 +139,7 @@ public class Main : BaseUnityPlugin
                   "   .::=*=-+*--++-:.   ┣────────────────────────────────────────┫\n" +
                   "   .+*************-   │ TUP: ThatUtilsPad                      │\n" +
                   "      :*.     ++.     │ Discord: https://discord.gg/fuJcTWsn   │\n" +
-                  "      :*.     ++.     │ Made by Jelly and Kwyf <3              │\n" +
+                  "      :*.     ++.     │ Made by Jelly and Kwyf and Xeptic <3   │\n" +
                   "                      └────────────────────────────────────────┘\n");
         
         GorillaTagger.OnPlayerSpawned(OnPlayerSpawned);
@@ -522,15 +540,88 @@ public class Main : BaseUnityPlugin
         FontCache.LoadFonts();
         ShaderCache.Init();
         new GameObject("TUP_CoroutineHandler").AddComponent<CoroutineHandler>();
-        btnPrefab = buttonBundle.LoadAsset<GameObject>("assets/prefabs/buttonmodel.prefab");
+        foreach (var n in buttonBundle.GetAllAssetNames()) Debug.Log("[TUP BUNDLE] " + n);
+        btnPrefab = buttonBundle.LoadAsset<GameObject>("assets/prefabs/buttonmodel-rename.prefab");
+        NotificationLib.Initialize(notifBundle);
+        NotificationLib.SendNotification("ThatUtilsPad", "Notification system ready", 3f);
         InitMenu();
+        InitSettings();
     }
+    
+    
+    private void InitCycleBtns()
+    {
+        if (menuObj == null) return;
 
+        GorillaComputer gorillaComputer = GorillaComputer.instance;
+        if (gorillaComputer == null)
+        {
+            Debug.LogError("[TUP] GorillaComputer instance is null");
+            return;
+        }
+        
+        Transform queueTextTransform = menuObj.transform.Find("Queue/ButtonText");
+        if (queueTextTransform != null && queueTextTransform.TryGetComponent(out TextMeshPro qText))
+        {
+            queueText = qText;
+            queueText.text = "Queue  :  " + gorillaComputer.currentQueue;
+        }
+        Transform queueSliderTransform = menuObj.transform.Find("Queue/Slider");
+        Transform queueArrowTransform = menuObj.transform.Find("Queue/NextArrow");
+
+        if (queueSliderTransform != null && queueArrowTransform != null)
+        {
+            queueSliderTransform.transform.gameObject.SetActive(false);
+            queueArrowTransform.transform.gameObject.SetActive(true);
+        }
+        
+
+        Transform modeTransform = menuObj.transform.Find("Mode/ButtonText");
+        if (modeTransform != null && modeTransform.TryGetComponent(out TextMeshPro mText))
+        {
+            modeText = mText;
+            modeText.text = "Mode  :  " + gorillaComputer.currentGameMode.ToString();
+        }
+        Transform modeSliderTransform = menuObj.transform.Find("Mode/Slider");
+        Transform modeArrowTransform = menuObj.transform.Find("Mode/NextArrow");
+
+        if (modeSliderTransform != null && modeArrowTransform != null)
+        {
+            modeSliderTransform.transform.gameObject.SetActive(false);
+            modeArrowTransform.transform.gameObject.SetActive(true);
+        }
+        
+        
+        Transform clickSoundTransform = menuObj.transform.Find("Click Sound/ButtonText");
+        if (clickSoundTransform != null && clickSoundTransform.TryGetComponent(out TextMeshPro csText))
+        {
+            clickSoundText = csText;
+            string rawName   = Mods.clickSounds.Count > 0 ? Mods.clickSounds[Mods.currentClickIndex].Name : "-";
+            string soundName = rawName.Length > 0 ? char.ToUpper(rawName[0]) + rawName.Substring(1).ToLower() : "-";
+            clickSoundText.text = "Click Sound  :  " + soundName;
+        }
+        Transform clickSoundSliderTransform = menuObj.transform.Find("Click Sound/Slider");
+        Transform clickSoundArrowTransform = menuObj.transform.Find("Click Sound/NextArrow");
+
+        if (clickSoundSliderTransform != null && clickSoundArrowTransform != null)
+        {
+            clickSoundSliderTransform.transform.gameObject.SetActive(false);
+            clickSoundArrowTransform.transform.gameObject.SetActive(true);
+        }
+    }
+    
+    private void InitSettings()
+    {
+        currentClickSound = watchSound;
+    }
+    
     private void Update()
     {
         if (!isKeyValid)
             return;
 
+        Mods.NameTagsLoop();
+        
         bool currentControllerState     = ControllerInputPoller.instance.leftControllerSecondaryButton;
         bool controllerPressedThisFrame = currentControllerState && !previousControllerState;
         previousControllerState = currentControllerState;
@@ -538,42 +629,43 @@ public class Main : BaseUnityPlugin
         bool keyboardPressedThisFrame = Keyboard.current != null && Keyboard.current.tKey.wasPressedThisFrame;
         bool keyboardHeld             = Keyboard.current != null && Keyboard.current.tKey.isPressed;
 
-        if (toggleMenuMethod && !AlwaysShowMenu)
+        if (!Mods.IsRenaming)
         {
-            bool togglePressed = controllerPressedThisFrame || keyboardPressedThisFrame;
-
-            if (togglePressed)
+            if (toggleMenuMethod && !AlwaysShowMenu)
             {
-                if (isMenuOpened)
+                bool togglePressed = controllerPressedThisFrame || keyboardPressedThisFrame;
+
+                if (togglePressed)
+                {
+                    if (isMenuOpened)
+                    {
+                        StartCoroutine(CloseMenu());
+                        isMenuOpened = false;
+                    }
+                    else
+                    {
+                        currentOpenType = currentControllerState ? MenuOpenType.Hand : MenuOpenType.Head;
+                        OpenMenu();
+                        isMenuOpened = true;
+                    }
+                }
+            }
+            else
+            {
+                bool controllerHeld = currentControllerState;
+                bool keyboardIsHeld = keyboardHeld;
+
+                if (!isMenuOpened && (controllerHeld || keyboardIsHeld || AlwaysShowMenu))
+                {
+                    currentOpenType = controllerHeld ? MenuOpenType.Hand : MenuOpenType.Head;
+                    OpenMenu();
+                    isMenuOpened = true;
+                }
+                else if (isMenuOpened && !controllerHeld && !keyboardIsHeld && !AlwaysShowMenu)
                 {
                     StartCoroutine(CloseMenu());
                     isMenuOpened = false;
                 }
-                else
-                {
-                    currentOpenType = currentControllerState ? MenuOpenType.Hand : MenuOpenType.Head;
-                    OpenMenu();
-                    isMenuOpened = true;
-                    buttonRoutine = StartCoroutine(CreateButtons());
-                }
-            }
-        }
-        else
-        {
-            bool controllerHeld = currentControllerState;
-            bool keyboardIsHeld = keyboardHeld;
-
-            if (!isMenuOpened && (controllerHeld || keyboardIsHeld || AlwaysShowMenu))
-            {
-                currentOpenType = controllerHeld ? MenuOpenType.Hand : MenuOpenType.Head;
-                OpenMenu();
-                isMenuOpened = true;
-                buttonRoutine = StartCoroutine(CreateButtons());
-            }
-            else if (isMenuOpened && !controllerHeld && !keyboardIsHeld && !AlwaysShowMenu)
-            {
-                StartCoroutine(CloseMenu());
-                isMenuOpened = false;
             }
         }
 
@@ -590,17 +682,27 @@ public class Main : BaseUnityPlugin
 
         StartCoroutine(MenuEffects.SpawnHitCircle(hit.point, hit.transform));
 
-        if (hit.collider.TryGetComponent(out ButtonTrigger buttonTrigger))
+        if (!hit.collider.TryGetComponent(out ButtonTrigger buttonTrigger))
+            buttonTrigger = hit.collider.GetComponentInParent<ButtonTrigger>();
+
+        if (buttonTrigger != null)
             ButtonTrigger.PcPress(buttonTrigger);
     }
     
+    private static void PrintHierarchy(Transform t, int depth)
+    {
+        Debug.Log(new string('-', depth * 2) + t.name);
+        foreach (Transform child in t)
+            PrintHierarchy(child, depth + 1);
+    }
+
     private void InitMenu()
     {
         if (menuInitialized)
             return;
 
         string prefabPath = UseSakuraTheme
-            ? "assets/prefabs/tup-overhaul.prefab"
+            ? "assets/prefabs/TUP-overv7.prefab"
             : "assets/prefabs/tup-modelsmooth.prefab";
 
         AssetBundle bundle = UseSakuraTheme ? menuReduxBundle : menuBundle;
@@ -609,9 +711,13 @@ public class Main : BaseUnityPlugin
         
         menuObj = Instantiate(prefab);
         menuObj.transform.localScale = Vector3.one * 0.375f;
-
+        
+        //monkeColor = menuObj.transform.Find("SideHolder/MonkeColor").GetComponent<SpriteRenderer>();
+        volumeText = menuObj.transform.Find("SideHolder/VolumePercent").GetComponent<TextMeshPro>();
+        
         InitPageButtons(menuObj);
         InitCheckerText(menuObj);
+        InitRoomInfo(menuObj);
 
         Rigidbody rb = menuObj.GetComponent<Rigidbody>();
         if (rb != null) Destroy(rb);
@@ -626,62 +732,107 @@ public class Main : BaseUnityPlugin
             renderer.material.color = new Color32(171, 0, 63, 255);
         }
 
-        if (UseSakuraTheme)
-            MenuTheme.AssignSakura(menuObj, mainColor, borderColor, accentColor);
-        else
-            MenuTheme.Assign(menuObj, mainColor, borderColor, buttonColor, accentColor);
-        
+        PrintHierarchy(menuObj.transform, 0);
+
+        MenuTheme.Assign(menuObj, Theme);
+
+        InitNavButtons(menuObj);
+        InitKeyboard();
+
         menuObj.SetActive(false);
         menuInitialized = true;
+        StartCoroutine(RoomInfoUpdater());
     }
     
-    private void OpenMenu()
+private void OpenMenu()
+{
+    if (!menuInitialized || menuObj == null)
+        return;
+
+    Transform parent = currentOpenType == MenuOpenType.Head
+        ? GetActiveCamera().transform
+        : GTPlayer.Instance.LeftHand.controllerTransform;
+
+    menuObj.transform.SetParent(null);
+
+    SmoothFollowMenu smooth = menuObj.GetComponent<SmoothFollowMenu>() ?? menuObj.AddComponent<SmoothFollowMenu>();
+    smooth.Target = parent;
+
+    if (currentOpenType == MenuOpenType.Head)
     {
-        if (!menuInitialized || menuObj == null)
-            return;
-
-        Transform parent = currentOpenType == MenuOpenType.Head
-            ? GetActiveCamera().transform
-            : GTPlayer.Instance.LeftHand.controllerTransform;
-
-        menuObj.transform.SetParent(parent, true);
-
-        if (currentOpenType == MenuOpenType.Head)
-        {
-            menuObj.transform.localPosition = new Vector3(-0.03f, -0.02f, 0.6f);
-            menuObj.transform.localRotation = Quaternion.Euler(0f, 270f, 0f);
-        }
-        else
-        {
-            menuObj.transform.localPosition = menuHandOffset + menuGripPosition;
-            menuObj.transform.localRotation = Quaternion.Euler(270f, 180f, menuGripRotaton);
-        }
-
-        menuObj.SetActive(true);
-
-        AudioSource audioSource = gameObject.GetComponent<AudioSource>() ?? gameObject.AddComponent<AudioSource>();
-        audioSource.PlayOneShot(menuOpenSound);
-        
-        StartCoroutine(MenuEffects.PopMenu(menuObj, Vector3.one * 0.375f, Vector3.zero, true));
-        
-        Debug.Log("Menu Opened");
-        Debug.Log(menuObj.activeSelf);
-        
-        foreach (GameObject selectorObj in selectorBtnObjs)
-            selectorObj.SetActive(true);
-        
-        DestroyButtons();
-        InitSelectorObj();
-        buttonRoutine = StartCoroutine(CreateButtons());
+        smooth.LocalPosition = new Vector3(-0.03f, -0.02f, 0.6f);
+        smooth.LocalRotation = Quaternion.Euler(0f, 270f, 0f);
+    }
+    else
+    {
+        smooth.LocalPosition = menuHandOffset + menuGripPosition;
+        smooth.LocalRotation = Quaternion.Euler(270f - menuGripRotaton, 180f, 0f);
     }
     
-    public void UpdateCheckerText(string plrName, int plrFPS, string plrPlatform, string plrColor)
+    Tools.CacheCheckerScales(menuObj.transform);
+    
+    Transform sideHolder = menuObj.transform.Find("SideHolder");
+    if (sideHolder != null)
     {
-        nameTextComp.text = plrName.ToUpper();
-        fpsTextComp.text =
-            $"<color=orange>{plrFPS}</color> │ <color=#CBA6F7>{plrPlatform}</color>";
-        colorTextComp.text = plrColor;
+        string[] checkerParts =
+        {
+            "MonkeBase",
+            "MonkeColor",
+            "Name",
+            "FPS",
+            "Platform",
+            "Ping",
+            "Date",
+            "VolumeUp",
+            "VolumeDown",
+            "Volume",
+            "VolumePercent",
+            "MuteElse",
+            "Mute",
+            "AddToSaved"
+        };
+
+        foreach (string part in checkerParts)
+        {
+            Transform t = sideHolder.Find(part);
+            if (t != null)
+                t.localScale = Vector3.zero;
+        }
     }
+    
+    foreach (GameObject selectorObj in selectorBtnObjs)
+        selectorObj.SetActive(true);
+
+    foreach (GameObject navBtn in navBtnObjs)
+        navBtn.SetActive(true);
+
+    menuObj.SetActive(true);
+
+    AudioSource audioSource =
+        gameObject.GetComponent<AudioSource>() ??
+        gameObject.AddComponent<AudioSource>();
+
+    audioSource.PlayOneShot(menuOpenSound);
+
+    StartCoroutine(
+        MenuEffects.PopMenu(
+            menuObj,
+            Vector3.one * 0.375f,
+            Vector3.zero,
+            true
+        )
+    );
+
+    StartCoroutine(MenuEffects.CheckerCompEnum(menuObj.transform));
+
+    Debug.Log("Menu Opened");
+    Debug.Log(menuObj.activeSelf);
+
+    DestroyButtons();
+    InitSelectorObj();
+    buttonRoutine = StartCoroutine(CreateButtons());
+}
+    
 
     private TMP_Text FindText(GameObject obj, string parentName)
     {
@@ -698,6 +849,7 @@ public class Main : BaseUnityPlugin
 
         return tmp;
     }
+
     
     private void InitCheckerText(GameObject menuObj)
     {
@@ -712,43 +864,33 @@ public class Main : BaseUnityPlugin
         GameObject side = menuObj.transform.Find("SideHolder").gameObject;
         
         nameTextComp        = FindText(side, "Name");
-        fpsTextComp         = FindText(side, "PlatformFPS");
-        colorTextComp       = FindText(side, "Color");
+        platformTextComp    = FindText(side, "Platform");
+        fpsTextComp         = FindText(side, "FPS");
+        pingTextComp        = FindText(side, "Ping");
         dateTextComp        = FindText(side, "Date");
         modsTextComp        = FindText(side, "Mods");
         cheatsTextComp      = FindText(side, "Cheats");
-        repCheatingComp     = FindText(side, "ReportCheating/Cheating");
-        repToxicityComp     = FindText(side, "ReportToxicity/Toxicity");
-        repHateSpeechComp   = FindText(side, "ReportHateSpeech/Hate");
         
-        nameTextComp.text = "GREENGORILLA";
+        nameTextComp.text = "-----";
         nameTextComp.font = figtreeFont;
         
-        colorTextComp.text = "0 9 0";
-        colorTextComp.font = figtreeFont;
-        
-        fpsTextComp.text = "<color=orange>60Hz</color>" +
-                           " │ " +
-                           "<color=#CBA6F7>Steam</color>";
+        fpsTextComp.text = "FPS                -       ";
         fpsTextComp.font = figtreeFont;
         
-        dateTextComp.text = "<color=lightblue>--/--/----</color>";
+        platformTextComp.text = "Platform       -       ";
+        platformTextComp.font = figtreeFont;
+        
+        pingTextComp.text = "Ping               -       ";
+        pingTextComp.font = figtreeFont;
+        
+        dateTextComp.text = "Date              -       ";
         dateTextComp.font = figtreeFont;
         
-        modsTextComp.text = "<color=green>Mods: 0</color>";
+        modsTextComp.text = "Mods       -   <color=green>Bark, GorillaFPS</color>";
         modsTextComp.font = figtreeFont;
         
-        cheatsTextComp.text = "<color=red>Cheats: 0</color>";
+        cheatsTextComp.text = "Cheats    -   <color=red>None</color>";
         cheatsTextComp.font = figtreeFont;
-        
-        repCheatingComp.text = "Report Cheating";
-        repCheatingComp.font = figtreeFont;
-        
-        repToxicityComp.text = "Report Toxicity";
-        repToxicityComp.font = figtreeFont;
-        
-        repHateSpeechComp.text = "Report Hate";
-        repHateSpeechComp.font = figtreeFont;
 
         List<string> btns = new List<string>()
         {
@@ -757,38 +899,120 @@ public class Main : BaseUnityPlugin
             "MuteElse",
             "Mute"
         };
-
+        
+        
         foreach (string btn in btns)
         {
-            var button = menuObj.transform.Find("SideHolder").gameObject.transform.Find(btn).gameObject;
+            var sideHolder = menuObj.transform.Find("SideHolder");
+            var button = sideHolder.Find(btn)?.gameObject;
+            if (button == null)
+            {
+                Debug.LogError($"[TUP] Button not found: {btn}");
+                continue;
+            }
             button.layer = 2;
             
             ButtonTrigger trigger = button.AddComponent<ButtonTrigger>();
-            trigger.BtnIdentifier         = btn;
-            //trigger.pressButtonSoundIndex = 28;
+
+            trigger.BtnIdentifier = btn;
+            button.AddComponent<ButtonCollider>().trigger = trigger;
             
-            Collider col = button.GetComponent<Collider>();
+            var col = button.GetComponent<Collider>();
             if (col == null)
                 col = button.AddComponent<BoxCollider>();
+
             col.isTrigger = true;
 
-            Rigidbody rb = button.GetComponent<Rigidbody>();
-            if (rb != null)
-                Destroy(rb);
-            
-            GameObject quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            quad.transform.SetParent(button.transform);
-            quad.transform.localPosition = new Vector3(0f, 0f, 0.011f);
-            quad.transform.localRotation = Quaternion.Euler(0f, 180f, 90f);
-            quad.transform.localScale = new Vector3(0.012f, 0.012f, 0.012f);
+            var rb = button.GetComponent<Rigidbody>();
+            if (rb == null)
+                rb = button.AddComponent<Rigidbody>();
 
-            var quadCol = quad.GetComponent<Collider>();
-            if (quadCol != null)
-                Destroy(quadCol);
+            rb.isKinematic = true;
+            rb.useGravity = false;
             
-            Renderer quadRend = quad.GetComponent<Renderer>();
-            quadRend.material = new Material(Shader.Find("Unlit/Texture"));
-            quadRend.material.mainTexture = MenuComponents.Tools.LoadEmbeddedImage(btn.ToLower() + ".png");
+            //GameObject quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            //quad.transform.SetParent(button.transform);
+            //quad.transform.localPosition = new Vector3(0f, 0f, 0.011f);
+            //quad.transform.localRotation = Quaternion.Euler(0f, 180f, 90f);
+            //quad.transform.localScale = new Vector3(0.012f, 0.012f, 0.012f);
+
+            //var quadCol = quad.GetComponent<Collider>();
+            //if (quadCol != null)
+            //   Destroy(quadCol);
+            
+            //Renderer quadRend = quad.GetComponent<Renderer>();
+            //quadRend.material = new Material(Shader.Find("Unlit/Texture"));
+            //quadRend.material.mainTexture = MenuComponents.Tools.LoadEmbeddedImage(btn.ToLower() + ".png");
+        }
+    }
+    
+    public void UpdateCheckerText(string plrName, int plrFPS, string plrPlatform, string plrCreationDate, string plrColor, Color colorBaseForm, int plrPing)
+    {
+        nameTextComp.text = $"{plrName.ToUpper()}   {plrColor}";
+        
+        
+        if (plrFPS < 60)
+            fpsTextComp.text = $"<color=yellow>FPS                -       {plrFPS}</color>";
+        else
+            fpsTextComp.text = $"<color=white>FPS                -       {plrFPS}</color>";
+        
+        
+        if (plrPing > 275)
+            pingTextComp.text = $"<color=yellow>Ping               -       {plrPing}</color>";
+        else
+            pingTextComp.text = $"<color=white>Ping               -       {plrPing}</color>";
+        
+        
+        platformTextComp.text = $"Platform       -       {plrPlatform}";
+        dateTextComp.text = $"<color=#1E1E2E>Date              -       {plrCreationDate}</color>";
+
+        var monkeColor = menuObj.transform.Find("SideHolder/MonkeColor").transform.GetComponent<SpriteRenderer>();
+        monkeColor.color = colorBaseForm;
+    }
+    
+    
+    TMP_Text roomInfoText;
+    TMP_Text roomNameText;
+    TMP_Text dateTimeText;
+
+    private void InitRoomInfo(GameObject menuObj)
+    {
+        Transform menu = menuObj.transform;
+
+        roomInfoText = menu.Find("RoomInfo")?.GetComponent<TMP_Text>();
+        roomNameText = menu.Find("RoomName")?.GetComponent<TMP_Text>();
+        dateTimeText = menu.Find("DateTime")?.GetComponent<TMP_Text>();
+
+        if (roomInfoText == null) Debug.LogError("RoomInfo not found");
+        if (roomNameText == null) Debug.LogError("RoomName not found");
+        if (dateTimeText == null) Debug.LogError("DateTime not found");
+    }
+    
+    private IEnumerator RoomInfoUpdater()
+    {
+        WaitForSeconds wait = new WaitForSeconds(1f);
+
+        while (true)
+        {
+            if (isKeyValid && isMenuOpened)
+            {
+                string date = DateTime.Now.ToString("MM/dd/yy");
+                string time = DateTime.Now.ToString("HH:mm");
+
+                dateTimeText.text = $"{date}   |   {time}";
+
+                string roomName = Photon.Pun.PhotonNetwork.CurrentRoom?.Name ?? "----";
+                roomNameText.text = roomName;
+
+                int players = Photon.Pun.PhotonNetwork.CurrentRoom?.PlayerCount ?? 0;
+                int max = Photon.Pun.PhotonNetwork.CurrentRoom?.MaxPlayers ?? 10;
+                int ping = Photon.Pun.PhotonNetwork.GetPing();
+                string name = Photon.Pun.PhotonNetwork.NickName;
+
+                roomInfoText.text = $"{players}/{max} Players  |  {ping} ms  |  {name}";
+            }
+
+            yield return wait;
         }
     }
 
@@ -813,7 +1037,7 @@ public class Main : BaseUnityPlugin
         
         var rend = selectionObj.GetComponent<Renderer>();
         rend.material.shader = ShaderCache.UberShader;
-        rend.material.color = accentColor;
+        rend.material.color = Theme.Accent;
     }
     
     private IEnumerator CloseMenu()
@@ -830,6 +1054,9 @@ public class Main : BaseUnityPlugin
 
         foreach (GameObject selectorObj in selectorBtnObjs)
             selectorObj.SetActive(false);
+
+        foreach (GameObject navBtn in navBtnObjs)
+            navBtn.SetActive(false);
         
         
         Debug.Log("Menu Closed");
@@ -837,24 +1064,27 @@ public class Main : BaseUnityPlugin
     }
     
     private string GenHWID() => SystemInfo.deviceUniqueIdentifier;
-
+    
     private IEnumerator CreateButtons(string categoryName = "Networking")
     {
         const float startY = 0.31f;
         const float gap    = 0.09f;
 
-        int index = 0;
-
         if (!Mods.Actions.TryGetValue(currentCategory, out var category))
             yield break;
 
-        foreach (var mod in category.Actions)
-        {
-            float height = startY - (index * gap);
+        var actionList = category.Actions.ToList();
+        int start = currentPage * PageSize;
+        int end   = Math.Min(start + PageSize, actionList.Count);
 
-            CreateButton(height, mod.Key);
+        int index = 0;
+        for (int i = start; i < end; i++)
+        {
+            var mod      = actionList[i];
+            float height = startY - (index * gap);
+            CreateButton(height, mod.Key, mod.Value.IsToggle, mod.Value.Cooldown);
             index++;
-            yield return new WaitForSeconds(0.15f);
+            yield return new WaitForSeconds(0.08f);
         }
     }
     
@@ -862,6 +1092,10 @@ public class Main : BaseUnityPlugin
     {
         Tools.StopCoroutine(ref buttonRoutine);
         currentCategory = categoryName;
+        currentPage = 0;
+
+        if (categoryName == "Cosmetics")
+            Mods.InitOutfitSlotActions();
 
         DestroyButtons();
         buttonRoutine = StartCoroutine(CreateButtons());
@@ -908,9 +1142,7 @@ public class Main : BaseUnityPlugin
             follow.Position = previousLocalPos;
             follow.Rotation = previousLocalRot;
 
-            var rend = child.GetComponent<Renderer>();
-            rend.material.shader = ShaderCache.UberShader;
-            rend.material.color = buttonColor;
+            MenuTheme.ApplySelectorButton(child);
             
             GameObject quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
             quad.transform.SetParent(child.transform);
@@ -955,17 +1187,118 @@ public class Main : BaseUnityPlugin
         }
     }
 
+    private void InitNavButtons(GameObject menuObj)
+    {
+        string[] navNames = { "PageBack", "PageNext" };
+        foreach (string navName in navNames)
+        {
+            Transform navTransform = null;
+            foreach (Transform child in menuObj.GetComponentsInChildren<Transform>(true))
+            {
+                if (child.name.Equals(navName, StringComparison.OrdinalIgnoreCase))
+                {
+                    navTransform = child;
+                    break;
+                }
+            }
+            if (navTransform == null)
+            {
+                Debug.LogWarning($"[TUP] Nav button '{navName}' not found in menu prefab");
+                continue;
+            }
+
+            navTransform.gameObject.layer = 2;
+
+            Collider col = navTransform.GetComponent<Collider>();
+            if (col == null)
+                col = navTransform.gameObject.AddComponent<BoxCollider>();
+            col.isTrigger = true;
+
+            Rigidbody rb = navTransform.GetComponent<Rigidbody>();
+            if (rb == null)
+                rb = navTransform.gameObject.AddComponent<Rigidbody>();
+            rb.isKinematic = true;
+            rb.useGravity  = false;
+
+            ButtonTrigger trigger = navTransform.AddComponent<ButtonTrigger>();
+            trigger.BtnIdentifier = navName;
+            navTransform.AddComponent<ButtonCollider>().trigger = trigger;
+
+            Vector3    prevLocalPos = navTransform.localPosition;
+            Quaternion prevLocalRot = navTransform.localRotation;
+            navTransform.parent = null;
+
+            var follow    = navTransform.AddComponent<FollowMenu>();
+            follow.Target   = menuObj.transform;
+            follow.Position = prevLocalPos;
+            follow.Rotation = prevLocalRot;
+
+            MenuTheme.ApplyNavButton(navTransform);
+
+            int delta = navName == "PageNext" ? 1 : -1;
+            trigger.CustomAction = () => ChangePage(delta);
+
+            navBtnObjs.Add(navTransform.gameObject);
+        }
+    }
+
+    private void ChangePage(int delta)
+    {
+        if (!Mods.Actions.TryGetValue(currentCategory, out var category))
+            return;
+
+        int totalPages = Mathf.Max(1, Mathf.CeilToInt((float)category.Actions.Count / PageSize));
+        currentPage = (currentPage + delta + totalPages) % totalPages;
+
+        Tools.StopCoroutine(ref buttonRoutine);
+        DestroyButtons();
+        buttonRoutine = StartCoroutine(CreateButtons());
+    }
+
+    public void RefreshCurrentPage()
+    {
+        if (!isMenuOpened) return;
+        Tools.StopCoroutine(ref buttonRoutine);
+        DestroyButtons();
+        buttonRoutine = StartCoroutine(CreateButtons());
+    }
+
+    public void AppendOutfitButton(int n)
+    {
+        if (!isMenuOpened || currentCategory != "Cosmetics") return;
+        if (!Mods.Actions.TryGetValue("Cosmetics", out var category)) return;
+
+        var actionList = category.Actions.ToList();
+        int itemIndex  = actionList.FindIndex(kv => kv.Key == "Saved Outfit #" + n);
+        if (itemIndex < 0) return;
+
+        int pageOfItem = itemIndex / PageSize;
+        if (pageOfItem != currentPage) return;
+
+        const float startY = 0.31f;
+        const float gap    = 0.09f;
+        int   visualIndex  = itemIndex - (currentPage * PageSize);
+        float height       = startY - (visualIndex * gap);
+
+        CreateButton(height, "Saved Outfit #" + n, false, 0f);
+    }
+
     void LoadAudio()
     {
         Assembly assembly = Assembly.GetExecutingAssembly();
 
-        clickSound    = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.creamy.wav");
-        startSound    = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.tup_startup.wav");
-        helloSound    = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.hello.wav");
-        menuOpenSound = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.UiEnter.wav");
-        btnEnterSound = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.btnEnter.wav");
+        creamySound        = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.creamy.wav");
+        startSound         = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.tup_startup.wav");
+        helloSound         = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.hello.wav");
+        menuOpenSound      = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.UiEnter.wav");
+        btnEnterSound      = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.btnEnter.wav");
+        minecraftSound     = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.minecraft.wav");
+        watchSound         = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.watch.wav");
+        destinySound       = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.destiny.wav");
+        wiiSound           = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.Wii.wav");
+        untitledClickSound = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.untitled.wav");
 
-        if (clickSound == null)
+        if (creamySound == null)
             Debug.LogError("[TUP] Failed to load click sound!");
 
         if (startSound == null)
@@ -1060,7 +1393,7 @@ public class Main : BaseUnityPlugin
                 {
                     Debug.Log("[TUP] Logged in as Admin: " + AdminName);
                     PlayHelloSound();
-                    SpeakWelcome(AdminName);
+                    //SpeakWelcome(AdminName);
                 }
                 else
                 {
@@ -1108,85 +1441,346 @@ public class Main : BaseUnityPlugin
         audioSource.PlayOneShot(helloSound);
     }
     
-    private void CreateButton(float zOffset, string btnName)
+    
+private void CreateButton(float zOffset, string btnName, bool isToggle = false, float cooldown = 0f)
+{
+    string prefabPath = "assets/fonts/figtree.asset"; // "assets/fonts/minecraftia.asset"
+    AssetBundle bundle = FontCache.figtreeBundle; // minecraftiaBundle
+    TMP_FontAsset figtreeFont = bundle.LoadAsset<TMP_FontAsset>(prefabPath); // minecraftiaFont
+
+    GameObject btn = Instantiate(btnPrefab, menuObj.transform);
+    btn.name = btnName;
+    // Main Canvas is inactive by default in the prefab; Overlay stays enabled inside it
+    GameObject btnCollider = GameObject.CreatePrimitive(PrimitiveType.Cube);
+    
+    Transform slider = btn.transform.Find("Slider");
+    Transform knob = btn.transform.Find("Slider/Knob");
+    
+    var colliderFollow = btnCollider.AddComponent<FollowMenu>();
+    colliderFollow.Target = btn.transform;
+    colliderFollow.Rotation = Quaternion.Euler(90f, 0f, 0f);
+    colliderFollow.Position = Vector3.zero;
+
+    Vector3 stackedPos = buttonBasePosition + new Vector3(0.01f, zOffset, 0f);
+
+    btn.transform.localPosition = stackedPos;
+    btn.transform.localRotation = Quaternion.Euler(-90f, 0f, 0f);
+
+    btnCollider.transform.localPosition = stackedPos;
+    btnCollider.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+    btnCollider.transform.localScale = new Vector3(0.05f, 0.065f, 0.55f) * 0.35f;
+    btnCollider.layer = 2;
+
+    ButtonTrigger trigger = btnCollider.AddComponent<ButtonTrigger>();
+
+    trigger.BtnIdentifier = btnName;
+    trigger.Slider = slider;
+    trigger.Knob = knob;
+    trigger.IsToggle = isToggle;
+    trigger.Cooldown = cooldown;
+    trigger.ButtonRoot = btn.transform;
+    btnCollider.AddComponent<ButtonCollider>().trigger = trigger;
+    btnCollider.GetComponent<Collider>().isTrigger = true;
+    Destroy(btnCollider.GetComponent<Rigidbody>());
+    
+    MenuTheme.ApplyMenuButton(btn.transform, out Renderer renderer, out Renderer outlineRenderer);
+    trigger.BodyRenderer = renderer;
+
+    Renderer rendererCollider = btnCollider.GetComponentInChildren<Renderer>();
+    if (rendererCollider != null)
     {
-        string prefabPath = "assets/fonts/figtree.asset"; // "assets/fonts/minecraftia.asset"
-        AssetBundle bundle = FontCache.figtreeBundle; // minecraftiaBundle
-        TMP_FontAsset figtreeFont = bundle.LoadAsset<TMP_FontAsset>(prefabPath); // minecraftiaFont
-    
-        GameObject btn = Instantiate(btnPrefab, menuObj.transform);
-        GameObject btnCollider = GameObject.CreatePrimitive(PrimitiveType.Cube);
-
-        Debug.Log($"[TUP] Creating button: {btnName}");
-        Debug.Log($"Button prefab: {btnPrefab}");
-        Debug.Log($"Buttons parent: {btn.transform.parent}");
-    
-        var colliderFollow = btnCollider.AddComponent<FollowMenu>();
-        colliderFollow.Target = btn.transform;
-        colliderFollow.Rotation = Quaternion.Euler(90f, 0f, 0f);
-        colliderFollow.Position = Vector3.zero;
-    
-        Vector3 stackedPos = buttonBasePosition + new Vector3(0f, zOffset, 0f);
-    
-        btn.transform.localPosition = stackedPos;
-        btn.transform.localRotation = Quaternion.Euler(-90f, 0f, 0f);
-    
-        btnCollider.transform.localPosition = stackedPos;
-        btnCollider.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-        btnCollider.transform.localScale = new Vector3(0.05f, 0.065f, 0.55f) * 0.35f;
-        btnCollider.layer = 2;
-    
-        ButtonTrigger trigger = btnCollider.AddComponent<ButtonTrigger>();
-        trigger.BtnIdentifier = btnName;
-        btnCollider.AddComponent<ButtonCollider>().trigger = trigger;
-        btnCollider.GetComponent<Collider>().isTrigger = true;
-        Destroy(btnCollider.GetComponent<Rigidbody>());
-    
-        Renderer renderer = btn.GetComponentInChildren<Renderer>();
-        if (renderer != null)
-        {
-            renderer.material.shader = ShaderCache.UberShader;
-            renderer.material.color = buttonColor;
-        }
-
-        Renderer rendererCollider = btnCollider.GetComponentInChildren<Renderer>();
         rendererCollider.material.shader = ShaderCache.TextShader;
         rendererCollider.material.color = new Color32(255, 0, 0, 50);
         rendererCollider.enabled = false;
-        
-        /*
-        GameObject textObj = new("ButtonLabel");
-        textObj.transform.SetParent(btn.transform, false);
-        textObj.transform.localPosition = new Vector3(0.02f, 0.003f, 0f);
-        textObj.transform.localRotation = Quaternion.Euler(0f, 270f, 180f);
-        
-        TextMeshPro text = textObj.AddComponent<TextMeshPro>();
-        text.text = btnName;
-        text.fontSize = 22;
-        text.alignment = TextAlignmentOptions.Center;
-        text.color = Color.white;
-        text.font = figtreeFont; // VRRig.LocalRig.playerText1.font;
-        text.enableAutoSizing = false;
-        text.transform.localScale = Vector3.one * 0.02f;
-        */
-        
-        TextMeshPro text = btn.transform.Find("ButtonText").GetComponent<TextMeshPro>();
-        if (text != null) 
-            text.text = btnName;
-        else
-            Debug.LogError("[TUP] Text not found: " + btnName);
-    
-        StartCoroutine(MenuEffects.PopButton(btn, buttonBaseScale, Vector3.zero, true));
-    
-        AudioSource audioSource = gameObject.GetComponent<AudioSource>();
-        if (audioSource == null)
-            audioSource = gameObject.AddComponent<AudioSource>();
+    }
 
-        audioSource.volume = 0.1f;
-        audioSource.PlayOneShot(btnEnterSound);
+    trigger.OutlineRenderer = outlineRenderer;
+
+    TextMeshPro text = btn.transform.Find("ButtonText").GetComponent<TextMeshPro>();
+    if (text != null)
+        text.text = btnName;
+    else
+        Debug.LogError("[TUP] Text not found: " + btnName);
+
+    if (isToggle && Mods.SavedToggleStates.TryGetValue(btnName, out bool savedOn) && savedOn)
+    {
+        trigger.IsOn = true;
+        MenuEffects.SnapActivated(knob, slider, trigger.BodyRenderer, trigger.OutlineRenderer);
+    }
+
+    if (btnName.StartsWith("Saved Outfit #") &&
+        int.TryParse(btnName.Substring("Saved Outfit #".Length), out int outfitN))
+    {
+        if (text != null)
+            text.text = Mods.GetOutfitDisplayName(outfitN);
+
+        Transform renameSprite = btn.transform.Find("Rename");
+        if (renameSprite != null) renameSprite.gameObject.SetActive(true);
+
+        Transform renameCollider = btn.transform.Find("RenameCollider");
+        if (renameCollider != null)
+        {
+            renameCollider.gameObject.SetActive(true);
+            renameCollider.gameObject.layer = 2;
+
+            Collider rc = renameCollider.GetComponent<Collider>();
+            if (rc == null) rc = renameCollider.gameObject.AddComponent<BoxCollider>();
+            rc.isTrigger = true;
+
+            Rigidbody rrb = renameCollider.GetComponent<Rigidbody>();
+            if (rrb != null) Destroy(rrb);
+
+            TMP_Text capturedLabel = text;
+            int      capturedN     = outfitN;
+
+            ButtonTrigger renameTrigger = renameCollider.gameObject.AddComponent<ButtonTrigger>();
+            renameTrigger.BtnIdentifier = btnName + "_Rename";
+            renameTrigger.CustomAction  = () => Mods.StartRename(
+                capturedN,
+                capturedLabel,
+                menuObj.transform.Find("Keyboard")?.gameObject
+            );
+            // No ButtonCollider — PC raycast finds ButtonTrigger via TryGetComponent;
+            // VR ButtonPresser sphere won't accidentally fire rename instead of the main press.
+        }
+    }
+
+    StartCoroutine(MenuEffects.PopButton(btn, buttonBaseScale, Vector3.zero, true));
+
+    AudioSource audioSource = gameObject.GetComponent<AudioSource>();
+    if (audioSource == null)
+        audioSource = gameObject.AddComponent<AudioSource>();
+
+    audioSource.volume = 0.1f;
+    audioSource.PlayOneShot(btnEnterSound);
     
-        btnObjs.Add(btn);
-        btnObjs.Add(btnCollider);
+    btnObjs.Add(btn);
+    btnObjs.Add(btnCollider);
+    
+    InitCycleBtns();
+}
+
+    private void InitKeyboard()
+    {
+        Transform keyboard = menuObj.transform.Find("Keyboard");
+        if (keyboard == null)
+        {
+            Debug.LogError("[TUP] Keyboard not found in menu prefab");
+            return;
+        }
+
+        keyboard.gameObject.SetActive(false);
+        MenuTheme.ApplyKeyboard(keyboard);
+
+        HashSet<Transform> keyRoots = new HashSet<Transform>();
+        List<Renderer> keyboardOutlines = GetKeyboardOutlines(keyboard);
+        foreach (Transform key in keyboard.GetComponentsInChildren<Transform>(true))
+        {
+            if (key == keyboard)
+                continue;
+
+            string keyName = ResolveKeyboardKey(key);
+            if (string.IsNullOrEmpty(keyName))
+                continue;
+
+            Transform keyRoot = GetKeyboardKeyRoot(key, keyboard);
+            if (keyRoot == null || !keyRoots.Add(keyRoot))
+                continue;
+
+            SetLayerRecursive(keyRoot, 2);
+
+            Collider kc = keyRoot.GetComponent<Collider>();
+            if (kc == null) kc = keyRoot.gameObject.AddComponent<BoxCollider>();
+            kc.isTrigger = true;
+
+            Rigidbody krb = keyRoot.GetComponent<Rigidbody>();
+            if (krb != null) Destroy(krb);
+
+            ButtonTrigger trigger = keyRoot.gameObject.AddComponent<ButtonTrigger>();
+            trigger.IsKeyboardKey = true;
+            trigger.BtnIdentifier = keyName;
+            trigger.ButtonRoot = keyRoot;
+            MenuTheme.ApplyKeyboardKey(keyRoot, out Renderer bodyRenderer, out Renderer[] outlineRenderers);
+            Renderer siblingOutline = FindNearestKeyboardOutline(keyRoot, keyboardOutlines);
+            if (siblingOutline != null)
+                outlineRenderers = outlineRenderers.Concat(new[] { siblingOutline }).Distinct().ToArray();
+            trigger.BodyRenderer = bodyRenderer;
+            trigger.OutlineRenderer = outlineRenderers.Length > 0 ? outlineRenderers[0] : null;
+            trigger.KeyboardOutlineRenderers = outlineRenderers;
+            string captured = keyName;
+            trigger.CustomAction = () => HandleKeyInput(captured);
+
+            keyRoot.gameObject.AddComponent<ButtonCollider>().trigger = trigger;
+        }
+    }
+
+    private static List<Renderer> GetKeyboardOutlines(Transform keyboard)
+    {
+        List<Renderer> outlines = new List<Renderer>();
+        foreach (Transform child in keyboard)
+        {
+            if (!child.name.Equals("Outline", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            Renderer renderer = MenuTheme.ApplyKeyboardOutline(child);
+            if (renderer != null)
+                outlines.Add(renderer);
+        }
+
+        return outlines;
+    }
+
+    private static Renderer FindNearestKeyboardOutline(Transform key, List<Renderer> outlines)
+    {
+        Renderer nearest = null;
+        float nearestDistance = float.MaxValue;
+        Vector3 keyPosition = key.localPosition;
+
+        foreach (Renderer outline in outlines)
+        {
+            if (outline == null)
+                continue;
+
+            float distance = (outline.transform.localPosition - keyPosition).sqrMagnitude;
+            if (distance >= nearestDistance)
+                continue;
+
+            nearestDistance = distance;
+            nearest = outline;
+        }
+
+        return nearest;
+    }
+
+    private static Transform GetKeyboardKeyRoot(Transform key, Transform keyboard)
+    {
+        if (key == null || keyboard == null)
+            return null;
+
+        if (key.GetComponent<TMP_Text>() != null && key.parent != null && key.parent != keyboard)
+            return key.parent;
+
+        return key.parent == keyboard || key.GetComponent<Collider>() != null || key.GetComponent<Renderer>() != null
+            ? key
+            : null;
+    }
+
+    private static string ResolveKeyboardKey(Transform key)
+    {
+        string keyName = NormalizeKeyboardKey(key.name);
+        if (!string.IsNullOrEmpty(keyName))
+            return keyName;
+
+        TMP_Text text = key.GetComponent<TMP_Text>() ?? key.GetComponentInChildren<TMP_Text>(true);
+        return text != null ? NormalizeKeyboardKey(text.text) : "";
+    }
+
+    private static string NormalizeKeyboardKey(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return "";
+
+        string key = raw.Trim();
+        key = key.Replace("\r", "").Replace("\n", "").Trim();
+        if (key.Length == 0)
+            return "";
+
+        string upper = key.ToUpperInvariant();
+        return upper switch
+        {
+            "ENTER" or "RETURN" => "Enter",
+            "DELETE" or "DEL" or "BACKSPACE" => "Delete",
+            "CLOSE" or "ESC" or "ESCAPE" => "Close",
+            _ when key.Length == 1 => key,
+            _ => "",
+        };
+    }
+
+    private static void SetLayerRecursive(Transform root, int layer)
+    {
+        root.gameObject.layer = layer;
+
+        foreach (Transform child in root)
+            SetLayerRecursive(child, layer);
+    }
+
+    public static void ShowKeyboard(GameObject keyboard)
+    {
+        if (keyboard == null)
+            return;
+
+        if (!KeyboardScales.TryGetValue(keyboard, out Vector3 targetScale))
+        {
+            targetScale = keyboard.transform.localScale;
+            KeyboardScales[keyboard] = targetScale;
+        }
+
+        StopKeyboardScaleRoutine(keyboard);
+        keyboard.SetActive(true);
+        keyboard.transform.localScale = Vector3.zero;
+        KeyboardScaleRoutines[keyboard] = Instance.StartCoroutine(ScaleKeyboard(keyboard, targetScale, true));
+    }
+
+    public static void HideKeyboard(GameObject keyboard)
+    {
+        if (keyboard == null)
+            return;
+
+        if (!KeyboardScales.TryGetValue(keyboard, out Vector3 targetScale))
+            targetScale = keyboard.transform.localScale;
+
+        StopKeyboardScaleRoutine(keyboard);
+        KeyboardScaleRoutines[keyboard] = Instance.StartCoroutine(ScaleKeyboard(keyboard, targetScale, false));
+    }
+
+    private static void StopKeyboardScaleRoutine(GameObject keyboard)
+    {
+        if (keyboard == null || !KeyboardScaleRoutines.TryGetValue(keyboard, out Coroutine routine) || routine == null)
+            return;
+
+        Instance.StopCoroutine(routine);
+        KeyboardScaleRoutines.Remove(keyboard);
+    }
+
+    private static IEnumerator ScaleKeyboard(GameObject keyboard, Vector3 targetScale, bool show)
+    {
+        if (keyboard == null)
+            yield break;
+
+        keyboard.SetActive(true);
+        Vector3 from = show ? Vector3.zero : keyboard.transform.localScale;
+        Vector3 to = show ? targetScale : Vector3.zero;
+
+        yield return MenuEffects.PopMenu(keyboard, to, from, show);
+
+        if (keyboard == null)
+            yield break;
+
+        keyboard.transform.localScale = show ? targetScale : targetScale;
+        if (!show)
+            keyboard.SetActive(false);
+
+        KeyboardScaleRoutines.Remove(keyboard);
+    }
+
+    private void HandleKeyInput(string key)
+    {
+        switch (key)
+        {
+            case "Enter":  Mods.ConfirmRename(); break;
+            case "Delete": Mods.DeleteChar();    break;
+            case "Close":  Mods.CancelRename();  break;
+            default:
+                if (key.Length == 1) Mods.TypeChar(key[0]);
+                break;
+        }
+    }
+
+    public void SetMenuSmoothing(bool smooth)
+    {
+        SmoothFollowMenu sf = menuObj?.GetComponent<SmoothFollowMenu>();
+        if (sf != null)
+            sf.Smoothing = smooth ? 30f : 1000f;
     }
 
     public void PlayBtnCickSound()
@@ -1195,7 +1789,7 @@ public class Main : BaseUnityPlugin
         if (audioSource == null)
             audioSource = gameObject.AddComponent<AudioSource>();
 
-        audioSource.PlayOneShot(clickSound);
+        audioSource.PlayOneShot(currentClickSound);
     }
 
     private void DestroyButtons()
@@ -1212,8 +1806,10 @@ public class Main : BaseUnityPlugin
         foreach (var name in assembly.GetManifestResourceNames())
             Debug.Log("[TUP RESOURCE] " + name);
         
-        buttonBundle             = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.buttonmodel");
-        menuReduxBundle          = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tup-overhaul");
+        buttonBundle             = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.buttonmodel-rename");
+        menuReduxBundle          = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tup-overv7");
+        Mods.nameBundle          = LoadBundle(assembly, "ThatUtilsPad.Assets.UI.nametag");
+        notifBundle              = LoadBundle(assembly, "ThatUtilsPad.Assets.UI.notif-scalefix2");
     }
 
     private AssetBundle LoadBundle(Assembly assembly, string resourceName)
