@@ -54,8 +54,13 @@ public class Main : BaseUnityPlugin
     private readonly Vector3    buttonBasePosition = new(-0.044f, 0f, 0f);
     private readonly Quaternion buttonBaseRotation = Quaternion.Euler(0f, 0f, 180f);
     private readonly Vector3    buttonBaseScale = new Vector3(1.91f, 33.75f, 3.61f);
-
+    
     private bool previousControllerState;
+    private bool requireDoubleClickOpen;
+    private string menuOpenBindCode = DefaultMenuOpenBindCode;
+    private float lastMenuOpenBindPressTime = -10f;
+    private const float MenuOpenDoubleClickWindow = 1f;
+    public const string DefaultMenuOpenBindCode = "Left:SecondaryButton";
     
     private Coroutine buttonRoutine;
     private Coroutine categoryRoutine;
@@ -67,7 +72,7 @@ public class Main : BaseUnityPlugin
 
     private GameObject  btnPrefab;
     private AssetBundle buttonBundle;
-    private AssetBundle notifBundle;
+    private Coroutine   menuScaleRoutine;
     
     private MenuOpenType currentOpenType;
 
@@ -86,6 +91,10 @@ public class Main : BaseUnityPlugin
 
     private AssetBundle menuBundle;
     private float       menuGripRotaton = -60f;
+    private float       menuScale = 0.375f;
+    private float       headMenuDistance = 0.6f;
+    private bool        menuSmoothingEnabled = true;
+    private float       menuSmoothingStrength = 30f;
 
     private GameObject  selectorObj;
     public  static GameObject  menuObj;
@@ -94,12 +103,12 @@ public class Main : BaseUnityPlugin
     private AssetBundle menuPanelExpansionBundle;
     private AssetBundle menuCheckerBundle;
     private AssetBundle menuReduxBundle;
+    public static AssetBundle notifBundle;
 
     private GameObject selectionObj;
     private float selectorCooldown = 0.2f;
     private float lastSelectorPress = 0f;
 
-    private List<string> categories;
     private string currentCategory = "Networking";
     
     private AudioClip  startSound;
@@ -117,7 +126,15 @@ public class Main : BaseUnityPlugin
     
     public static TextMeshPro queueText;
     public static TextMeshPro modeText;
+    public static TextMeshPro regionText;
     public static TextMeshPro clickSoundText;
+    public static TextMeshPro smoothingText;
+    public static TextMeshPro smoothingStrengthText;
+    public static TextMeshPro menuScaleText;
+    public static TextMeshPro headDistanceText;
+    public static TextMeshPro doubleOpenText;
+    public static TextMeshPro openBindText;
+    public static TextMeshPro themeText;
     
     public static TMPro.TextMeshPro volumeText;
 
@@ -135,12 +152,12 @@ public class Main : BaseUnityPlugin
     private void Start()
     {
         Debug.Log("\n \n" +
-                  "   ================:  ┌○○○─TUP────────────────────────────── x ┐\n" +
-                  "   .::=*=-+*--++-:.   ┣────────────────────────────────────────┫\n" +
-                  "   .+*************-   │ TUP: ThatUtilsPad                      │\n" +
-                  "      :*.     ++.     │ Discord: https://discord.gg/fuJcTWsn   │\n" +
-                  "      :*.     ++.     │ Made by Jelly and Kwyf and Xeptic <3   │\n" +
-                  "                      └────────────────────────────────────────┘\n");
+                  "   ================:  +???-TUP------------------------------ x +\n" +
+                  "   .::=*=-+*--++-:.   ?----------------------------------------?\n" +
+                  "   .+*************-   ? TUP: ThatUtilsPad                      ?\n" +
+                  "      :*.     ++.     ? Discord: https://discord.gg/fuJcTWsn   ?\n" +
+                  "      :*.     ++.     ? Made by Jelly and Kwyf and Xeptic <3   ?\n" +
+                  "                      +----------------------------------------+\n");
         
         GorillaTagger.OnPlayerSpawned(OnPlayerSpawned);
         Debug.Log(GenHWID());
@@ -524,7 +541,7 @@ public class Main : BaseUnityPlugin
         else
         {
             statusText.color = new Color(0.953f, 0.545f, 0.659f, 1f);
-            statusText.text  = "invalid key — contact support";
+                statusText.text  = "invalid key ? contact support";
             btn.interactable = true;
         }
     }
@@ -535,17 +552,15 @@ public class Main : BaseUnityPlugin
         PlayStartSound();
         CheckAdminStatus();
         Mods.Init();
-        categories = Mods.Actions.Keys.ToList();
         LoadBundles();
         FontCache.LoadFonts();
         ShaderCache.Init();
         new GameObject("TUP_CoroutineHandler").AddComponent<CoroutineHandler>();
         foreach (var n in buttonBundle.GetAllAssetNames()) Debug.Log("[TUP BUNDLE] " + n);
         btnPrefab = buttonBundle.LoadAsset<GameObject>("assets/prefabs/buttonmodel-rename.prefab");
-        NotificationLib.Initialize(notifBundle);
-        NotificationLib.SendNotification("ThatUtilsPad", "Notification system ready", 3f);
         InitMenu();
         InitSettings();
+        Mods.ApplySavedSettings();
     }
     
     
@@ -590,6 +605,8 @@ public class Main : BaseUnityPlugin
             modeSliderTransform.transform.gameObject.SetActive(false);
             modeArrowTransform.transform.gameObject.SetActive(true);
         }
+
+        InitCycleButtonText("Region", ref regionText, "Region  :  " + Mods.GetRegionLabel());
         
         
         Transform clickSoundTransform = menuObj.transform.Find("Click Sound/ButtonText");
@@ -608,6 +625,33 @@ public class Main : BaseUnityPlugin
             clickSoundSliderTransform.transform.gameObject.SetActive(false);
             clickSoundArrowTransform.transform.gameObject.SetActive(true);
         }
+
+        InitCycleButtonText("Menu Smoothing", ref smoothingText, "Menu Smoothing  :  On");
+        InitCycleButtonText("Smooth Strength", ref smoothingStrengthText, "Smooth Strength  :  " + Mods.GetSmoothingStrengthLabel());
+        InitCycleButtonText("Menu Scale", ref menuScaleText, "Menu Scale  :  " + Mods.GetMenuScaleLabel());
+        InitCycleButtonText("PC Distance", ref headDistanceText, "PC Distance  :  " + Mods.GetHeadDistanceLabel());
+        InitCycleButtonText("Double Open", ref doubleOpenText, "Double Open  :  Off");
+        InitCycleButtonText("Open Bind", ref openBindText, "Open Bind  :  " + GetMenuOpenBindDisplayName(DefaultMenuOpenBindCode));
+        InitCycleButtonText("Theme", ref themeText, "Theme  :  " + Mods.GetThemeLabel());
+        Mods.UpdateSettingsLabels();
+    }
+
+    private void InitCycleButtonText(string buttonName, ref TextMeshPro target, string defaultText)
+    {
+        Transform textTransform = menuObj.transform.Find(buttonName + "/ButtonText");
+        if (textTransform != null && textTransform.TryGetComponent(out TextMeshPro text))
+        {
+            target = text;
+            target.text = defaultText;
+        }
+
+        Transform sliderTransform = menuObj.transform.Find(buttonName + "/Slider");
+        Transform arrowTransform = menuObj.transform.Find(buttonName + "/NextArrow");
+        if (sliderTransform != null && arrowTransform != null)
+        {
+            sliderTransform.gameObject.SetActive(false);
+            arrowTransform.gameObject.SetActive(true);
+        }
     }
     
     private void InitSettings()
@@ -622,7 +666,7 @@ public class Main : BaseUnityPlugin
 
         Mods.NameTagsLoop();
         
-        bool currentControllerState     = ControllerInputPoller.instance.leftControllerSecondaryButton;
+        bool currentControllerState     = IsMenuOpenBindPressed();
         bool controllerPressedThisFrame = currentControllerState && !previousControllerState;
         previousControllerState = currentControllerState;
 
@@ -633,7 +677,7 @@ public class Main : BaseUnityPlugin
         {
             if (toggleMenuMethod && !AlwaysShowMenu)
             {
-                bool togglePressed = controllerPressedThisFrame || keyboardPressedThisFrame;
+                bool togglePressed = ConsumeMenuOpenBindPress(controllerPressedThisFrame) || keyboardPressedThisFrame;
 
                 if (togglePressed)
                 {
@@ -672,7 +716,7 @@ public class Main : BaseUnityPlugin
         if (!isMenuOpened)
             return;
 
-        if (!Mouse.current.leftButton.wasPressedThisFrame)
+        if (Mouse.current == null || !Mouse.current.leftButton.wasPressedThisFrame)
             return;
 
         Camera raycastCamera = GetActiveCamera();
@@ -689,6 +733,190 @@ public class Main : BaseUnityPlugin
             ButtonTrigger.PcPress(buttonTrigger);
     }
     
+    private bool ConsumeMenuOpenBindPress(bool pressedThisFrame)
+    {
+        if (!pressedThisFrame)
+            return false;
+
+        if (!requireDoubleClickOpen)
+            return true;
+
+        if (Time.time - lastMenuOpenBindPressTime <= MenuOpenDoubleClickWindow)
+        {
+            lastMenuOpenBindPressTime = -10f;
+            return true;
+        }
+
+        lastMenuOpenBindPressTime = Time.time;
+        return false;
+    }
+
+    public void SetMenuOpenOptions(bool doubleClickRequired, string bindCode)
+    {
+        requireDoubleClickOpen = doubleClickRequired;
+        menuOpenBindCode = string.IsNullOrWhiteSpace(bindCode) ? DefaultMenuOpenBindCode : bindCode;
+        previousControllerState = IsMenuOpenBindPressed();
+        lastMenuOpenBindPressTime = -10f;
+    }
+
+    private bool IsMenuOpenBindPressed() => IsMenuOpenBindPressed(menuOpenBindCode);
+
+    public static bool IsMenuOpenBindPressed(string bindCode)
+    {
+        if (string.IsNullOrWhiteSpace(bindCode))
+            bindCode = DefaultMenuOpenBindCode;
+
+        if (bindCode.StartsWith("InputSystem:", StringComparison.OrdinalIgnoreCase))
+        {
+            string path = bindCode.Substring("InputSystem:".Length);
+            return IsInputSystemButtonPressed(path);
+        }
+
+        ControllerInputPoller poller = ControllerInputPoller.instance;
+        if (poller == null)
+            return false;
+
+        return bindCode switch
+        {
+            "Left:SecondaryButton" => poller.leftControllerSecondaryButton,
+            "Right:GripButton" => poller.rightControllerGripFloat > 0.75f,
+            "Right:TriggerButton" => poller.rightControllerIndexFloat > 0.75f,
+            _ => false
+        };
+    }
+
+    public static bool TryGetPressedMenuOpenBind(HashSet<string> ignoredCodes, out string bindCode, out string displayName)
+    {
+        foreach (string fallbackCode in BuiltInMenuOpenBindCodes)
+        {
+            if (ignoredCodes != null && ignoredCodes.Contains(fallbackCode))
+                continue;
+
+            if (!IsMenuOpenBindPressed(fallbackCode))
+                continue;
+
+            bindCode = fallbackCode;
+            displayName = GetMenuOpenBindDisplayName(fallbackCode);
+            return true;
+        }
+
+        foreach (UnityEngine.InputSystem.InputDevice device in InputSystem.devices)
+        {
+            if (device == null || device is Keyboard || device is Mouse)
+                continue;
+
+            foreach (UnityEngine.InputSystem.InputControl control in device.allControls)
+            {
+                if (control is not UnityEngine.InputSystem.Controls.ButtonControl button)
+                    continue;
+
+                if (IsIgnoredInputButton(button))
+                    continue;
+
+                string code = "InputSystem:" + button.path;
+                if (ignoredCodes != null && ignoredCodes.Contains(code))
+                    continue;
+
+                if (!button.isPressed)
+                    continue;
+
+                bindCode = code;
+                displayName = FormatInputSystemButtonName(button);
+                return true;
+            }
+        }
+
+        bindCode = "";
+        displayName = "";
+        return false;
+    }
+
+    public static HashSet<string> GetPressedMenuOpenBinds()
+    {
+        HashSet<string> pressed = new HashSet<string>();
+
+        foreach (string fallbackCode in BuiltInMenuOpenBindCodes)
+        {
+            if (IsMenuOpenBindPressed(fallbackCode))
+                pressed.Add(fallbackCode);
+        }
+
+        foreach (UnityEngine.InputSystem.InputDevice device in InputSystem.devices)
+        {
+            if (device == null || device is Keyboard || device is Mouse)
+                continue;
+
+            foreach (UnityEngine.InputSystem.InputControl control in device.allControls)
+            {
+                if (control is not UnityEngine.InputSystem.Controls.ButtonControl button)
+                    continue;
+
+                if (IsIgnoredInputButton(button) || !button.isPressed)
+                    continue;
+
+                pressed.Add("InputSystem:" + button.path);
+            }
+        }
+
+        return pressed;
+    }
+
+    public static string GetMenuOpenBindDisplayName(string bindCode)
+    {
+        if (string.IsNullOrWhiteSpace(bindCode))
+            bindCode = DefaultMenuOpenBindCode;
+
+        if (bindCode.StartsWith("InputSystem:", StringComparison.OrdinalIgnoreCase))
+        {
+            string path = bindCode.Substring("InputSystem:".Length);
+            UnityEngine.InputSystem.InputControl control = InputSystem.FindControl(path);
+            if (control is UnityEngine.InputSystem.Controls.ButtonControl button)
+                return FormatInputSystemButtonName(button);
+
+            return path;
+        }
+
+        return bindCode switch
+        {
+            "Left:SecondaryButton" => "Left Secondary",
+            "Right:GripButton" => "Right Grip",
+            "Right:TriggerButton" => "Right Trigger",
+            _ => "Left Secondary"
+        };
+    }
+
+    private static bool IsInputSystemButtonPressed(string path)
+    {
+        UnityEngine.InputSystem.InputControl control = InputSystem.FindControl(path);
+        return control is UnityEngine.InputSystem.Controls.ButtonControl button && button.isPressed;
+    }
+
+    private static bool IsIgnoredInputButton(UnityEngine.InputSystem.Controls.ButtonControl button)
+    {
+        string name = (button.name ?? "").ToLowerInvariant();
+        string path = (button.path ?? "").ToLowerInvariant();
+        return name.Contains("touch") || path.Contains("touch") || name.Contains("position") || path.Contains("position");
+    }
+
+    private static string FormatInputSystemButtonName(UnityEngine.InputSystem.Controls.ButtonControl button)
+    {
+        string deviceName = button.device?.displayName;
+        if (string.IsNullOrWhiteSpace(deviceName))
+            deviceName = button.device?.name ?? "Controller";
+
+        string controlName = !string.IsNullOrWhiteSpace(button.displayName) ? button.displayName : button.name;
+        if (string.IsNullOrWhiteSpace(controlName))
+            controlName = button.path;
+
+        return deviceName + " " + controlName;
+    }
+
+    private static readonly string[] BuiltInMenuOpenBindCodes =
+    {
+        DefaultMenuOpenBindCode,
+        "Right:GripButton",
+        "Right:TriggerButton",
+    };
     private static void PrintHierarchy(Transform t, int depth)
     {
         Debug.Log(new string('-', depth * 2) + t.name);
@@ -702,7 +930,7 @@ public class Main : BaseUnityPlugin
             return;
 
         string prefabPath = UseSakuraTheme
-            ? "assets/prefabs/TUP-overv7.prefab"
+            ? "assets/prefabs/TUP-overv9.prefab"
             : "assets/prefabs/tup-modelsmooth.prefab";
 
         AssetBundle bundle = UseSakuraTheme ? menuReduxBundle : menuBundle;
@@ -710,7 +938,7 @@ public class Main : BaseUnityPlugin
         
         
         menuObj = Instantiate(prefab);
-        menuObj.transform.localScale = Vector3.one * 0.375f;
+        menuObj.transform.localScale = Vector3.one * menuScale;
         
         //monkeColor = menuObj.transform.Find("SideHolder/MonkeColor").GetComponent<SpriteRenderer>();
         volumeText = menuObj.transform.Find("SideHolder/VolumePercent").GetComponent<TextMeshPro>();
@@ -757,10 +985,11 @@ private void OpenMenu()
 
     SmoothFollowMenu smooth = menuObj.GetComponent<SmoothFollowMenu>() ?? menuObj.AddComponent<SmoothFollowMenu>();
     smooth.Target = parent;
+    smooth.Smoothing = menuSmoothingEnabled ? menuSmoothingStrength : 1000f;
 
     if (currentOpenType == MenuOpenType.Head)
     {
-        smooth.LocalPosition = new Vector3(-0.03f, -0.02f, 0.6f);
+        smooth.LocalPosition = new Vector3(-0.03f, -0.02f, headMenuDistance);
         smooth.LocalRotation = Quaternion.Euler(0f, 270f, 0f);
     }
     else
@@ -815,9 +1044,9 @@ private void OpenMenu()
     audioSource.PlayOneShot(menuOpenSound);
 
     StartCoroutine(
-        MenuEffects.PopMenu(
+            MenuEffects.PopMenu(
             menuObj,
-            Vector3.one * 0.375f,
+            Vector3.one * menuScale,
             Vector3.zero,
             true
         )
@@ -886,10 +1115,10 @@ private void OpenMenu()
         dateTextComp.text = "Date              -       ";
         dateTextComp.font = figtreeFont;
         
-        modsTextComp.text = "Mods       -   <color=green>Bark, GorillaFPS</color>";
+        modsTextComp.text = "Mods   -   None";
         modsTextComp.font = figtreeFont;
         
-        cheatsTextComp.text = "Cheats    -   <color=red>None</color>";
+        cheatsTextComp.text = "Cheats   -   None";
         cheatsTextComp.font = figtreeFont;
 
         List<string> btns = new List<string>()
@@ -968,6 +1197,15 @@ private void OpenMenu()
 
         var monkeColor = menuObj.transform.Find("SideHolder/MonkeColor").transform.GetComponent<SpriteRenderer>();
         monkeColor.color = colorBaseForm;
+    }
+
+    public void UpdateCheckerProperties(string legalMods, string illegalMods)
+    {
+        if (modsTextComp != null)
+            modsTextComp.text = "Mods   -   " + (string.IsNullOrWhiteSpace(legalMods) ? "None" : legalMods);
+
+        if (cheatsTextComp != null)
+            cheatsTextComp.text = "Cheats   -   " + (string.IsNullOrWhiteSpace(illegalMods) ? "None" : illegalMods);
     }
     
     
@@ -1143,21 +1381,7 @@ private void OpenMenu()
             follow.Rotation = previousLocalRot;
 
             MenuTheme.ApplySelectorButton(child);
-            
-            GameObject quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            quad.transform.SetParent(child.transform);
-            quad.transform.localPosition = new Vector3(-0.011f, 0f, 0f);
-            quad.transform.localRotation = Quaternion.Euler(0f, 90f, 90f);
-            quad.transform.localScale = new Vector3(0.015f, 0.015f, 0.015f);
-            
-            Collider quadCol = quad.GetComponent<Collider>();
-            if (quadCol != null)
-                Destroy(quadCol);
 
-            Renderer quadRend = quad.GetComponent<Renderer>();
-            quadRend.material = new Material(Shader.Find("Unlit/Texture"));
-            quadRend.material.mainTexture = MenuComponents.Tools.LoadEmbeddedImage("cableIcon.png");
-            
             //if (child.transform.parent != null)
             //    Debug.Log($"[TUP] Parent: {child.transform.parent}");
             //else
@@ -1169,17 +1393,12 @@ private void OpenMenu()
 
             index -= 1;
             if (index < 0 || index >= categories.Count)
+            {
+                child.gameObject.SetActive(false);
                 continue;
+            }
 
             string categoryName = categories[index];
-            
-            //load the category page button images
-            var category = Mods.Actions[categoryName];
-            string imageName = category.ImageName;
-
-            quadRend.material.mainTexture =
-                MenuComponents.Tools.LoadEmbeddedImage(imageName);
-            
             trigger.CustomAction = () => SwitchCategory(categoryName);
             //Debug.Log($"[TUP] Assigned {child.name} -> {categoryName}");
             
@@ -1450,7 +1669,6 @@ private void CreateButton(float zOffset, string btnName, bool isToggle = false, 
 
     GameObject btn = Instantiate(btnPrefab, menuObj.transform);
     btn.name = btnName;
-    // Main Canvas is inactive by default in the prefab; Overlay stays enabled inside it
     GameObject btnCollider = GameObject.CreatePrimitive(PrimitiveType.Cube);
     
     Transform slider = btn.transform.Find("Slider");
@@ -1540,7 +1758,7 @@ private void CreateButton(float zOffset, string btnName, bool isToggle = false, 
                 capturedLabel,
                 menuObj.transform.Find("Keyboard")?.gameObject
             );
-            // No ButtonCollider — PC raycast finds ButtonTrigger via TryGetComponent;
+            // No ButtonCollider ? PC raycast finds ButtonTrigger via TryGetComponent;
             // VR ButtonPresser sphere won't accidentally fire rename instead of the main press.
         }
     }
@@ -1776,11 +1994,63 @@ private void CreateButton(float zOffset, string btnName, bool isToggle = false, 
         }
     }
 
-    public void SetMenuSmoothing(bool smooth)
+    public void SetMenuSmoothing(bool smooth, float strength = 30f)
     {
+        menuSmoothingEnabled = smooth;
+        menuSmoothingStrength = Mathf.Max(1f, strength);
+
         SmoothFollowMenu sf = menuObj?.GetComponent<SmoothFollowMenu>();
         if (sf != null)
-            sf.Smoothing = smooth ? 30f : 1000f;
+            sf.Smoothing = smooth ? menuSmoothingStrength : 1000f;
+    }
+
+    public void SetMenuScale(float scale)
+    {
+        menuScale = Mathf.Clamp(scale, 0.2f, 0.6f);
+
+        if (menuObj != null && menuObj.activeSelf)
+        {
+            if (menuScaleRoutine != null)
+                StopCoroutine(menuScaleRoutine);
+
+            menuScaleRoutine = StartCoroutine(SmoothMenuScale(menuScale));
+        }
+    }
+
+    private IEnumerator SmoothMenuScale(float targetScale)
+    {
+        if (menuObj == null)
+        {
+            menuScaleRoutine = null;
+            yield break;
+        }
+
+        Vector3 startScale = menuObj.transform.localScale;
+        Vector3 endScale = Vector3.one * targetScale;
+        const float duration = 0.2f;
+        float elapsed = 0f;
+
+        while (elapsed < duration && menuObj != null && menuObj.activeSelf)
+        {
+            elapsed += Time.deltaTime;
+            float t = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(elapsed / duration));
+            menuObj.transform.localScale = Vector3.LerpUnclamped(startScale, endScale, t);
+            yield return null;
+        }
+
+        if (menuObj != null && menuObj.activeSelf)
+            menuObj.transform.localScale = endScale;
+
+        menuScaleRoutine = null;
+    }
+
+    public void SetHeadDistance(float distance)
+    {
+        headMenuDistance = Mathf.Clamp(distance, 0.35f, 1.0f);
+
+        SmoothFollowMenu sf = menuObj?.GetComponent<SmoothFollowMenu>();
+        if (sf != null && currentOpenType == MenuOpenType.Head)
+            sf.LocalPosition = new Vector3(-0.03f, -0.02f, headMenuDistance);
     }
 
     public void PlayBtnCickSound()
@@ -1807,9 +2077,9 @@ private void CreateButton(float zOffset, string btnName, bool isToggle = false, 
             Debug.Log("[TUP RESOURCE] " + name);
         
         buttonBundle             = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.buttonmodel-rename");
-        menuReduxBundle          = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tup-overv7");
-        Mods.nameBundle          = LoadBundle(assembly, "ThatUtilsPad.Assets.UI.nametag");
-        notifBundle              = LoadBundle(assembly, "ThatUtilsPad.Assets.UI.notif-scalefix2");
+        menuReduxBundle          = LoadBundle(assembly, "ThatUtilsPad.Assets.Models.tup-overv9");
+        notifBundle              = LoadBundle(assembly, "ThatUtilsPad.Assets.UI.notifpls");
+        Mods.nameBundle          = LoadBundle(assembly, "ThatUtilsPad.Assets.UI.tup-nametagui");
     }
 
     private AssetBundle LoadBundle(Assembly assembly, string resourceName)

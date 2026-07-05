@@ -9,13 +9,11 @@
         <None Remove="Assets\tup-prefab" />
         <None Remove="Assets\tupbutton-prefab" />
         <None Remove="Assets\tupsakura-prefab" />
+        <None Remove="PropertyList.txt" />
     </ItemGroup>
 
     <ItemGroup>
-        <EmbeddedResource Include="Assets\Icons\cableIcon.png" />
-        <EmbeddedResource Include="Assets\Icons\roomIcon.png" />
-        <EmbeddedResource Include="Assets\Icons\shirtIcon.png" />
-        <EmbeddedResource Include="Assets\Icons\trevis-placeholder.png" />
+        <EmbeddedResource Include="PropertyList.txt" />
         <EmbeddedResource Include="Assets\Sounds\hello.wav" />
         <EmbeddedResource Include="Assets\Sounds\tup_startup.wav" />
         <None Remove="Assets\tupmenu-panelexpansion" />
@@ -39,30 +37,21 @@
         <None Remove="Assets\Fonts\figtree" />
         <EmbeddedResource Include="Assets\Fonts\figtree" />
         <None Remove="Assets\Icons\volumedown.png" />
-        <EmbeddedResource Include="Assets\Icons\volumedown.png" />
         <None Remove="Assets\Icons\volumeup.png" />
-        <EmbeddedResource Include="Assets\Icons\volumeup.png" />
         <None Remove="Assets\Icons\muteelse.png" />
-        <EmbeddedResource Include="Assets\Icons\muteelse.png" />
         <None Remove="Assets\Icons\mute.png" />
-        <EmbeddedResource Include="Assets\Icons\mute.png" />
         <None Remove="Assets\Models\tup-checker" />
         <None Remove="Assets\Models\tup-checkerfix" />
         <None Remove="Assets\Models\tup-checkerplus" />
         <None Remove="Assets\Models\tup-checkerbetter" />
         <None Remove="Assets\Icons\selectuser.png" />
-        <EmbeddedResource Include="Assets\Icons\selectuser.png" />
         <None Remove="Assets\Icons\settings.png" />
-        <EmbeddedResource Include="Assets\Icons\settings.png" />
         <None Remove="Assets\Models\tup-redux" />
         <None Remove="Assets\Models\tup-reduxv2" />
         <None Remove="Assets\Models\tupbutton-prefab" />
         <None Remove="Assets\Models\buttonmodel" />
         <None Remove="Assets\Models\tup-reimagined" />
         <None Remove="Assets\Models\tup-overhaul" />
-        <None Remove="Assets\UI\notifui" />
-        <None Remove="Assets\UI\notif" />
-        <None Remove="Assets\UI\notifgui" />
         <None Remove="Assets\Models\tup-new" />
         <None Remove="Assets\Models\tup-newo" />
         <None Remove="Assets\Models\tup-newoo" />
@@ -80,15 +69,11 @@
         <None Remove="Assets\Shaders\tup-holo" />
         <None Remove="Assets\UI\nametag" />
         <None Remove="Assets\Models\buttonmodel-outline" />
-        <EmbeddedResource Include="Assets\Models\buttonmodel-outline" />
         <None Remove="Assets\Models\buttonmodel-newo" />
-        <EmbeddedResource Include="Assets\Models\buttonmodel-newo" />
         <None Remove="Assets\Models\tup-overv3" />
         <None Remove="Assets\Models\tup-overv4" />
         <None Remove="Assets\Models\tup-overv5" />
-        <EmbeddedResource Include="Assets\Models\tup-overv5" />
         <None Remove="Assets\Icons\playersicon.png" />
-        <EmbeddedResource Include="Assets\Icons\playersicon.png" />
         <None Remove="Assets\Sounds\Minecraft.wav" />
         <EmbeddedResource Include="Assets\Sounds\minecraft.wav" />
         <None Remove="Assets\Sounds\destiny.wav" />
@@ -100,28 +85,22 @@
         <None Remove="Assets\Sounds\untitled.wav" />
         <EmbeddedResource Include="Assets\Sounds\untitled.wav" />
         <None Remove="Assets\UI\nametag" />
-        <EmbeddedResource Include="Assets\UI\nametag" />
-        <None Remove="Assets\UI\tup-notif" />
-        <EmbeddedResource Include="Assets\UI\tup-notif" />
         <None Remove="Assets\Models\buttonmodel-masked" />
-        <EmbeddedResource Include="Assets\Models\buttonmodel-masked" />
         <None Remove="Assets\Models\buttonmodel-trash" />
-        <EmbeddedResource Include="Assets\Models\buttonmodel-trash" />
         <None Remove="Assets\Models\buttonmodel-maskfix" />
-        <EmbeddedResource Include="Assets\Models\buttonmodel-maskfix" />
         <None Remove="Assets\Models\buttonmodel-maskfix2" />
-        <EmbeddedResource Include="Assets\Models\buttonmodel-maskfix2" />
         <None Remove="Assets\Models\tup-overv6" />
-        <EmbeddedResource Include="Assets\Models\tup-overv6" />
         <None Remove="Assets\Models\tup-overv7" />
-        <EmbeddedResource Include="Assets\Models\tup-overv7" />
         <None Remove="Assets\Models\buttonmodel-rename" />
         <EmbeddedResource Include="Assets\Models\buttonmodel-rename" />
-        <None Remove="Assets\UI\notif-compact" />
-        <EmbeddedResource Include="Assets\UI\notif-compact" />
-        <None Remove="Assets\UI\notif-sizefix" />
-        <None Remove="Assets\UI\notif-scalefix2" />
-        <EmbeddedResource Include="Assets\UI\notif-scalefix2" />
+        <None Remove="Assets\Models\tup-overv8" />
+        <None Remove="Assets\Models\tup-overv9" />
+        <EmbeddedResource Include="Assets\Models\tup-overv9" />
+        <None Remove="Assets\UI\tup-nametagui" />
+        <EmbeddedResource Include="Assets\UI\tup-nametagui" />
+        <None Remove="Assets\UI\notifover" />
+        <None Remove="Assets\UI\notifpls" />
+        <EmbeddedResource Include="Assets\UI\notifpls" />
     </ItemGroup>
 
     <ItemGroup>
@@ -785,6 +764,7 @@
     </ItemGroup>
 
     <ItemGroup>
+      <Folder Include="Assets\Icons\" />
       <Folder Include="Patches\" />
     </ItemGroup>
 

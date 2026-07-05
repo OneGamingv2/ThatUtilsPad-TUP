@@ -1,10 +1,10 @@
-﻿using System;
+using System;
 using System.Collections;
+using GorillaLocomotion;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using GorillaGameModes;
-using GorillaLocomotion;
 using GorillaNetworking;
 using Photon.Pun;
 using Photon.Realtime;
@@ -17,6 +17,8 @@ using PlayFab.ClientModels;
 using Photon.Voice.Unity;
 using TMPro;
 using ThatUtilsPad.MenuComponents;
+using UnityEngine.UI;
+using Debug = UnityEngine.Debug;
 
 namespace ThatUtilsPad;
 
@@ -57,6 +59,23 @@ public static class Mods
 
     public static Dictionary<string, ModCategory> Actions;
 
+    private const string NotificationPrefabPath = "assets/prefabs/Notification-PLS.prefab";
+    private const float NotificationBaseWidth = 11.55f;
+    private const float NotificationWidthPerCharacter = 2.025f;
+    private const float NotificationBaseY = -0.08f;
+    private const float NotificationStackSpacing = 0.025f;
+    private const float NotificationDefaultDuration = 3f;
+    private const float NotificationWidthAnimDuration = 0.35f;
+    private const float NotificationTextFadeInDuration = 0.25f;
+    private const float NotificationTextFadeOutDuration = 0.125f;
+    private const float NotificationTextScaleDelay = 0.03f;
+    private const float NotificationMoveDuration = 0.15f;
+    private const float NotificationMoveWaveDelay = 0.05f;
+    private const int NotificationMaxVisible = 5;
+    private static readonly List<NotificationEntry> activeNotifications = new List<NotificationEntry>();
+    private static readonly Queue<NotificationRequest> queuedNotifications = new Queue<NotificationRequest>();
+    private static Coroutine notificationQueueRoutine;
+    private static float notificationStackSettlesAt;
     private static int currentOutfitIndex = 0;
     private static int savedOutfitCount   = 0;
     private static readonly Dictionary<int, int> savedOutfitSlots = new Dictionary<int, int>();
@@ -101,6 +120,22 @@ public static class Mods
     private static int            renamingOutfitN   = -1;
 
     private static readonly Dictionary<int, string> outfitSlotNames = new Dictionary<int, string>();
+    private static Dictionary<string, bool> propertyLegality;
+    private static Dictionary<string, PropertySignature> propertySignatures;
+
+    private sealed class PropertySignature
+    {
+        public readonly string Name;
+        public readonly bool IsLegal;
+        public readonly string Section;
+
+        public PropertySignature(string name, bool isLegal, string section)
+        {
+            Name = name;
+            IsLegal = isLegal;
+            Section = section;
+        }
+    }
 
     public static void SaveToggleState(string identifier, bool isOn)
     {
@@ -117,6 +152,12 @@ public static class Mods
             foreach (var kvp in SavedToggleStates)
                 lines.Add("toggle:" + kvp.Key + "=" + kvp.Value);
             lines.Add("clickSoundIndex=" + currentClickIndex);
+            lines.Add("smoothMenuEnabled=" + smoothMenuEnabled);
+            lines.Add("smoothingStrengthIndex=" + smoothingStrengthIndex);
+            lines.Add("menuScaleIndex=" + menuScaleIndex);
+            lines.Add("headDistanceIndex=" + headDistanceIndex);
+            lines.Add("doubleClickOpenEnabled=" + doubleClickOpenEnabled);
+            lines.Add("menuOpenBind=" + menuOpenBindCode);
             foreach (var kvp in savedOutfitSlots)
                 lines.Add("savedOutfit:" + kvp.Key + "=" + kvp.Value);
             foreach (var kvp in outfitSlotNames)
@@ -132,7 +173,12 @@ public static class Mods
         savedOutfitSlots.Clear();
         outfitSlotNames.Clear();
         savedOutfitCount = 0;
-        if (!System.IO.File.Exists(statesFilePath)) return;
+        if (!System.IO.File.Exists(statesFilePath))
+        {
+            SavedToggleStates["Menu Smoothing"] = smoothMenuEnabled;
+            SavedToggleStates["Double Open"] = doubleClickOpenEnabled;
+            return;
+        }
         try
         {
             foreach (var line in System.IO.File.ReadAllLines(statesFilePath))
@@ -150,6 +196,37 @@ public static class Mods
                 {
                     if (int.TryParse(line.Substring(16), out int idx))
                         currentClickIndex = Mathf.Clamp(idx, 0, clickSounds.Count - 1);
+                }
+                else if (line.StartsWith("smoothMenuEnabled="))
+                {
+                    if (bool.TryParse(line.Substring(18), out bool val))
+                        smoothMenuEnabled = val;
+                }
+                else if (line.StartsWith("smoothingStrengthIndex="))
+                {
+                    if (int.TryParse(line.Substring(23), out int idx))
+                        smoothingStrengthIndex = Mathf.Clamp(idx, 0, smoothingStrengthNames.Length - 1);
+                }
+                else if (line.StartsWith("menuScaleIndex="))
+                {
+                    if (int.TryParse(line.Substring(15), out int idx))
+                        menuScaleIndex = Mathf.Clamp(idx, 0, menuScaleNames.Length - 1);
+                }
+                else if (line.StartsWith("headDistanceIndex="))
+                {
+                    if (int.TryParse(line.Substring(18), out int idx))
+                        headDistanceIndex = Mathf.Clamp(idx, 0, headDistanceNames.Length - 1);
+                }
+                else if (line.StartsWith("doubleClickOpenEnabled="))
+                {
+                    if (bool.TryParse(line.Substring(23), out bool val))
+                        doubleClickOpenEnabled = val;
+                }
+                else if (line.StartsWith("menuOpenBind="))
+                {
+                    string bind = line.Substring(13).Trim();
+                    if (!string.IsNullOrWhiteSpace(bind))
+                        menuOpenBindCode = bind;
                 }
                 else if (line.StartsWith("savedOutfit:"))
                 {
@@ -174,6 +251,9 @@ public static class Mods
             }
         }
         catch (Exception e) { Debug.LogWarning("[TUP] Failed to load button states: " + e.Message); }
+
+        SavedToggleStates["Menu Smoothing"] = smoothMenuEnabled;
+        SavedToggleStates["Double Open"] = doubleClickOpenEnabled;
     }
     
     
@@ -202,8 +282,11 @@ public static void Init()
                     { "Disconnect", new ModAction(Disconnect, false, true, 3f) },
                     { "Join Random", new ModAction(JoinRandom, false, true, 5f) },
                     { "Lobby Hop", new ModAction(LobbyHop, false, true, 5f) },
+                    { "Region", new ModAction(CycleRegion, false, true, 5f) },
+                    { "Copy Room Code", new ModAction(CopyRoomCode, false) },
                     { "Queue", new ModAction(ToggleQueue, false) },
                     { "Mode", new ModAction(ToggleMode, false) },
+                    { "Custom Prop Test", new ModAction(PrintPhotonPlayerCustomProperties, false) }
                 }
             }
         },
@@ -214,6 +297,7 @@ public static void Init()
                 Actions =
                 {
                     { "Nametags", new ModAction(ToggleNameTags, true) },
+                    { "Nametag Size", new ModAction(CycleNameTagSize, false) },
                 }
             }
         },
@@ -240,38 +324,18 @@ public static void Init()
             {
                 Actions =
                 {
-                    { "ab", new ModAction(Nothing, false, true, 3f) },
-                    { "ge", new ModAction(Nothing, false, true, 3f) },
-                    { "fg", new ModAction(Nothing, false, true, 3f) },
-                    //{ "Click Sound", new ModAction(ToggleClickSound, false) },
-                    //{ "Sound Test", new ModAction(Nothing, false) },
-                    //{ "Menu Smoothing", new ModAction(SmoothMenu, true) },
-                    { "e", new ModAction(Nothing, false, true, 3f) },
-                    { "a", new ModAction(Nothing, false, true, 3f) },
-                    { "g", new ModAction(Nothing, false, true, 3f) },
-                    { "f", new ModAction(Nothing, false, true, 3f) },
+                    { "Click Sound", new ModAction(ToggleClickSound, false) },
+                    { "Test Sound", new ModAction(Nothing, false) },
+                    { "Menu Smoothing", new ModAction(SmoothMenu, true) },
+                    { "Smooth Strength", new ModAction(CycleMenuSmoothingStrength, false) },
+                    { "Menu Scale", new ModAction(CycleMenuScale, false) },
+                    { "PC Distance", new ModAction(CycleHeadDistance, false) },
+                    { "Double Open", new ModAction(ToggleDoubleOpen, true) },
+                    { "Open Bind", new ModAction(StartOpenBindCapture, false) },
+                    { "Theme", new ModAction(CycleTheme, false) },
                 }
             }
         },
-        {
-            "Placeholder-6",
-            new ModCategory("trevis-placeholder.png")
-            {
-                Actions =
-                {
-                }
-            }
-        },
-        {
-            "Placeholder-7",
-            new ModCategory("trevis-placeholder.png")
-            {
-                Actions =
-                {
-                }
-            }
-        },
-        
         //Checker (hidden)
         {
             "ModChecker",
@@ -292,8 +356,284 @@ public static void Init()
     LoadButtonStates();
     InitOutfitSlotActions();
 }
-    
-    private static Dictionary<VRRig, float> volumes = new Dictionary<VRRig, float>();
+
+private static void Nothing()
+{
+    ShowNotification("testing yipee", NotificationDefaultDuration);
+}
+
+public static void ShowNotification(string text, float duration)
+{
+    text ??= "";
+    duration = Mathf.Max(0f, duration);
+
+    queuedNotifications.Enqueue(new NotificationRequest(text, duration));
+    if (notificationQueueRoutine == null)
+        notificationQueueRoutine = GetNotificationCoroutineHandler().StartCoroutine(ProcessNotificationQueue());
+}
+
+public static void ShowNotification(string text)
+{
+    ShowNotification(text, NotificationDefaultDuration);
+}
+
+private static IEnumerator ProcessNotificationQueue()
+{
+    while (queuedNotifications.Count > 0)
+    {
+        while (activeNotifications.Count >= NotificationMaxVisible || Time.time < notificationStackSettlesAt)
+            yield return null;
+
+        NotificationRequest request = queuedNotifications.Dequeue();
+        TryShowNotificationNow(request.Text, request.Duration);
+        yield return null;
+    }
+
+    notificationQueueRoutine = null;
+}
+
+private static void TryShowNotificationNow(string text, float duration)
+{
+    if (Main.notifBundle == null)
+    {
+        Debug.LogWarning("[TUP] Notification bundle is not loaded.");
+        return;
+    }
+
+    Transform headTransform = GTPlayer.Instance?.headCollider?.transform;
+    if (headTransform == null)
+    {
+        Debug.LogWarning("[TUP] Cannot show notification without a head transform.");
+        return;
+    }
+
+    GameObject prefab = Main.notifBundle.LoadAsset<GameObject>(NotificationPrefabPath);
+    if (prefab == null)
+    {
+        Debug.LogWarning("[TUP] Notification prefab not found: " + NotificationPrefabPath);
+        return;
+    }
+
+    GameObject notifObject = Object.Instantiate(prefab);
+    notifObject.transform.localScale = Vector3.one * 0.02f;
+    NotificationFollower follower = notifObject.AddComponent<NotificationFollower>();
+
+    TextMeshProUGUI notifText = notifObject.transform.Find("Base/Text")?.GetComponent<TextMeshProUGUI>();
+    RectTransform notifImageRect = notifObject.transform.Find("Base")?.GetComponent<RectTransform>();
+    if (notifText == null || notifImageRect == null)
+    {
+        Debug.LogWarning("[TUP] Notification prefab is missing Base/Text or Base RectTransform.");
+        Object.Destroy(notifObject);
+        return;
+    }
+
+    float targetWidth = NotificationBaseWidth + (text.Length * NotificationWidthPerCharacter);
+    notifText.text = text;
+    notifText.alpha = 0f;
+    notifImageRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, 0f);
+
+    var entry = new NotificationEntry(notifObject, notifText, notifImageRect, follower, targetWidth);
+    activeNotifications.Add(entry);
+    RestackNotifications(false);
+
+    GetNotificationCoroutineHandler().StartCoroutine(NotificationLifetime(entry, duration));
+}
+private static CoroutineHandler GetNotificationCoroutineHandler()
+{
+    if (CoroutineHandler.Instance != null)
+        return CoroutineHandler.Instance;
+
+    return new GameObject("TUP_CoroutineHandler").AddComponent<CoroutineHandler>();
+}
+
+private static IEnumerator NotificationLifetime(NotificationEntry entry, float duration)
+{
+    yield return AnimateNotificationWidth(entry, 0f, entry.TargetWidth, NotificationWidthAnimDuration);
+    yield return new WaitForSeconds(NotificationTextScaleDelay);
+    yield return FadeNotificationText(entry, 0f, 1f, NotificationTextFadeInDuration);
+    yield return new WaitForSeconds(duration);
+
+    while (entry.Object != null && activeNotifications.Count > 0 && activeNotifications[0] != entry)
+        yield return null;
+    yield return MoveNotification(entry, GetNotificationStackPosition(0), NotificationMoveDuration, 0f);
+    yield return new WaitForSeconds(NotificationTextScaleDelay);
+    yield return FadeNotificationText(entry, 1f, 0f, NotificationTextFadeOutDuration);
+    yield return new WaitForSeconds(NotificationTextScaleDelay);
+    yield return AnimateNotificationWidth(entry, entry.TargetWidth, 0f, NotificationWidthAnimDuration);
+
+    RemoveNotification(entry);
+
+    RestackNotifications(true);
+    MarkNotificationStackSettling();
+}
+
+private static IEnumerator AnimateNotificationWidth(NotificationEntry entry, float from, float to, float duration)
+{
+    if (entry.Rect == null)
+        yield break;
+
+    if (duration <= 0f)
+    {
+        entry.Rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, to);
+        yield break;
+    }
+
+    float elapsed = 0f;
+    while (elapsed < duration && entry.Rect != null)
+    {
+        elapsed += Time.deltaTime;
+        float t = Mathf.Clamp01(elapsed / duration);
+        t = 1f - ((1f - t) * (1f - t));
+        entry.Rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, Mathf.Lerp(from, to, t));
+        yield return null;
+    }
+
+    if (entry.Rect != null)
+        entry.Rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, to);
+}
+
+private static IEnumerator FadeNotificationText(NotificationEntry entry, float from, float to, float duration)
+{
+    if (entry.Text == null)
+        yield break;
+
+    if (duration <= 0f)
+    {
+        entry.Text.alpha = to;
+        yield break;
+    }
+
+    float elapsed = 0f;
+    while (elapsed < duration && entry.Text != null)
+    {
+        elapsed += Time.deltaTime;
+        float t = Mathf.Clamp01(elapsed / duration);
+        entry.Text.alpha = Mathf.Lerp(from, to, t);
+        yield return null;
+    }
+
+    if (entry.Text != null)
+        entry.Text.alpha = to;
+}
+
+private static void RestackNotifications(bool animate)
+{
+    activeNotifications.RemoveAll(entry => entry.Object == null);
+
+    for (int i = 0; i < activeNotifications.Count; i++)
+    {
+        NotificationEntry entry = activeNotifications[i];
+        GameObject notifObject = entry.Object;
+        if (notifObject == null) continue;
+
+        Vector3 targetPosition = GetNotificationStackPosition(i);
+
+        if (!animate)
+        {
+            entry.Follower.LocalPosition = targetPosition;
+            continue;
+        }
+
+        if (entry.MoveRoutine != null && CoroutineHandler.Instance != null)
+            CoroutineHandler.Instance.StopCoroutine(entry.MoveRoutine);
+
+        entry.MoveRoutine = GetNotificationCoroutineHandler().StartCoroutine(
+            MoveNotification(entry, targetPosition, NotificationMoveDuration, NotificationMoveWaveDelay * i)
+        );
+    }
+}
+
+private static void RemoveNotification(NotificationEntry entry)
+{
+    activeNotifications.Remove(entry);
+    if (entry.Object != null)
+        Object.Destroy(entry.Object);
+}
+
+private static void MarkNotificationStackSettling()
+{
+    if (activeNotifications.Count <= 0)
+    {
+        notificationStackSettlesAt = Time.time;
+        return;
+    }
+
+    notificationStackSettlesAt = Time.time + NotificationMoveDuration + (NotificationMoveWaveDelay * (activeNotifications.Count - 1));
+}
+
+private static Vector3 GetNotificationStackPosition(int index)
+{
+    return new Vector3(
+        0f,
+        NotificationBaseY + (NotificationStackSpacing * index),
+        0.3f
+    );
+}
+private static IEnumerator MoveNotification(NotificationEntry entry, Vector3 targetPosition, float duration, float delay)
+{
+    if (delay > 0f)
+        yield return new WaitForSeconds(delay);
+
+    if (entry.Object == null)
+        yield break;
+
+    NotificationFollower follower = entry.Follower;
+    Vector3 startPosition = follower.LocalPosition;
+
+    if (duration <= 0f)
+    {
+        follower.LocalPosition = targetPosition;
+        yield break;
+    }
+
+    float elapsed = 0f;
+    while (elapsed < duration && entry.Object != null)
+    {
+        elapsed += Time.deltaTime;
+        float t = Mathf.Clamp01(elapsed / duration);
+        t = t * t * (3f - (2f * t));
+        follower.LocalPosition = Vector3.Lerp(startPosition, targetPosition, t);
+        yield return null;
+    }
+
+    if (entry.Object != null)
+        follower.LocalPosition = targetPosition;
+
+    entry.MoveRoutine = null;
+}
+
+private sealed class NotificationEntry
+{
+    public readonly GameObject Object;
+    public readonly TextMeshProUGUI Text;
+    public readonly RectTransform Rect;
+    public readonly NotificationFollower Follower;
+    public readonly float TargetWidth;
+    public Coroutine MoveRoutine;
+
+    public NotificationEntry(GameObject obj, TextMeshProUGUI text, RectTransform rect, NotificationFollower follower, float targetWidth)
+    {
+        Object = obj;
+        Text = text;
+        Rect = rect;
+        Follower = follower;
+        TargetWidth = targetWidth;
+    }
+}
+
+private readonly struct NotificationRequest
+{
+    public readonly string Text;
+    public readonly float Duration;
+
+    public NotificationRequest(string text, float duration)
+    {
+        Text = text;
+        Duration = duration;
+    }
+}
+
+private static Dictionary<VRRig, float> volumes = new Dictionary<VRRig, float>();
 
 private static bool muteToggled;
 private static bool muteElseToggled;
@@ -629,6 +969,9 @@ public static void UpdateChecker()
 
     void ClearSelected()
     {
+        if (selectedRig != null)
+            Main.Instance?.UpdateCheckerProperties("None", "None");
+
         selectedRig = null;
     }
 
@@ -1100,6 +1443,50 @@ public static void DisableBoneHighlight(VRRig rig)
             $"RGB({Mathf.RoundToInt(color.r * 9)}, {Mathf.RoundToInt(color.g * 9)}, {Mathf.RoundToInt(color.b * 9)})";
 
         Debug.Log($"[TUP CHECKER]\nName: {name}\nColor: {colorStr}\nFPS: {fps}\nPlatform: {platform}");
+        UpdateSelectedPlayerProperties(rig);
+    }
+
+    private static void UpdateSelectedPlayerProperties(VRRig rig)
+    {
+        string legalText = "None";
+        string illegalText = "None";
+
+        try
+        {
+            Player player = rig.GetPhotonPlayer();
+            if (player != null)
+            {
+                Dictionary<string, List<string>> hits = FindPropertySignatureHits(player);
+
+                List<string> legalMods = hits.Keys
+                    .Select(key => propertySignatures[key])
+                    .Where(signature => signature.IsLegal)
+                    .Select(signature => signature.Name)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                List<string> illegalMods = hits.Keys
+                    .Select(key => propertySignatures[key])
+                    .Where(signature => !signature.IsLegal)
+                    .Select(signature => signature.Name)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (legalMods.Count > 0)
+                    legalText = string.Join(", ", legalMods);
+
+                if (illegalMods.Count > 0)
+                    illegalText = string.Join(", ", illegalMods);
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning("[TUP PROP SCAN] Failed to scan selected player: " + e.Message);
+        }
+
+        Main.Instance?.UpdateCheckerProperties(legalText, illegalText);
     }
     
     private static FieldInfo rigSerializerField = typeof(VRRig).GetField(
@@ -1122,6 +1509,264 @@ public static void DisableBoneHighlight(VRRig rig)
     public static Player NetPlayerToPlayer(NetPlayer p) =>
         p.GetPlayerRef();
     
+    public static void PrintPhotonPlayerCustomProperties()
+    {
+        if (!PhotonNetwork.InRoom)
+        {
+            Debug.Log("[TUP] Cannot print Photon custom properties: not in a room.");
+            return;
+        }
+
+        EnsurePropertySignatureDictionary();
+
+        foreach (Player player in PhotonNetwork.PlayerList)
+        {
+            string playerLabel = $"actor={player.ActorNumber}, name={player.NickName}, userId={player.UserId}";
+
+            if (player.CustomProperties == null || player.CustomProperties.Count == 0)
+            {
+                Debug.Log($"[TUP] Photon custom properties for {playerLabel}: <none>");
+                continue;
+            }
+
+            List<string> props = new List<string>();
+            foreach (object key in player.CustomProperties.Keys)
+            {
+                object value = player.CustomProperties[key];
+                props.Add($"{key}={FormatPhotonCustomPropertyValue(value)}");
+            }
+
+            Debug.Log($"[TUP] Photon custom properties for {playerLabel}: {string.Join(", ", props)}");
+            PrintDetectedPropertySignatures(player, playerLabel);
+        }
+    }
+
+    public static Dictionary<string, bool> GetPropertyLegalityDictionary()
+    {
+        EnsurePropertySignatureDictionary();
+        return propertyLegality;
+    }
+
+    private static void PrintDetectedPropertySignatures(Player player, string playerLabel)
+    {
+        Dictionary<string, List<string>> hits = FindPropertySignatureHits(player);
+
+        if (hits.Count == 0)
+        {
+            Debug.Log($"[TUP PROP SCAN] No property-list signatures detected for {playerLabel}");
+            return;
+        }
+
+        foreach (var hit in hits)
+        {
+            PropertySignature signature = propertySignatures[hit.Key];
+            string verdict = signature.IsLegal ? "LEGAL" : "ILLEGAL";
+            Debug.Log($"[TUP PROP SCAN] {verdict} signature detected for {playerLabel}: \"{signature.Name}\" ({signature.Section}) in {string.Join(", ", hit.Value)}");
+        }
+    }
+
+    private static Dictionary<string, List<string>> FindPropertySignatureHits(Player player)
+    {
+        EnsurePropertySignatureDictionary();
+
+        Dictionary<string, List<string>> hits = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var source in BuildPropertyScanSources(player))
+        {
+            foreach (PropertySignature signature in propertySignatures.Values)
+            {
+                if (!TextContainsSignature(source.Value, signature.Name))
+                    continue;
+
+                if (!hits.TryGetValue(signature.Name, out List<string> sources))
+                {
+                    sources = new List<string>();
+                    hits[signature.Name] = sources;
+                }
+
+                if (!sources.Contains(source.Key))
+                    sources.Add(source.Key);
+            }
+        }
+
+        return hits;
+    }
+
+    private static Dictionary<string, string> BuildPropertyScanSources(Player player)
+    {
+        Dictionary<string, string> sources = new Dictionary<string, string>();
+        sources["PhotonPlayer"] = $"{player.NickName} {player.UserId} {player.ActorNumber}";
+
+        if (player.CustomProperties != null)
+        {
+            List<string> props = new List<string>();
+            foreach (object key in player.CustomProperties.Keys)
+            {
+                object value = player.CustomProperties[key];
+                props.Add($"{key} {FormatPhotonCustomPropertyValue(value)}");
+            }
+            sources["CustomProperties"] = string.Join(" ", props);
+        }
+
+        VRRig rig = GetRigForPhotonPlayer(player);
+        if (rig != null)
+        {
+            try { sources["Cosmetics"] = rig.Cosmetics(); } catch { }
+            try { sources["Platform"] = rig.GetPlatform(); } catch { }
+            try { sources["FPS"] = RigHelper.GetFPS(rig).ToString(); } catch { }
+        }
+
+        return sources;
+    }
+
+    private static VRRig GetRigForPhotonPlayer(Player player)
+    {
+        foreach (VRRig rig in VRRigCache.ActiveRigs)
+        {
+            if (rig == null || rig.isLocal) continue;
+            try
+            {
+                if (rig.GetPhotonPlayer() == player)
+                    return rig;
+            }
+            catch { }
+        }
+
+        return null;
+    }
+
+    private static void EnsurePropertySignatureDictionary()
+    {
+        if (propertySignatures != null && propertyLegality != null)
+            return;
+
+        propertySignatures = new Dictionary<string, PropertySignature>(StringComparer.OrdinalIgnoreCase);
+        propertyLegality = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+        string text = LoadPropertyListText();
+        if (string.IsNullOrEmpty(text))
+        {
+            Debug.LogWarning("[TUP PROP SCAN] PropertyList.txt not found or empty.");
+            return;
+        }
+
+        string section = "Uncategorized";
+        foreach (string rawLine in text.Replace("\r\n", "\n").Split('\n'))
+        {
+            string line = rawLine.Trim();
+            if (string.IsNullOrEmpty(line))
+                continue;
+
+            if (IsPropertyListSectionHeader(line))
+            {
+                section = line;
+                continue;
+            }
+
+            if (section.Equals("Report severities", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string[] entries = line.Contains(",") ? line.Split(',') : new[] { line };
+            foreach (string rawEntry in entries)
+            {
+                string entry = rawEntry.Trim();
+                if (string.IsNullOrEmpty(entry))
+                    continue;
+
+                bool isLegal = IsLegalPropertySignature(section, entry);
+                propertySignatures[entry] = new PropertySignature(entry, isLegal, section);
+                propertyLegality[entry] = isLegal;
+            }
+        }
+
+        Debug.Log($"[TUP PROP SCAN] Loaded {propertySignatures.Count} property signatures.");
+    }
+
+    private static string LoadPropertyListText()
+    {
+        Assembly assembly = Assembly.GetExecutingAssembly();
+        using System.IO.Stream stream = assembly.GetManifestResourceStream("ThatUtilsPad.PropertyList.txt");
+        if (stream == null)
+            return "";
+
+        using System.IO.StreamReader reader = new System.IO.StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    private static bool IsPropertyListSectionHeader(string line)
+    {
+        switch (line.ToLowerInvariant())
+        {
+            case "runtime anti-cheat (red)":
+            case "runtime anti-cheat (warning)":
+            case "behavioral mod detections":
+            case "property count flags":
+            case "heuristic categories":
+            case "suspicious property tokens":
+            case "high-risk property keys":
+            case "illegal mod hints (mods tab red flag)":
+            case "report severities":
+            case "signature keywords":
+            case "built-in signatures":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static bool IsLegalPropertySignature(string section, string entry)
+    {
+        if (!section.Equals("Built-in signatures", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        string normalized = NormalizeForPropertyScan(entry);
+        string[] illegalTokens =
+        {
+            "cheat", "menu", "seralyth", "seralith", "void", "shiba", "mango", "nebula", "pulsar",
+            "cosmos", "hydra", "spectre", "viper", "eclipse", "phantom", "sentinel", "oblivion",
+            "resurgence", "elixir", "orbit", "rexon", "cosmetx"
+        };
+
+        return !illegalTokens.Any(token => normalized.Contains(token));
+    }
+
+    private static bool TextContainsSignature(string text, string signature)
+    {
+        if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(signature))
+            return false;
+
+        string normalizedText = NormalizeForPropertyScan(text);
+        string normalizedSignature = NormalizeForPropertyScan(signature);
+        if (string.IsNullOrEmpty(normalizedSignature))
+            return false;
+
+        if (normalizedSignature.Length <= 3 && !normalizedSignature.All(char.IsDigit))
+            return normalizedText.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)
+                .Any(token => token.Equals(normalizedSignature, StringComparison.OrdinalIgnoreCase));
+
+        if (normalizedText.Contains(normalizedSignature))
+            return true;
+
+        string compactText = normalizedText.Replace(" ", "");
+        string compactSignature = normalizedSignature.Replace(" ", "");
+        return compactSignature.Length > 3 && compactText.Contains(compactSignature);
+    }
+
+    private static string NormalizeForPropertyScan(string text)
+    {
+        char[] chars = text.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : ' ').ToArray();
+        return string.Join(" ", new string(chars).Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static string FormatPhotonCustomPropertyValue(object value)
+    {
+        if (value == null) return "null";
+        if (value is string) return value.ToString();
+        if (value is System.Collections.IEnumerable values)
+            return "[" + string.Join(", ", values.Cast<object>().Select(FormatPhotonCustomPropertyValue)) + "]";
+
+        return value.ToString();
+    }
+
     public static string GetPlatform(this VRRig rig)
     {
         int suspiciouslySteam = 0;
@@ -1232,6 +1877,74 @@ public static void DisableBoneHighlight(VRRig rig)
         if (NetworkSystem.Instance.InRoom)
             NetworkSystem.Instance.ReturnToSinglePlayer();
     }
+
+    private static readonly string[] regionCodes = { "eu", "us", "usw" };
+    private static readonly string[] regionNames = { "EU", "NA East", "NA West" };
+    private static int regionIndex = -1;
+    private static Coroutine? regionCoroutine;
+
+    private static void EnsureRegionIndex()
+    {
+        if (regionIndex >= 0)
+            return;
+
+        string currentRegion = PhotonNetwork.CloudRegion;
+        if (string.IsNullOrWhiteSpace(currentRegion))
+            currentRegion = PhotonNetwork.PhotonServerSettings?.AppSettings?.FixedRegion;
+
+        currentRegion = currentRegion?.Split('/')[0].Trim().ToLowerInvariant();
+        regionIndex = Array.FindIndex(regionCodes, code => code == currentRegion);
+        if (regionIndex < 0)
+            regionIndex = 0;
+    }
+
+    public static string GetRegionLabel()
+    {
+        EnsureRegionIndex();
+        return regionNames[regionIndex];
+    }
+
+    private static void CycleRegion()
+    {
+        if (regionCoroutine != null)
+            return;
+
+        EnsureRegionIndex();
+        regionIndex = (regionIndex + 1) % regionCodes.Length;
+
+        if (Main.regionText != null)
+            Main.regionText.text = "Region  :  " + regionNames[regionIndex];
+
+        regionCoroutine = CoroutineHandler.Instance.StartCoroutine(ChangeRegion(regionCodes[regionIndex]));
+    }
+
+    private static IEnumerator ChangeRegion(string regionCode)
+    {
+        Debug.Log("[TUP] Changing Photon region to " + regionCode);
+
+        if (PhotonNetwork.InRoom)
+        {
+            NetworkSystem.Instance.ReturnToSinglePlayer();
+            float leaveTimeout = Time.time + 5f;
+            while (PhotonNetwork.InRoom && Time.time < leaveTimeout)
+                yield return null;
+        }
+
+        if (PhotonNetwork.IsConnected)
+        {
+            PhotonNetwork.Disconnect();
+            float disconnectTimeout = Time.time + 10f;
+            while (PhotonNetwork.IsConnected && Time.time < disconnectTimeout)
+                yield return null;
+        }
+
+        PhotonNetwork.PhotonServerSettings.AppSettings.FixedRegion = regionCode;
+
+        if (!PhotonNetwork.IsConnected)
+            PhotonNetwork.ConnectUsingSettings();
+
+        regionCoroutine = null;
+    }
     
     
     
@@ -1311,6 +2024,7 @@ public static void DisableBoneHighlight(VRRig rig)
     {
         if (clickSounds.Count == 0) return;
 
+        currentClickIndex = (currentClickIndex + 1) % clickSounds.Count;
         var entry = clickSounds[currentClickIndex];
         Main.Instance.currentClickSound = entry.Clip;
 
@@ -1318,7 +2032,6 @@ public static void DisableBoneHighlight(VRRig rig)
 
         Debug.Log("Click Sound : " + displayName);
 
-        currentClickIndex = (currentClickIndex + 1) % clickSounds.Count;
         SaveButtonStates();
 
         if (Main.clickSoundText != null)
@@ -1327,22 +2040,183 @@ public static void DisableBoneHighlight(VRRig rig)
 
 
     private static bool smoothMenuEnabled = true;
+
+    private static readonly string[] smoothingStrengthNames = { "Soft", "Normal", "Sharp", "Locked" };
+    private static readonly float[] smoothingStrengthValues = { 10f, 30f, 60f, 120f };
+    private static int smoothingStrengthIndex = 1;
+
+    private static readonly string[] menuScaleNames = { "Compact", "Normal", "Large" };
+    private static readonly float[] menuScaleValues = { 0.32f, 0.375f, 0.43f };
+    private static int menuScaleIndex = 1;
+
+    private static readonly string[] headDistanceNames = { "Close", "Normal", "Far" };
+    private static readonly float[] headDistanceValues = { 0.48f, 0.6f, 0.75f };
+    private static int headDistanceIndex = 1;
+
+    private static bool doubleClickOpenEnabled;
+    private static string menuOpenBindCode = Main.DefaultMenuOpenBindCode;
+    private static Coroutine openBindCaptureCoroutine;
+
+    private static readonly string[] themeNames = { "Default", "Sakura" };
+    private static readonly MenuThemePalette[] themePalettes =
+    {
+        MenuTheme.Themes.Default,
+        MenuTheme.Themes.Sakura
+    };
+    private static int themeIndex = 1;
+
+
+    private static void ToggleDoubleOpen()
+    {
+        doubleClickOpenEnabled = !doubleClickOpenEnabled;
+        ApplySavedSettings();
+        SaveButtonStates();
+        Debug.Log("Double Open : " + (doubleClickOpenEnabled ? "ON" : "OFF"));
+    }
+
+    private static void StartOpenBindCapture()
+    {
+        if (Main.Instance == null)
+            return;
+
+        if (openBindCaptureCoroutine != null)
+            Main.Instance.StopCoroutine(openBindCaptureCoroutine);
+
+        openBindCaptureCoroutine = Main.Instance.StartCoroutine(CaptureOpenBind());
+    }
+
+    private static IEnumerator CaptureOpenBind()
+    {
+        HashSet<string> ignored = Main.GetPressedMenuOpenBinds();
+
+        if (Main.openBindText != null)
+            Main.openBindText.text = "Open Bind  :  Listening...";
+
+        while (true)
+        {
+            if (Main.TryGetPressedMenuOpenBind(ignored, out string bindCode, out string displayName))
+            {
+                menuOpenBindCode = bindCode;
+                ApplySavedSettings();
+                SaveButtonStates();
+                Debug.Log("Open Bind : " + displayName);
+                break;
+            }
+
+            HashSet<string> currentlyPressed = Main.GetPressedMenuOpenBinds();
+            ignored.RemoveWhere(code => !currentlyPressed.Contains(code));
+
+            yield return null;
+        }
+
+        openBindCaptureCoroutine = null;
+    }
+
     private static void SmoothMenu()
     {
         smoothMenuEnabled = !smoothMenuEnabled;
-        Main.Instance.SetMenuSmoothing(smoothMenuEnabled);
+        ApplySavedSettings();
+        SaveButtonStates();
+        Debug.Log("Menu Smoothing : " + (smoothMenuEnabled ? "ON" : "OFF"));
     }
-    
-    private static void Nothing()
+
+    private static void CycleMenuSmoothingStrength()
     {
-        NotificationLib.DisplayMode = NotificationDisplayMode.Pc;
-        NotificationLib.SendNotification("TUP Test Message", "PC only random messaege idkl dnsjandjandaj", 3f);
+        smoothingStrengthIndex = (smoothingStrengthIndex + 1) % smoothingStrengthNames.Length;
+        ApplySavedSettings();
+        SaveButtonStates();
+        Debug.Log("Smooth Strength : " + smoothingStrengthNames[smoothingStrengthIndex]);
+    }
+
+    private static void CycleMenuScale()
+    {
+        menuScaleIndex = (menuScaleIndex + 1) % menuScaleNames.Length;
+        ApplySavedSettings();
+        SaveButtonStates();
+        Debug.Log("Menu Scale : " + menuScaleNames[menuScaleIndex]);
+    }
+
+    private static void CycleHeadDistance()
+    {
+        headDistanceIndex = (headDistanceIndex + 1) % headDistanceNames.Length;
+        ApplySavedSettings();
+        SaveButtonStates();
+        Debug.Log("Head Distance : " + headDistanceNames[headDistanceIndex]);
+    }
+
+    private static void CycleTheme()
+    {
+        themeIndex = (themeIndex + 1) % themePalettes.Length;
+        ApplyTheme();
+        UpdateSettingsLabels();
+        Debug.Log("Theme : " + GetThemeLabel());
+    }
+
+    private static void ApplyTheme()
+    {
+        themeIndex = Mathf.Clamp(themeIndex, 0, themePalettes.Length - 1);
+        if (Main.menuObj != null)
+            MenuTheme.Assign(Main.menuObj, themePalettes[themeIndex]);
+        Main.Instance?.RefreshCurrentPage();
+    }
+
+    public static string GetThemeLabel() => themeNames[Mathf.Clamp(themeIndex, 0, themeNames.Length - 1)];
+
+    public static void ApplySavedSettings()
+    {
+        if (Main.Instance == null) return;
+
+        if (clickSounds.Count > 0)
+        {
+            currentClickIndex = Mathf.Clamp(currentClickIndex, 0, clickSounds.Count - 1);
+            Main.Instance.currentClickSound = clickSounds[currentClickIndex].Clip;
+        }
+
+        Main.Instance.SetMenuSmoothing(smoothMenuEnabled, smoothingStrengthValues[smoothingStrengthIndex]);
+        Main.Instance.SetMenuScale(menuScaleValues[menuScaleIndex]);
+        Main.Instance.SetHeadDistance(headDistanceValues[headDistanceIndex]);
+        Main.Instance.SetMenuOpenOptions(doubleClickOpenEnabled, menuOpenBindCode);
+        ApplyTheme();
+        UpdateSettingsLabels();
+    }
+
+    public static string GetSmoothingStrengthLabel() => smoothingStrengthNames[smoothingStrengthIndex];
+    public static string GetMenuScaleLabel() => menuScaleNames[menuScaleIndex];
+    public static string GetHeadDistanceLabel() => headDistanceNames[headDistanceIndex];
+
+    public static void UpdateSettingsLabels()
+    {
+        if (Main.smoothingText != null)
+            Main.smoothingText.text = "Menu Smoothing  :  " + (smoothMenuEnabled ? "On" : "Off");
+
+        if (Main.smoothingStrengthText != null)
+            Main.smoothingStrengthText.text = "Smooth Strength  :  " + GetSmoothingStrengthLabel();
+
+        if (Main.menuScaleText != null)
+            Main.menuScaleText.text = "Menu Scale  :  " + GetMenuScaleLabel();
+
+        if (Main.headDistanceText != null)
+            Main.headDistanceText.text = "PC Distance  :  " + GetHeadDistanceLabel();
+
+        if (Main.doubleOpenText != null)
+            Main.doubleOpenText.text = "Double Open  :  " + (doubleClickOpenEnabled ? "On" : "Off");
+
+        if (Main.openBindText != null)
+            Main.openBindText.text = "Open Bind  :  " + Main.GetMenuOpenBindDisplayName(menuOpenBindCode);
+
+        if (Main.themeText != null)
+            Main.themeText.text = "Theme  :  " + GetThemeLabel();
     }
     
     
     private static bool nameTagsEnabled = false;
     private static readonly Dictionary<VRRig, GameObject> nametags = new();
     public static AssetBundle nameBundle;
+    private static GameObject nameTagPrefab;
+    private static bool loggedMissingNameTagPrefab;
+    private static readonly Dictionary<VRRig, int> cachedNameTagModCounts = new Dictionary<VRRig, int>();
+    private static readonly Dictionary<VRRig, float> nextNameTagModScanTimes = new Dictionary<VRRig, float>();
+    private static float targetNameTagScale = 0.0725f;
 
     public static void UpdateNameTags()
     {
@@ -1363,9 +2237,12 @@ public static void DisableBoneHighlight(VRRig rig)
             
             if (!nametags.ContainsKey(rig))
             {
-                GameObject prefab = nameBundle.LoadAsset<GameObject>("assets/prefabs/nametag.prefab");
+                GameObject prefab = GetNameTagPrefab();
+                if (prefab == null) return;
 
                 GameObject tag = Object.Instantiate(prefab, rig.transform, true);
+                tag.transform.localScale = Vector3.one * targetNameTagScale;
+                tag.SetActive(true);
                 nametags.Add(rig, tag);
             }
 
@@ -1378,32 +2255,24 @@ public static void DisableBoneHighlight(VRRig rig)
             }
             
             Transform anchor = rig.headMesh != null ? rig.headMesh.transform : rig.transform;
-            nametag.transform.position = anchor.position + Vector3.up * 0.62f;
+            nametag.transform.position = anchor.position + Vector3.up * 0.87f;
             
-            nametag.transform.LookAt(Main.ThirdPersonCamera.transform.position);
-            nametag.transform.Rotate(0f, 180f, 0f);
-            nametag.transform.localScale = Vector3.one * 0.1f;
+            Camera camera = Main.GetActiveCamera();
+            if (camera != null)
+            {
+                nametag.transform.LookAt(camera.transform.position);
+                nametag.transform.Rotate(0f, 450f, 0f);
+            }
+            nametag.transform.localScale = Vector3.Lerp(nametag.transform.localScale, Vector3.one * targetNameTagScale, Time.deltaTime * 12f);
+            if (!nametag.activeSelf)
+                nametag.SetActive(true);
             
-            var color = nametag.transform.Find("Color")?.GetComponent<SpriteRenderer>();
-            if (color != null)
-                color.color = rig.playerColor;
+            SetTagText(nametag.transform.Find("Name"), GetPlayerFromVRRig(rig).NickName);
+            SetTagText(nametag.transform.Find("FPS"), RigHelper.GetFPS(rig) + "Hz");
+            SetTagText(nametag.transform.Find("Ping"), GetPingThrottled(rig) + "Ms");
+            SetTagText(nametag.transform.Find("Mods"), GetDetectedModCount(rig) + "Mods");
 
-            var name = nametag.transform.Find("TextCanvas/Name")?.GetComponent<TextMeshProUGUI>();
-            if (name != null)
-                name.text = GetPlayerFromVRRig(rig).NickName;
-            
-            var fps = nametag.transform.Find("TextCanvas/FPS")?.GetComponent<TextMeshProUGUI>();
-            if (fps != null)
-                fps.text = "FPS: " + RigHelper.GetFPS(rig) + "Hz";
-            
-            var ping = nametag.transform.Find("TextCanvas/Ping")?.GetComponent<TextMeshProUGUI>();
-            if (ping != null)
-                ping.text = "PING: " + GetPingThrottled(rig) + "Ms";
-            
-            
-            // platform
-            var IconsLeft = nametag.transform.Find("TextCanvas/Name/IconsLeft");
-            var IconsRight = nametag.transform.Find("TextCanvas/Name/IconsRight");
+            var iconsLeft = nametag.transform.Find("IconsLeft");
 
             string platform;
             try { platform = GetPlatform(rig); }
@@ -1443,11 +2312,93 @@ public static void DisableBoneHighlight(VRRig rig)
                 }
             }
             
-            SetPlatformIcons(IconsLeft, platform);
-            SetPlatformIcons(IconsRight, platform);
+            SetPlatformIcons(iconsLeft, platform);
         }
     }
     
+
+    private static GameObject GetNameTagPrefab()
+    {
+        if (nameTagPrefab != null)
+            return nameTagPrefab;
+
+        if (nameBundle == null)
+            return null;
+
+        string[] assetNames = nameBundle.GetAllAssetNames();
+        string prefabPath = assetNames.FirstOrDefault(name =>
+            name.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) &&
+            name.IndexOf("nametag", StringComparison.OrdinalIgnoreCase) >= 0);
+
+        if (!string.IsNullOrEmpty(prefabPath))
+            nameTagPrefab = nameBundle.LoadAsset<GameObject>(prefabPath);
+
+        if (nameTagPrefab == null)
+            nameTagPrefab = nameBundle.LoadAsset<GameObject>("assets/prefabs/tup-nametagui.prefab");
+
+        if (nameTagPrefab == null)
+            nameTagPrefab = nameBundle.LoadAsset<GameObject>("assets/prefabs/nametag.prefab");
+
+        if (nameTagPrefab == null && !loggedMissingNameTagPrefab)
+        {
+            loggedMissingNameTagPrefab = true;
+            Debug.LogError("[TUP] Nametag prefab missing. Bundle assets: " + string.Join(", ", assetNames));
+        }
+
+        return nameTagPrefab;
+    }
+
+    private static void SetTagText(Transform textTransform, string value)
+    {
+        if (textTransform == null) return;
+
+        TMP_Text tmp = textTransform.GetComponent<TMP_Text>();
+        if (tmp != null)
+        {
+            tmp.text = value;
+            return;
+        }
+
+        UnityEngine.UI.Text uiText = textTransform.GetComponent<UnityEngine.UI.Text>();
+        if (uiText != null)
+            uiText.text = value;
+    }
+
+    private static int GetDetectedModCount(VRRig rig)
+    {
+        if (rig == null) return 0;
+
+        if (cachedNameTagModCounts.TryGetValue(rig, out int cached) &&
+            nextNameTagModScanTimes.TryGetValue(rig, out float nextScan) &&
+            Time.time < nextScan)
+            return cached;
+
+        int count = 0;
+        try
+        {
+            Player player = rig.GetPhotonPlayer();
+            if (player != null)
+                count = FindPropertySignatureHits(player).Count;
+        }
+        catch
+        {
+            count = 0;
+        }
+
+        cachedNameTagModCounts[rig] = count;
+        nextNameTagModScanTimes[rig] = Time.time + 1f;
+        return count;
+    }
+
+    private static readonly float[] nameTagScaleSteps = { 0.0475f, 0.06f, 0.0725f, 0.085f, 0.0975f, 0.11f };
+    private static int nameTagScaleIndex = 2;
+
+    private static void CycleNameTagSize()
+    {
+        nameTagScaleIndex = (nameTagScaleIndex + 1) % nameTagScaleSteps.Length;
+        targetNameTagScale = nameTagScaleSteps[nameTagScaleIndex];
+    }
+
     public static void ToggleNameTags()
     {
         nameTagsEnabled = !nameTagsEnabled;
@@ -1463,12 +2414,9 @@ public static void DisableBoneHighlight(VRRig rig)
         foreach (var tag in nametags.Values)
         {
             if (tag != null)
-                Object.Destroy(tag);
+                tag.SetActive(false);
         }
-
-        nametags.Clear();
     }
-    
     
     public static void NameTagsLoop()
     {
@@ -1792,6 +2740,25 @@ public static class RigHelper
     }
 }
 
+public class NotificationFollower : MonoBehaviour
+{
+    private static readonly Quaternion NotificationRotation = Quaternion.Euler(0f, -90f, 0f);
+    public Vector3 LocalPosition;
+
+    private void LateUpdate()
+    {
+        Transform head = GTPlayer.Instance?.headCollider?.transform;
+        if (head == null) return;
+
+        Transform body = GTPlayer.Instance?.bodyCollider?.transform;
+        float yaw = body != null ? body.eulerAngles.y : head.eulerAngles.y;
+        Quaternion anchorRotation = Quaternion.Euler(0f, yaw, 0f);
+
+        transform.position = head.position + (anchorRotation * LocalPosition);
+        transform.rotation = anchorRotation * NotificationRotation;
+    }
+}
+
 public class CoroutineHandler : MonoBehaviour
 {
     public static CoroutineHandler Instance;
@@ -1814,3 +2781,8 @@ public class ClickSoundEntry
         Clip = clip;
     }
 }
+
+
+
+
+
