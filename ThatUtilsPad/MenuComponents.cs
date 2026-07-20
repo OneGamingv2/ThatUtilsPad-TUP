@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -13,6 +13,7 @@ using UnityEngine.UIElements;
 using UIImage  = UnityEngine.UI.Image;
 using RawImage = UnityEngine.UI.RawImage;
 using Quaternion = UnityEngine.Quaternion;
+using Vector2 = UnityEngine.Vector2;
 using Vector3 = UnityEngine.Vector3;
 
 namespace ThatUtilsPad.MenuComponents;
@@ -26,6 +27,7 @@ public class ButtonTrigger : MonoBehaviour
     public Renderer BodyRenderer;
     public Renderer OutlineRenderer;
     public Renderer[] KeyboardOutlineRenderers;
+    public UIImage[] KeyboardImages;
     public Coroutine KeyboardPressRoutine;
     public Coroutine SwitchRoutine;
     public Transform ButtonRoot;
@@ -34,31 +36,54 @@ public class ButtonTrigger : MonoBehaviour
     public float Cooldown = 0f;
     public bool IsOnCooldown = false;
     public bool IsKeyboardKey = false;
+    public bool SkipSwitchAnimation = false;
+    public Transform HoverBar;
+    public Transform HoverTitle;
+    public Coroutine HoverRoutine;
+    public bool IsHovered;
+    private static readonly Dictionary<string, float> CooldownEnds = new Dictionary<string, float>();
 
     public static void PcPress(ButtonTrigger button)
     {
         if (button == null) return;
-        if (button.IsOnCooldown) return;
+        if (button.IsOnCooldown || GetRemainingCooldown(button.BtnIdentifier) > 0f) return;
         if (Mods.IsRenaming && !button.IsKeyboardKey) return;
 
         Debug.Log("Pressed: " + button.BtnIdentifier);
         Main.Instance.PlayBtnCickSound();
 
+        if (button.SkipSwitchAnimation && button.CustomAction != null)
+        {
+            Debug.Log("[TUP PRESS] direct custom action: " + button.BtnIdentifier);
+            button.CustomAction.Invoke();
+            return;
+        }
+
         if (button.IsKeyboardKey)
         {
             if (button.KeyboardPressRoutine != null)
-                CoroutineHandler.Instance.StopCoroutine(button.KeyboardPressRoutine);
+            {
+                MenuEffects.ResetKeyboardButtonPress(button);
+                Tools.SafeStopCoroutine(ref button.KeyboardPressRoutine);
+            }
 
-            button.KeyboardPressRoutine = CoroutineHandler.Instance.StartCoroutine(
-                MenuEffects.KeyboardButtonPress(
-                    button,
-                    button.BodyRenderer,
-                    button.KeyboardOutlineRenderers != null && button.KeyboardOutlineRenderers.Length > 0
-                        ? button.KeyboardOutlineRenderers
-                        : button.OutlineRenderer != null
-                            ? new[] { button.OutlineRenderer }
-                            : Array.Empty<Renderer>())
-            );
+            bool suppressHighlight = string.Equals(button.BtnIdentifier, "Delete", StringComparison.OrdinalIgnoreCase)
+                                     || string.Equals(button.BtnIdentifier, "Enter", StringComparison.OrdinalIgnoreCase);
+            if (!suppressHighlight)
+            {
+                button.KeyboardPressRoutine = Tools.SafeStartCoroutine(
+                    MenuEffects.KeyboardButtonPress(
+                        button,
+                        button.BodyRenderer,
+                        button.KeyboardOutlineRenderers != null && button.KeyboardOutlineRenderers.Length > 0
+                            ? button.KeyboardOutlineRenderers
+                            : button.OutlineRenderer != null
+                                ? new[] { button.OutlineRenderer }
+                                : Array.Empty<Renderer>(),
+                        button.KeyboardImages)
+                );
+            }
+
             button.CustomAction?.Invoke();
             return;
         }
@@ -66,24 +91,27 @@ public class ButtonTrigger : MonoBehaviour
         if (button.IsToggle)
         {
             if (button.SwitchRoutine != null)
-                CoroutineHandler.Instance.StopCoroutine(button.SwitchRoutine);
+                Tools.SafeStopCoroutine(ref button.SwitchRoutine);
 
             button.IsOn = !button.IsOn;
             Mods.SaveToggleState(button.BtnIdentifier, button.IsOn);
-            button.SwitchRoutine = CoroutineHandler.Instance.StartCoroutine(button.IsOn
+            button.SwitchRoutine = Tools.SafeStartCoroutine(button.IsOn
                 ? MenuEffects.ActivateSwitch(button.Knob, button.Slider, button.BodyRenderer, button.OutlineRenderer)
                 : MenuEffects.DeactivateSwitch(button.Knob, button.Slider, button.BodyRenderer, button.OutlineRenderer));
         }
         else
         {
             if (button.SwitchRoutine != null)
-                CoroutineHandler.Instance.StopCoroutine(button.SwitchRoutine);
+                Tools.SafeStopCoroutine(ref button.SwitchRoutine);
 
-            button.SwitchRoutine = CoroutineHandler.Instance.StartCoroutine(MenuEffects.ToggleSwitch(button.Knob, button.Slider, button.BodyRenderer, button.OutlineRenderer));
+            button.SwitchRoutine = Tools.SafeStartCoroutine(MenuEffects.ToggleSwitch(button.Knob, button.Slider, button.BodyRenderer, button.OutlineRenderer));
         }
 
         if (button.Cooldown > 0f)
-            CoroutineHandler.Instance.StartCoroutine(RunCooldown(button));
+        {
+            CooldownEnds[button.BtnIdentifier] = Time.time + button.Cooldown;
+            Tools.SafeStartCoroutine(RunCooldown(button));
+        }
 
         if (button.CustomAction != null)
         {
@@ -97,86 +125,96 @@ public class ButtonTrigger : MonoBehaviour
             Debug.LogWarning($"[TUP: WARNING] No mod found for button: {button.BtnIdentifier}");
     }
 
+    public static void RestoreCooldown(ButtonTrigger button)
+    {
+        if (button == null || button.Cooldown <= 0f) return;
+        if (GetRemainingCooldown(button.BtnIdentifier) > 0f)
+            Tools.SafeStartCoroutine(RunCooldown(button));
+    }
+
+    private static float GetRemainingCooldown(string identifier)
+    {
+        if (string.IsNullOrEmpty(identifier)) return 0f;
+        if (!CooldownEnds.TryGetValue(identifier, out float endTime)) return 0f;
+        float remaining = endTime - Time.time;
+        if (remaining > 0f) return remaining;
+        CooldownEnds.Remove(identifier);
+        return 0f;
+    }
+
     private static IEnumerator RunCooldown(ButtonTrigger button)
     {
         button.IsOnCooldown = true;
+        float remainingCooldown = GetRemainingCooldown(button.BtnIdentifier);
 
-        Transform main = button.ButtonRoot != null ? button.ButtonRoot.Find("Main") : null;
+        Transform root = button.ButtonRoot;
+        Transform main = root != null ? root.Find("Main") ?? root : null;
         if (main == null) { button.IsOnCooldown = false; yield break; }
 
-        Transform overlayT = main.Find("Overlay");
+        Transform overlayT = main.Find("Overlay") ?? root.Find("Overlay");
         if (overlayT == null) { button.IsOnCooldown = false; yield break; }
 
-        Transform delayT = overlayT.Find("Delay") ?? main.Find("Delay");
-
+        Transform delayT = overlayT.Find("Delay") ?? main.Find("Delay") ?? root.Find("Delay");
         Vector3 delayStartScale = delayT != null ? delayT.localScale : Vector3.one;
 
         RawImage overlayRI = overlayT.GetComponent<RawImage>();
         RawImage delayRI   = delayT?.GetComponent<RawImage>();
+        UIImage overlayI   = overlayT.GetComponent<UIImage>();
+        UIImage delayI     = delayT?.GetComponent<UIImage>();
 
-        // Activate the Canvas and ensure Overlay is visible
-        main.gameObject.SetActive(true);
+        if (main != root) main.gameObject.SetActive(true);
         overlayT.gameObject.SetActive(true);
 
-        if (overlayRI != null) overlayRI.color = new Color(overlayRI.color.r, overlayRI.color.g, overlayRI.color.b, 0f);
-        if (delayRI   != null) delayRI.color   = new Color(delayRI.color.r,   delayRI.color.g,   delayRI.color.b,   0f);
+        SetGraphicAlpha(overlayRI, overlayI, 0f);
+        SetGraphicAlpha(delayRI, delayI, 0f);
 
         const float fadeDuration = 0.4f;
 
-        // Fade in
         for (float t = 0f; t < fadeDuration; t += Time.deltaTime)
         {
             float p = t / fadeDuration;
-            if (overlayRI != null) overlayRI.color = new Color(overlayRI.color.r, overlayRI.color.g, overlayRI.color.b, Mathf.Lerp(0f, 0.2f, p));
-            if (delayRI   != null) delayRI.color   = new Color(delayRI.color.r,   delayRI.color.g,   delayRI.color.b,   Mathf.Lerp(0f, 1f,   p));
+            SetGraphicAlpha(overlayRI, overlayI, Mathf.Lerp(0f, 0.2f, p));
+            SetGraphicAlpha(delayRI, delayI, Mathf.Lerp(0f, 1f, p));
             yield return null;
         }
-        if (overlayRI != null) overlayRI.color = new Color(overlayRI.color.r, overlayRI.color.g, overlayRI.color.b, 0.2f);
-        if (delayRI   != null) delayRI.color   = new Color(delayRI.color.r,   delayRI.color.g,   delayRI.color.b,   1f);
+        SetGraphicAlpha(overlayRI, overlayI, 0.2f);
+        SetGraphicAlpha(delayRI, delayI, 1f);
 
-        // Scale bar X to 0 over cooldown duration
-        for (float t = 0f; t < button.Cooldown; t += Time.deltaTime)
+        float startRemaining = Mathf.Max(0.001f, remainingCooldown > 0f ? remainingCooldown : button.Cooldown);
+        while (GetRemainingCooldown(button.BtnIdentifier) > 0f)
         {
+            float remaining = GetRemainingCooldown(button.BtnIdentifier);
             if (delayT != null)
-                delayT.localScale = new Vector3(Mathf.Lerp(delayStartScale.x, 0f, t / button.Cooldown), delayStartScale.y, delayStartScale.z);
+                delayT.localScale = new Vector3(delayStartScale.x * Mathf.Clamp01(remaining / startRemaining), delayStartScale.y, delayStartScale.z);
             yield return null;
         }
         if (delayT != null) delayT.localScale = new Vector3(0f, delayStartScale.y, delayStartScale.z);
 
-        // Fade out
         for (float t = 0f; t < fadeDuration; t += Time.deltaTime)
         {
             float p = t / fadeDuration;
-            if (overlayRI != null) overlayRI.color = new Color(overlayRI.color.r, overlayRI.color.g, overlayRI.color.b, Mathf.Lerp(0.2f, 0f, p));
-            if (delayRI   != null) delayRI.color   = new Color(delayRI.color.r,   delayRI.color.g,   delayRI.color.b,   Mathf.Lerp(1f,   0f, p));
+            SetGraphicAlpha(overlayRI, overlayI, Mathf.Lerp(0.2f, 0f, p));
+            SetGraphicAlpha(delayRI, delayI, Mathf.Lerp(1f, 0f, p));
             yield return null;
         }
 
-        main.gameObject.SetActive(false);
+        if (main != root) main.gameObject.SetActive(false);
         if (delayT != null) delayT.localScale = delayStartScale;
+        CooldownEnds.Remove(button.BtnIdentifier);
         button.IsOnCooldown = false;
     }
-    
-    //public override void ButtonActivationWithHand(bool isLeftHand)
-    //{
-        //base.ButtonActivationWithHand(isLeftHand);
 
-        //if (isLeftHand)
-        //    return;
+    private static void SetGraphicAlpha(RawImage raw, UIImage image, float alpha)
+    {
+        if (raw != null)
+            raw.color = new Color(raw.color.r, raw.color.g, raw.color.b, alpha);
+        if (image != null)
+            image.color = new Color(image.color.r, image.color.g, image.color.b, alpha);
+    }
 
-        //Debug.Log("ButtonActivationWithHand");
+
         
-        //if (CustomAction != null)
-        //{
-        //    CustomAction.Invoke();
-        //     return;
-        //}
         
-        //if (Mods.TryGetAction(BtnIdentifier, out var action))
-        //    action?.Invoke();
-        //else
-        //    Debug.LogWarning($"[TUP: WARNING] No mod found for button: {BtnIdentifier}");
-    //}
 }
 
 public class ButtonPresser : MonoBehaviour
@@ -201,6 +239,10 @@ public class ButtonCollider : MonoBehaviour
 
     private void OnTriggerEnter(Collider other)
     {
+        if (gameObject.name.IndexOf("HoverCollider", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            !(gameObject.name.Equals("Collider", StringComparison.OrdinalIgnoreCase) || gameObject.name.EndsWith("Collider", StringComparison.OrdinalIgnoreCase)))
+            return;
+
         if (Time.time - lastGlobalTime < 0.1f || Time.time - lastLocalTime < 0.2f)
             return;
 
@@ -220,6 +262,149 @@ public class ButtonCollider : MonoBehaviour
 }
 
 
+public class VolumeSliderCollider : MonoBehaviour
+{
+    public RectTransform SliderRect;
+    public RectTransform FillRect;
+    public Action<float> OnValueChanged;
+    public float MinFillWidth = 15f;
+    public float MaxFillWidth = 524.19f;
+    public float FillSmoothDuration = 0.5f;
+
+    private float lastSetTime;
+    private float currentValue;
+    private float targetValue;
+    private float fillVelocity;
+    private bool fillInitialized;
+    private BoxCollider hitBox;
+    private void Awake()
+    {
+        gameObject.layer = 2;
+        Collider col = GetComponent<Collider>();
+        if (col == null)
+            col = gameObject.AddComponent<BoxCollider>();
+        col.isTrigger = true;
+        hitBox = col as BoxCollider;
+
+        Rigidbody rb = GetComponent<Rigidbody>();
+        if (rb == null)
+            rb = gameObject.AddComponent<Rigidbody>();
+        rb.isKinematic = true;
+        rb.useGravity = false;
+    }
+
+    private void Update()
+    {
+        if (FillRect == null || !fillInitialized)
+            return;
+
+        currentValue = Mathf.SmoothDamp(currentValue, targetValue, ref fillVelocity, FillSmoothDuration, Mathf.Infinity, Time.deltaTime);
+        ApplyFill(currentValue);
+    }
+
+    private void OnTriggerEnter(Collider other) => TrySetFromPresser(other);
+    private void OnTriggerStay(Collider other) => TrySetFromPresser(other);
+
+    private void TrySetFromPresser(Collider other)
+    {
+        if (gameObject.name.IndexOf("HoverCollider", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            !(gameObject.name.Equals("Collider", StringComparison.OrdinalIgnoreCase) || gameObject.name.EndsWith("Collider", StringComparison.OrdinalIgnoreCase)))
+            return;
+
+        if (other.GetComponent<ButtonPresser>() == null)
+            return;
+
+        SetFromWorldPoint(other.transform.position);
+    }
+
+    public void SetFromWorldPoint(Vector3 worldPoint)
+    {
+        if (hitBox == null)
+            hitBox = GetComponent<BoxCollider>();
+
+        if (hitBox != null && hitBox.size.x > 0.0001f)
+        {
+            Vector3 hitLocal = transform.InverseTransformPoint(worldPoint);
+            float min = hitBox.center.x - hitBox.size.x * 0.5f;
+            float max = hitBox.center.x + hitBox.size.x * 0.5f;
+            float sliderValue = Mathf.InverseLerp(min, max, hitLocal.x);
+            Debug.Log($"[TUP VOLUME SLIDER] world={worldPoint} localX={hitLocal.x:F5} min={min:F5} max={max:F5} value={sliderValue:F3}");
+            SetValue01(sliderValue, true);
+            return;
+        }
+
+        if (SliderRect == null)
+            return;
+
+        Vector3 local = SliderRect.InverseTransformPoint(worldPoint);
+        Rect rect = SliderRect.rect;
+        float value = Mathf.InverseLerp(rect.xMin, rect.xMax, local.x);
+        SetValue01(value, true);
+    }
+
+    public void SetValue01(float value, bool notify)
+    {
+        value = Mathf.Clamp01(value);
+        targetValue = value;
+        if (!fillInitialized)
+        {
+            fillInitialized = true;
+            currentValue = value;
+            fillVelocity = 0f;
+            ApplyFill(value);
+        }
+
+        if (!notify || Time.time - lastSetTime < 0.025f)
+            return;
+
+        lastSetTime = Time.time;
+        Debug.Log($"[TUP VOLUME SLIDER] notify value={value:F3}");
+        OnValueChanged?.Invoke(value);
+    }
+
+    private void ApplyFill(float value)
+    {
+        if (FillRect == null)
+            return;
+
+        Vector2 size = FillRect.sizeDelta;
+        size.x = Mathf.Lerp(MinFillWidth, MaxFillWidth, Mathf.Clamp01(value));
+        FillRect.sizeDelta = size;
+    }
+}
+public class ButtonHoverCollider : MonoBehaviour
+{
+    public ButtonTrigger trigger;
+
+    private void Awake()
+    {
+        gameObject.layer = 2;
+        if (trigger == null)
+            trigger = GetComponentInParent<ButtonTrigger>();
+    }
+
+    private void OnTriggerEnter(Collider other)
+    {
+        if (other.GetComponent<ButtonPresser>() == null || trigger == null || trigger.IsHovered)
+            return;
+
+        trigger.IsHovered = true;
+        if (trigger.HoverRoutine != null)
+            Tools.SafeStopCoroutine(ref trigger.HoverRoutine);
+        trigger.HoverRoutine = Tools.SafeStartCoroutine(MenuEffects.ButtonHover(trigger, true));
+    }
+
+    private void OnTriggerExit(Collider other)
+    {
+        if (other.GetComponent<ButtonPresser>() == null || trigger == null || !trigger.IsHovered)
+            return;
+
+        trigger.IsHovered = false;
+        if (trigger.HoverRoutine != null)
+            Tools.SafeStopCoroutine(ref trigger.HoverRoutine);
+        trigger.HoverRoutine = Tools.SafeStartCoroutine(MenuEffects.ButtonHover(trigger, false));
+    }
+}
 public static class Tools
 {
     public static Texture2D LoadEmbeddedImage(string name)
@@ -237,9 +422,41 @@ public static class Tools
     
     public static void StopCoroutine(ref Coroutine routine)
     {
-        if (routine != null)
+        SafeStopCoroutine(ref routine);
+    }
+
+    public static Coroutine SafeStartCoroutine(IEnumerator routine)
+    {
+        if (routine == null || CoroutineHandler.Instance == null)
+            return null;
+
+        try
         {
-            CoroutineHandler.Instance.StopCoroutine(routine);
+            return CoroutineHandler.Instance.StartCoroutine(routine);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning("[TUP] Coroutine start blocked: " + ex.Message);
+            return null;
+        }
+    }
+
+    public static void SafeStopCoroutine(ref Coroutine routine)
+    {
+        if (routine == null)
+            return;
+
+        try
+        {
+            if (CoroutineHandler.Instance != null)
+                CoroutineHandler.Instance.StopCoroutine(routine);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning("[TUP] Coroutine stop blocked: " + ex.Message);
+        }
+        finally
+        {
             routine = null;
         }
     }
@@ -247,10 +464,6 @@ public static class Tools
     private static readonly Dictionary<Transform, Vector3> originalScales =
         new Dictionary<Transform, Vector3>();
 
-    /// <summary>
-    /// Stores the current scale of all checker components.
-    /// Call this once before setting their scales to Vector3.zero.
-    /// </summary>
     public static void CacheCheckerScales(Transform menuRoot)
     {
         if (menuRoot == null)
@@ -265,6 +478,7 @@ public static class Tools
             "MonkeBase",
             "MonkeColor",
             "Name",
+            "FPS/Ping",
             "FPS",
             "Platform",
             "Ping",
@@ -275,12 +489,16 @@ public static class Tools
             "VolumePercent",
             "MuteElse",
             "Mute",
-            "AddToSaved"
+            "ModsTitle",
+            "CheatsTitle",
+            "AddToSaved",
+            "SavedPlayers",
+            "Saved Players"
         };
 
         foreach (string part in checkerParts)
         {
-            Transform t = sideHolder.Find(part);
+            Transform t = FindCheckerPart(sideHolder, part);
             if (t == null)
                 continue;
             
@@ -289,6 +507,19 @@ public static class Tools
         }
     }
 
+
+    public static Transform FindCheckerPart(Transform root, string name)
+    {
+        if (root == null)
+            return null;
+
+        Transform direct = root.Find(name);
+        if (direct != null)
+            return direct;
+
+        return root.GetComponentsInChildren<Transform>(true)
+            .FirstOrDefault(child => child != null && child.name.Equals(name, StringComparison.OrdinalIgnoreCase));
+    }
     public static Vector3 GetCachedScale(Transform t)
     {
         if (t != null && originalScales.TryGetValue(t, out Vector3 scale))
@@ -305,6 +536,70 @@ public static class MenuEffects
         return 1f - Mathf.Pow(1f - t, 5f);
     }
 
+    private static void SafeSetRendererColor(Renderer renderer, Color color)
+    {
+        if (renderer == null)
+            return;
+
+        try
+        {
+            foreach (Material mat in renderer.materials)
+                if (mat != null)
+                    mat.color = color;
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning("[TUP] Renderer color guard: " + ex.Message);
+        }
+    }
+
+    private static void SafeSetImageColor(UIImage image, Color color)
+    {
+        if (image == null)
+            return;
+
+        try
+        {
+            image.color = color;
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning("[TUP] UI color guard: " + ex.Message);
+        }
+    }
+
+    private static Color SafeGetImageColor(UIImage image, Color fallback)
+    {
+        if (image == null)
+            return fallback;
+
+        try
+        {
+            return image.color;
+        }
+        catch
+        {
+            return fallback;
+        }
+    }
+
+    public static void ResetKeyboardButtonPress(ButtonTrigger button)
+    {
+        if (button == null)
+            return;
+
+        SafeSetRendererColor(button.BodyRenderer, MenuTheme.Current.Main);
+        Renderer[] outlines = button.KeyboardOutlineRenderers != null && button.KeyboardOutlineRenderers.Length > 0
+            ? button.KeyboardOutlineRenderers
+            : button.OutlineRenderer != null
+                ? new[] { button.OutlineRenderer }
+                : Array.Empty<Renderer>();
+        foreach (Renderer outline in outlines)
+            SafeSetRendererColor(outline, MenuTheme.Current.Button);
+        if (button.KeyboardImages != null)
+            foreach (UIImage image in button.KeyboardImages)
+                SafeSetImageColor(image, MenuTheme.Current.Main);
+    }
     public static IEnumerator CheckerCompEnum(Transform menuObj)
     {
         if (menuObj == null)
@@ -318,6 +613,7 @@ public static class MenuEffects
         string[] paths =
         {
             "Name",
+            "FPS/Ping",
             "FPS",
             "Platform",
             "Ping",
@@ -328,7 +624,11 @@ public static class MenuEffects
             "VolumePercent",
             "MuteElse",
             "Mute",
-            "AddToSaved"
+            "ModsTitle",
+            "CheatsTitle",
+            "AddToSaved",
+            "SavedPlayers",
+            "Saved Players"
         };
 
 
@@ -347,16 +647,18 @@ public static class MenuEffects
             );
         }
         
-        StartPop(sideHolder.Find("MonkeBase"));
-        StartPop(sideHolder.Find("MonkeColor"));
+        StartPop(Tools.FindCheckerPart(sideHolder, "MonkeBase"));
+        StartPop(Tools.FindCheckerPart(sideHolder, "MonkeColor"));
         
         yield return new WaitForSeconds(delayBetween);
         
         foreach (string path in paths)
         {
-            Transform t = sideHolder.Find(path);
-            StartPop(t);
+            Transform t = Tools.FindCheckerPart(sideHolder, path);
+            if (t == null)
+                continue;
 
+            StartPop(t);
             yield return new WaitForSeconds(delayBetween);
         }
     }
@@ -390,13 +692,54 @@ public static class MenuEffects
     }
     
     
+    public static IEnumerator ButtonHover(ButtonTrigger button, bool enter)
+    {
+        if (button == null)
+            yield break;
+
+        Transform bar = button.HoverBar;
+        Transform title = button.HoverTitle;
+        const float duration = 0.18f;
+        Vector3 titleIn = new Vector3(0.0085f, 0f, 0f);
+        Vector3 titleOut = new Vector3(0.00943f, 0f, 0f);
+
+        Vector3 barFrom = bar != null ? bar.localScale : Vector3.zero;
+        Vector3 barTo = enter ? Vector3.one : Vector3.zero;
+        Vector3 titleFrom = title != null ? title.localPosition : titleOut;
+        Vector3 titleTo = enter ? new Vector3(titleIn.x, titleFrom.y, titleFrom.z) : new Vector3(titleOut.x, titleFrom.y, titleFrom.z);
+
+        if (bar != null)
+            bar.gameObject.SetActive(true);
+
+        for (float time = 0f; time < duration; time += Time.deltaTime)
+        {
+            float p = EaseOut(Mathf.Clamp01(time / duration));
+            if (bar != null)
+                bar.localScale = Vector3.LerpUnclamped(barFrom, barTo, p);
+            if (title != null)
+                title.localPosition = Vector3.LerpUnclamped(titleFrom, titleTo, p);
+            yield return null;
+        }
+
+        if (bar != null)
+        {
+            bar.localScale = barTo;
+            bar.gameObject.SetActive(enter);
+        }
+        if (title != null)
+            title.localPosition = titleTo;
+
+        button.HoverRoutine = null;
+    }
     public static void SnapActivated(Transform knob, Transform slider, Renderer bodyRenderer = null, Renderer outlineRenderer = null)
     {
-        if (knob   != null) knob.localPosition = new Vector3(-1.53f, 0f, 0f);
+        if (knob != null) knob.localPosition = new Vector3(0.00235f, 0f, 0f);
         SpriteRenderer sr = slider?.GetComponent<SpriteRenderer>();
-        if (sr             != null) sr.color = MenuTheme.Current.Accent;
-        if (bodyRenderer   != null) bodyRenderer.material.color    = MenuTheme.Current.Button;
-        if (outlineRenderer!= null) outlineRenderer.material.color = MenuTheme.Current.ButtonLight;
+        UIImage sliderImage = slider?.GetComponent<UIImage>();
+        if (sr != null) sr.color = MenuTheme.Current.Accent;
+        SafeSetImageColor(sliderImage, MenuTheme.Current.Accent);
+        SafeSetRendererColor(bodyRenderer, MenuTheme.Current.Button);
+        SafeSetRendererColor(outlineRenderer, MenuTheme.Current.ButtonLight);
     }
 
     public static IEnumerator ActivateSwitch(Transform knob, Transform slider, Renderer bodyRenderer = null, Renderer outlineRenderer = null)
@@ -407,50 +750,65 @@ public static class MenuEffects
 
     public static IEnumerator ToggleSwitch(Transform knob, Transform slider, Renderer bodyRenderer = null, Renderer outlineRenderer = null)
     {
-        yield return CoroutineHandler.Instance.StartCoroutine(SliderEnumActivate(knob, slider, bodyRenderer, outlineRenderer));
-        yield return CoroutineHandler.Instance.StartCoroutine(SliderEnumDeActivate(knob, slider, bodyRenderer, outlineRenderer));
+        yield return SliderEnumActivate(knob, slider, bodyRenderer, outlineRenderer);
+        yield return SliderEnumDeActivate(knob, slider, bodyRenderer, outlineRenderer);
     }
 
-    public static IEnumerator KeyboardButtonPress(ButtonTrigger button, Renderer bodyRenderer, Renderer[] outlineRenderers)
+    public static IEnumerator KeyboardButtonPress(ButtonTrigger button, Renderer bodyRenderer, Renderer[] outlineRenderers, UIImage[] uiImages = null)
     {
-        if (bodyRenderer == null && (outlineRenderers == null || outlineRenderers.Length == 0))
+        bool hasRenderers = bodyRenderer != null || (outlineRenderers != null && outlineRenderers.Any(outline => outline != null));
+        bool hasImages = uiImages != null && uiImages.Any(image => image != null);
+        if (!hasRenderers && !hasImages)
             yield break;
 
         Color bodyStart = MenuTheme.Current.Main;
         Color outlineStart = MenuTheme.Current.Button;
         Color bodyPressed = MenuTheme.Current.Button;
         Color outlinePressed = MenuTheme.Current.ButtonLight;
+        Color imagePressed = MenuTheme.Current.ButtonLight;
+        Color[] imageStartColors = uiImages != null
+            ? uiImages.Select(image => SafeGetImageColor(image, MenuTheme.Current.Main)).ToArray()
+            : Array.Empty<Color>();
 
-        if (bodyRenderer != null) bodyRenderer.material.color = bodyStart;
+        SafeSetRendererColor(bodyRenderer, bodyStart);
         if (outlineRenderers != null)
             foreach (Renderer outline in outlineRenderers)
-                if (outline != null) outline.material.color = outlineStart;
+                SafeSetRendererColor(outline, outlineStart);
 
-        const float duration = 0.225f;
+        const float duration = 0.12f;
         for (float t = 0f; t < duration; t += Time.deltaTime)
         {
-            float p = EaseOut(t / duration);
-            if (bodyRenderer != null) bodyRenderer.material.color = Color.Lerp(bodyStart, bodyPressed, p);
+            float p = EaseOut(Mathf.Clamp01(t / duration));
+            SafeSetRendererColor(bodyRenderer, Color.Lerp(bodyStart, bodyPressed, p));
             if (outlineRenderers != null)
                 foreach (Renderer outline in outlineRenderers)
-                    if (outline != null) outline.material.color = Color.Lerp(outlineStart, outlinePressed, p);
+                    SafeSetRendererColor(outline, Color.Lerp(outlineStart, outlinePressed, p));
+            if (uiImages != null)
+                for (int i = 0; i < uiImages.Length; i++)
+                    SafeSetImageColor(uiImages[i], Color.Lerp(imageStartColors[i], imagePressed, p));
             yield return null;
         }
 
         for (float t = 0f; t < duration; t += Time.deltaTime)
         {
-            float p = EaseOut(t / duration);
-            if (bodyRenderer != null) bodyRenderer.material.color = Color.Lerp(bodyPressed, bodyStart, p);
+            float p = EaseOut(Mathf.Clamp01(t / duration));
+            SafeSetRendererColor(bodyRenderer, Color.Lerp(bodyPressed, bodyStart, p));
             if (outlineRenderers != null)
                 foreach (Renderer outline in outlineRenderers)
-                    if (outline != null) outline.material.color = Color.Lerp(outlinePressed, outlineStart, p);
+                    SafeSetRendererColor(outline, Color.Lerp(outlinePressed, outlineStart, p));
+            if (uiImages != null)
+                for (int i = 0; i < uiImages.Length; i++)
+                    SafeSetImageColor(uiImages[i], Color.Lerp(imagePressed, imageStartColors[i], p));
             yield return null;
         }
 
-        if (bodyRenderer != null) bodyRenderer.material.color = bodyStart;
+        SafeSetRendererColor(bodyRenderer, bodyStart);
         if (outlineRenderers != null)
             foreach (Renderer outline in outlineRenderers)
-                if (outline != null) outline.material.color = outlineStart;
+                SafeSetRendererColor(outline, outlineStart);
+        if (uiImages != null)
+            for (int i = 0; i < uiImages.Length; i++)
+                SafeSetImageColor(uiImages[i], imageStartColors[i]);
 
         if (button != null)
             button.KeyboardPressRoutine = null;
@@ -467,15 +825,11 @@ public static class MenuEffects
         float duration = 0.225f;
         float time = 0f;
 
-        Vector3 startPosition = new Vector3(1.53f, 0f, 0f);
-        Vector3 endPosition   = new Vector3(-1.53f, 0f, 0f);
+        Vector3 startPosition = new Vector3(-0.00235f, 0f, 0f);
+        Vector3 endPosition   = new Vector3( 0.00235f, 0f, 0f);
 
         SpriteRenderer sr = slider.GetComponent<SpriteRenderer>();
-        if (sr == null)
-        {
-            Debug.LogError("No SpriteRenderer");
-            yield break;
-        }
+        UIImage sliderImage = slider.GetComponent<UIImage>();
 
         Color32 sliderStart   = MenuTheme.Current.ButtonBase;
         Color32 sliderTarget  = MenuTheme.Current.Accent;
@@ -491,18 +845,20 @@ public static class MenuEffects
             float easeT = EaseOut(time / duration);
 
             knob.localPosition = Vector3.Lerp(startPosition, endPosition, easeT);
-            sr.color = Color.Lerp(sliderStart, sliderTarget, easeT);
-            if (bodyRenderer    != null) bodyRenderer.material.color    = Color.Lerp(bodyStart,    bodyTarget,    easeT);
-            if (outlineRenderer != null) outlineRenderer.material.color = Color.Lerp(outlineStart, outlineTarget, easeT);
+            if (sr != null) sr.color = Color.Lerp(sliderStart, sliderTarget, easeT);
+            SafeSetImageColor(sliderImage, Color.Lerp(sliderStart, sliderTarget, easeT));
+            SafeSetRendererColor(bodyRenderer, Color.Lerp(bodyStart, bodyTarget, easeT));
+            SafeSetRendererColor(outlineRenderer, Color.Lerp(outlineStart, outlineTarget, easeT));
 
             time += Time.deltaTime;
             yield return null;
         }
 
         knob.localPosition = endPosition;
-        sr.color = sliderTarget;
-        if (bodyRenderer    != null) bodyRenderer.material.color    = bodyTarget;
-        if (outlineRenderer != null) outlineRenderer.material.color = outlineTarget;
+        if (sr != null) sr.color = sliderTarget;
+        SafeSetImageColor(sliderImage, sliderTarget);
+        SafeSetRendererColor(bodyRenderer, bodyTarget);
+        SafeSetRendererColor(outlineRenderer, outlineTarget);
     }
 
     private static IEnumerator SliderEnumDeActivate(Transform knob, Transform slider, Renderer bodyRenderer, Renderer outlineRenderer)
@@ -516,15 +872,11 @@ public static class MenuEffects
         float duration = 0.225f;
         float time = 0f;
 
-        Vector3 startPosition = new Vector3(-1.53f, 0f, 0f);
-        Vector3 endPosition   = new Vector3( 1.53f, 0f, 0f);
+        Vector3 startPosition = new Vector3( 0.00235f, 0f, 0f);
+        Vector3 endPosition   = new Vector3(-0.00235f, 0f, 0f);
 
         SpriteRenderer sr = slider.GetComponent<SpriteRenderer>();
-        if (sr == null)
-        {
-            Debug.LogError("No SpriteRenderer");
-            yield break;
-        }
+        UIImage sliderImage = slider.GetComponent<UIImage>();
 
         Color32 sliderStart   = MenuTheme.Current.Accent;
         Color32 sliderTarget  = MenuTheme.Current.ButtonBase;
@@ -540,18 +892,20 @@ public static class MenuEffects
             float easeT = EaseOut(time / duration);
 
             knob.localPosition = Vector3.Lerp(startPosition, endPosition, easeT);
-            sr.color = Color.Lerp(sliderStart, sliderTarget, easeT);
-            if (bodyRenderer    != null) bodyRenderer.material.color    = Color.Lerp(bodyStart,    bodyTarget,    easeT);
-            if (outlineRenderer != null) outlineRenderer.material.color = Color.Lerp(outlineStart, outlineTarget, easeT);
+            if (sr != null) sr.color = Color.Lerp(sliderStart, sliderTarget, easeT);
+            SafeSetImageColor(sliderImage, Color.Lerp(sliderStart, sliderTarget, easeT));
+            SafeSetRendererColor(bodyRenderer, Color.Lerp(bodyStart, bodyTarget, easeT));
+            SafeSetRendererColor(outlineRenderer, Color.Lerp(outlineStart, outlineTarget, easeT));
 
             time += Time.deltaTime;
             yield return null;
         }
 
         knob.localPosition = endPosition;
-        sr.color = sliderTarget;
-        if (bodyRenderer    != null) bodyRenderer.material.color    = bodyTarget;
-        if (outlineRenderer != null) outlineRenderer.material.color = outlineTarget;
+        if (sr != null) sr.color = sliderTarget;
+        SafeSetImageColor(sliderImage, sliderTarget);
+        SafeSetRendererColor(bodyRenderer, bodyTarget);
+        SafeSetRendererColor(outlineRenderer, outlineTarget);
     }
     
     public static IEnumerator TapCircleEnum(Transform circle)
@@ -650,7 +1004,8 @@ public static class MenuEffects
             yield return null;
         }
         
-        btnObj.transform.localScale = targetScale;
+        if (btnObj != null)
+            btnObj.transform.localScale = targetScale;
     }
 
     public static IEnumerator SpawnHitCircle(Vector3 position, Transform hit)
@@ -713,6 +1068,11 @@ public class SmoothFollowMenu : MonoBehaviour
     public Vector3    LocalPosition;
     public Quaternion LocalRotation = Quaternion.identity;
     public float      Smoothing     = 6f;
+    public bool       YawOnly;
+    public bool       UseYawDeadzone;
+    public float      YawActivationDegrees = 30f;
+    private float     anchoredYaw;
+    private bool      hasYawAnchor;
 
     private void OnEnable()
     {
@@ -722,8 +1082,40 @@ public class SmoothFollowMenu : MonoBehaviour
 
     public void Snap()
     {
-        transform.position = Target.TransformPoint(LocalPosition);
-        transform.rotation = Target.rotation * LocalRotation;
+        Quaternion targetRotation = GetTargetRotation();
+        transform.position = Target.position + targetRotation * LocalPosition;
+        transform.rotation = targetRotation * LocalRotation;
+    }
+
+    public void ResetDeadzoneAnchor()
+    {
+        hasYawAnchor = false;
+    }
+
+    private Quaternion GetTargetRotation()
+    {
+        if (!YawOnly)
+            return Target.rotation;
+
+        float targetYaw = Target.eulerAngles.y;
+        if (!UseYawDeadzone)
+        {
+            anchoredYaw = targetYaw;
+            hasYawAnchor = true;
+            return Quaternion.Euler(0f, targetYaw, 0f);
+        }
+
+        if (!hasYawAnchor)
+        {
+            anchoredYaw = targetYaw;
+            hasYawAnchor = true;
+        }
+        else if (Mathf.Abs(Mathf.DeltaAngle(anchoredYaw, targetYaw)) >= YawActivationDegrees)
+        {
+            anchoredYaw = targetYaw;
+        }
+
+        return Quaternion.Euler(0f, anchoredYaw, 0f);
     }
 
     public bool Frozen;
@@ -732,16 +1124,10 @@ public class SmoothFollowMenu : MonoBehaviour
     {
         if (Target == null || Frozen) return;
 
-        transform.position = Vector3.Lerp(
-            transform.position,
-            Target.TransformPoint(LocalPosition),
-            Smoothing * Time.deltaTime
-        );
-        transform.rotation = Quaternion.Slerp(
-            transform.rotation,
-            Target.rotation * LocalRotation,
-            Smoothing * Time.deltaTime
-        );
+        Quaternion targetRotation = GetTargetRotation();
+        float t = 1f - Mathf.Exp(-Smoothing * Time.deltaTime);
+        transform.position = Vector3.Lerp(transform.position, Target.position + targetRotation * LocalPosition, t);
+        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation * LocalRotation, t);
     }
 }
 
@@ -767,7 +1153,6 @@ public static class MenuTheme
         public static readonly MenuThemePalette Default = new();
         public static readonly MenuThemePalette Sakura = new() { SakuraParts = true };
     }
-
     public static MenuThemePalette Current { get; private set; } = Themes.Default;
 
     private static readonly string[] MainParts =
@@ -823,7 +1208,6 @@ public static class MenuTheme
     {
         "TopBar", "TopBarSide"
     };
-
     public static void Use(MenuThemePalette theme)
     {
         Current = theme;
@@ -878,9 +1262,9 @@ public static class MenuTheme
 
     public static void ApplyKeyboard(Transform keyboard)
     {
-        Apply(keyboard, "Main", Current.Border);
-        Apply(keyboard, "Border", Current.Border);
-        ApplyDirectChildren(keyboard, "Outline", Current.Button);
+        ApplyKeyboardSafe(keyboard, "Main", Current.Border);
+        ApplyKeyboardSafe(keyboard, "Border", Current.Border);
+        ApplyKeyboardDirectSafe(keyboard, "Outline", Current.Button);
     }
 
     public static void ApplyKeyboardKey(Transform key, out Renderer bodyRenderer, out Renderer outlineRenderer)
@@ -891,7 +1275,14 @@ public static class MenuTheme
 
     public static void ApplyKeyboardKey(Transform key, out Renderer bodyRenderer, out Renderer[] outlineRenderers)
     {
+        bodyRenderer = null;
+        outlineRenderers = Array.Empty<Renderer>();
+        if (IsProtectedKeyboardVisual(key))
+            return;
+
         bodyRenderer = ApplyRenderer(key, Current.Main);
+        UIImage image = key.GetComponent<UIImage>() ?? key.GetComponentInChildren<UIImage>(true);
+        if (image != null) image.color = Current.Main;
 
         Renderer mainRenderer = ApplyChild(key, "Main", Current.Main);
         if (mainRenderer != null)
@@ -907,6 +1298,47 @@ public static class MenuTheme
     public static Renderer ApplyKeyboardOutline(Transform outline)
         => ApplyRenderer(outline, Current.Button);
 
+
+    private static void ApplyKeyboardSafe(Transform root, string name, Color32 color)
+    {
+        if (root == null) return;
+
+        foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
+        {
+            if (child.name.Equals(name, StringComparison.OrdinalIgnoreCase) && !IsProtectedKeyboardVisual(child))
+                ApplyRenderer(child, color);
+        }
+    }
+
+    private static void ApplyKeyboardDirectSafe(Transform root, string name, Color32 color)
+    {
+        if (root == null) return;
+
+        foreach (Transform child in root)
+        {
+            if (child.name.Equals(name, StringComparison.OrdinalIgnoreCase) && !IsProtectedKeyboardVisual(child))
+                ApplyRenderer(child, color);
+        }
+    }
+
+    private static bool IsProtectedKeyboardVisual(Transform transform)
+    {
+        for (Transform current = transform; current != null; current = current.parent)
+        {
+            if (current.name.Equals("Base", StringComparison.OrdinalIgnoreCase)
+                || current.name.Equals("Enter", StringComparison.OrdinalIgnoreCase)
+                || current.name.Equals("Delete", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        TMP_Text text = transform != null ? transform.GetComponent<TMP_Text>() ?? transform.GetComponentInChildren<TMP_Text>(true) : null;
+        if (text == null)
+            return false;
+
+        string value = text.text?.Trim();
+        return value != null && (value.Equals("Enter", StringComparison.OrdinalIgnoreCase)
+                                 || value.Equals("Delete", StringComparison.OrdinalIgnoreCase));
+    }
     private static void Apply(Transform root, IEnumerable<string> names, Color32 color)
     {
         foreach (string name in names)
@@ -993,6 +1425,10 @@ public static class MenuTheme
     {
         if (target == null) return null;
 
+        UIImage image = target.GetComponent<UIImage>();
+        if (image != null)
+            image.color = color;
+
         Renderer renderer = target.GetComponent<Renderer>() ?? target.GetComponentInChildren<Renderer>(true);
         if (renderer == null) return null;
 
@@ -1005,3 +1441,16 @@ public static class MenuTheme
         return renderer;
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+

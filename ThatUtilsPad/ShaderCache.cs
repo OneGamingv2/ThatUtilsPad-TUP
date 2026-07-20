@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 namespace ThatUtilsPad;
 
@@ -9,7 +9,6 @@ public static class ShaderCache
 
     public static void Init()
     {
-        // ReSharper disable once ShaderLabShaderReferenceNotResolved
         UberShader = Shader.Find("GorillaTag/UberShader");
         TextShader = Shader.Find("GUI/Text Shader");
 

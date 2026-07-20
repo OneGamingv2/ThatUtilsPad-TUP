@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
         <TargetFramework>netstandard2.1</TargetFramework>
         <LangVersion>Latest</LangVersion>
@@ -84,6 +84,7 @@
         <EmbeddedResource Include="Assets\Sounds\Wii.wav" />
         <None Remove="Assets\Sounds\untitled.wav" />
         <EmbeddedResource Include="Assets\Sounds\untitled.wav" />
+        <EmbeddedResource Include="Assets\QuickSong.exe" Condition="Exists('Assets\QuickSong.exe')" />
         <None Remove="Assets\UI\nametag" />
         <None Remove="Assets\Models\buttonmodel-masked" />
         <None Remove="Assets\Models\buttonmodel-trash" />
@@ -92,15 +93,26 @@
         <None Remove="Assets\Models\tup-overv6" />
         <None Remove="Assets\Models\tup-overv7" />
         <None Remove="Assets\Models\buttonmodel-rename" />
-        <EmbeddedResource Include="Assets\Models\buttonmodel-rename" />
         <None Remove="Assets\Models\tup-overv8" />
         <None Remove="Assets\Models\tup-overv9" />
-        <EmbeddedResource Include="Assets\Models\tup-overv9" />
         <None Remove="Assets\UI\tup-nametagui" />
         <EmbeddedResource Include="Assets\UI\tup-nametagui" />
         <None Remove="Assets\UI\notifover" />
         <None Remove="Assets\UI\notifpls" />
         <EmbeddedResource Include="Assets\UI\notifpls" />
+        <None Remove="Assets\Models\tup-overv10" />
+        <None Remove="Assets\Models\tup-overv11" />
+        <None Remove="Assets\Sounds\notifSound.mp3" />
+        <EmbeddedResource Include="Assets\Sounds\notifSound.mp3" />
+        <None Remove="Assets\Models\buttonmodelui" />
+        <None Remove="Assets\Models\tup-overv12" />
+        <None Remove="Assets\Models\tup-overv13" />
+        <None Remove="Assets\Models\buttonmodelui2" />
+        <EmbeddedResource Include="Assets\Models\buttonmodelui2" />
+        <None Remove="Assets\Models\tup-overv14" />
+        <None Remove="Assets\Models\tup-overv15" />
+        <None Remove="Assets\Models\tup-overv16" />
+        <EmbeddedResource Include="Assets\Models\tup-overv16" />
     </ItemGroup>
 
     <ItemGroup>
@@ -769,3 +781,4 @@
     </ItemGroup>
 
 </Project>
+

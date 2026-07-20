@@ -18,6 +18,7 @@ using Photon.Voice.Unity;
 using TMPro;
 using ThatUtilsPad.MenuComponents;
 using UnityEngine.UI;
+using Newtonsoft.Json.Linq;
 using Debug = UnityEngine.Debug;
 
 namespace ThatUtilsPad;
@@ -62,8 +63,8 @@ public static class Mods
     private const string NotificationPrefabPath = "assets/prefabs/Notification-PLS.prefab";
     private const float NotificationBaseWidth = 11.55f;
     private const float NotificationWidthPerCharacter = 2.025f;
-    private const float NotificationBaseY = -0.08f;
-    private const float NotificationStackSpacing = 0.025f;
+    private const float NotificationBaseY = -0.38f;
+    private const float NotificationStackSpacing = 0.0325f;
     private const float NotificationDefaultDuration = 3f;
     private const float NotificationWidthAnimDuration = 0.35f;
     private const float NotificationTextFadeInDuration = 0.25f;
@@ -82,6 +83,9 @@ public static class Mods
 
     private static Coroutine   pulseRoutine;
     private static bool        checkerEnabled;
+    private static bool        autoScanEnabled;
+    private static string      autoScanRoomKey = "";
+    private static readonly HashSet<int> autoScannedActorNumbers = new HashSet<int>();
     private static GameObject? checkerLine;
     private static GameObject? checkerSphere;
     private static VRRig?      lastTargetRig;
@@ -99,6 +103,9 @@ public static class Mods
     
     private static Dictionary<VRRig, float> currentVolumes = new Dictionary<VRRig, float>();
     private static Dictionary<string, float> savedVolumes = new Dictionary<string, float>();
+    private static readonly Dictionary<VRRig, SpeedSample> speedSamples = new Dictionary<VRRig, SpeedSample>();
+    private static readonly Dictionary<VRRig, int> speedFlagCounts = new Dictionary<VRRig, int>();
+    private static readonly Dictionary<VRRig, float> nextSpeedNotifyTimes = new Dictionary<VRRig, float>();
 
     private static string folderPath =
         System.IO.Path.Combine(BepInEx.Paths.PluginPath, "ThatUtilsPad");
@@ -156,8 +163,13 @@ public static class Mods
             lines.Add("smoothingStrengthIndex=" + smoothingStrengthIndex);
             lines.Add("menuScaleIndex=" + menuScaleIndex);
             lines.Add("headDistanceIndex=" + headDistanceIndex);
+            lines.Add("themeIndex=" + themeIndex);
             lines.Add("doubleClickOpenEnabled=" + doubleClickOpenEnabled);
             lines.Add("menuOpenBind=" + menuOpenBindCode);
+            lines.Add("scanModeIndex=" + scanModeIndex);
+            lines.Add("speedStrictnessIndex=" + speedStrictnessIndex);
+            lines.Add("nameTagScaleIndex=" + nameTagScaleIndex);
+            lines.Add("nameTagFadeDistanceIndex=" + nameTagFadeDistanceIndex);
             foreach (var kvp in savedOutfitSlots)
                 lines.Add("savedOutfit:" + kvp.Key + "=" + kvp.Value);
             foreach (var kvp in outfitSlotNames)
@@ -177,6 +189,12 @@ public static class Mods
         {
             SavedToggleStates["Menu Smoothing"] = smoothMenuEnabled;
             SavedToggleStates["Double Open"] = doubleClickOpenEnabled;
+            SavedToggleStates["3 Flag Notify"] = requireThreeSpeedFlags;
+            SavedToggleStates["Speedboost Check"] = speedboostCheckEnabled;
+            SavedToggleStates["Nametag Distance Fade"] = nameTagDistanceFadeEnabled;
+            SavedToggleStates["Auto Scan"] = autoScanEnabled;
+            SavedToggleStates["Nametags"] = nameTagsEnabled;
+            SavedToggleStates["Select User"] = checkerEnabled;
             return;
         }
         try
@@ -217,6 +235,11 @@ public static class Mods
                     if (int.TryParse(line.Substring(18), out int idx))
                         headDistanceIndex = Mathf.Clamp(idx, 0, headDistanceNames.Length - 1);
                 }
+                else if (line.StartsWith("themeIndex="))
+                {
+                    if (int.TryParse(line.Substring(11), out int idx))
+                        themeIndex = Mathf.Clamp(idx, 0, themeNames.Length - 1);
+                }
                 else if (line.StartsWith("doubleClickOpenEnabled="))
                 {
                     if (bool.TryParse(line.Substring(23), out bool val))
@@ -227,6 +250,26 @@ public static class Mods
                     string bind = line.Substring(13).Trim();
                     if (!string.IsNullOrWhiteSpace(bind))
                         menuOpenBindCode = bind;
+                }
+                else if (line.StartsWith("scanModeIndex="))
+                {
+                    if (int.TryParse(line.Substring(14), out int idx))
+                        scanModeIndex = Mathf.Clamp(idx, 0, scanModeNames.Length - 1);
+                }
+                else if (line.StartsWith("speedStrictnessIndex="))
+                {
+                    if (int.TryParse(line.Substring(21), out int idx))
+                        speedStrictnessIndex = Mathf.Clamp(idx, 0, speedStrictnessNames.Length - 1);
+                }
+                else if (line.StartsWith("nameTagScaleIndex="))
+                {
+                    if (int.TryParse(line.Substring(18), out int idx))
+                        nameTagScaleIndex = Mathf.Clamp(idx, 0, nameTagScaleSteps.Length - 1);
+                }
+                else if (line.StartsWith("nameTagFadeDistanceIndex="))
+                {
+                    if (int.TryParse(line.Substring(25), out int idx))
+                        nameTagFadeDistanceIndex = Mathf.Clamp(idx, 0, nameTagFadeDistanceValues.Length - 1);
                 }
                 else if (line.StartsWith("savedOutfit:"))
                 {
@@ -254,6 +297,19 @@ public static class Mods
 
         SavedToggleStates["Menu Smoothing"] = smoothMenuEnabled;
         SavedToggleStates["Double Open"] = doubleClickOpenEnabled;
+        if (!SavedToggleStates.ContainsKey("3 Flag Notify")) SavedToggleStates["3 Flag Notify"] = requireThreeSpeedFlags;
+        if (!SavedToggleStates.ContainsKey("Speedboost Check")) SavedToggleStates["Speedboost Check"] = speedboostCheckEnabled;
+        if (!SavedToggleStates.ContainsKey("Nametag Distance Fade")) SavedToggleStates["Nametag Distance Fade"] = nameTagDistanceFadeEnabled;
+        if (!SavedToggleStates.ContainsKey("Auto Scan")) SavedToggleStates["Auto Scan"] = autoScanEnabled;
+        if (!SavedToggleStates.ContainsKey("Nametags")) SavedToggleStates["Nametags"] = nameTagsEnabled;
+        if (!SavedToggleStates.ContainsKey("Select User")) SavedToggleStates["Select User"] = checkerEnabled;
+        requireThreeSpeedFlags = SavedToggleStates["3 Flag Notify"];
+        speedboostCheckEnabled = SavedToggleStates["Speedboost Check"];
+        nameTagDistanceFadeEnabled = SavedToggleStates["Nametag Distance Fade"];
+        autoScanEnabled = SavedToggleStates["Auto Scan"];
+        nameTagsEnabled = SavedToggleStates["Nametags"];
+        checkerEnabled = SavedToggleStates["Select User"];
+        targetNameTagScale = nameTagScaleSteps[Mathf.Clamp(nameTagScaleIndex, 0, nameTagScaleSteps.Length - 1)];
     }
     
     
@@ -286,7 +342,6 @@ public static void Init()
                     { "Copy Room Code", new ModAction(CopyRoomCode, false) },
                     { "Queue", new ModAction(ToggleQueue, false) },
                     { "Mode", new ModAction(ToggleMode, false) },
-                    { "Custom Prop Test", new ModAction(PrintPhotonPlayerCustomProperties, false) }
                 }
             }
         },
@@ -298,6 +353,8 @@ public static void Init()
                 {
                     { "Nametags", new ModAction(ToggleNameTags, true) },
                     { "Nametag Size", new ModAction(CycleNameTagSize, false) },
+                    { "Nametag Distance Fade", new ModAction(ToggleNameTagDistanceFade, true) },
+                    { "Nametag Fade Distance", new ModAction(CycleNameTagFadeDistance, false) },
                 }
             }
         },
@@ -315,6 +372,9 @@ public static void Init()
                 Actions =
                 {
                     { "Select User", new ModAction(ToggleChecker, true) },
+                    { "Auto Scan", new ModAction(ToggleAutoScan, true) },
+                    { "Scan Lobby", new ModAction(PrintPhotonPlayerCustomProperties, false) },
+                    { "Scan Mode", new ModAction(CycleScanMode, false) }
                 }
             }
         },
@@ -336,7 +396,25 @@ public static void Init()
                 }
             }
         },
-        //Checker (hidden)
+        {
+            "Anticheat",
+            new ModCategory("settings.png")
+            {
+                Actions =
+                {
+                    { "Speedboost Check", new ModAction(ToggleSpeedboostCheck, true) },
+                    { "3 Flag Notify", new ModAction(ToggleSpeedFlagRequirement, true) },
+                    { "Speed Strictness", new ModAction(CycleSpeedStrictness, false) }
+                }
+            }
+        },
+        {
+            "Spotify",
+            new ModCategory("settings.png")
+            {
+                Actions = { }
+            }
+        },
         {
             "ModChecker",
             new ModCategory("trevis-placeholder.png", false)
@@ -354,9 +432,24 @@ public static void Init()
     
     LoadVolumes();
     LoadButtonStates();
+    ApplyLoadedToggleStates();
     InitOutfitSlotActions();
 }
 
+private static void ApplyLoadedToggleStates()
+{
+    if (checkerEnabled && checkerCoroutine == null && CoroutineHandler.Instance != null)
+        checkerCoroutine = CoroutineHandler.Instance.StartCoroutine(CheckerLoop());
+
+    if (!nameTagsEnabled)
+        DisableNameTags();
+
+    if (!autoScanEnabled)
+    {
+        autoScanRoomKey = "";
+        autoScannedActorNumbers.Clear();
+    }
+}
 private static void Nothing()
 {
     ShowNotification("testing yipee", NotificationDefaultDuration);
@@ -415,7 +508,7 @@ private static void TryShowNotificationNow(string text, float duration)
     }
 
     GameObject notifObject = Object.Instantiate(prefab);
-    notifObject.transform.localScale = Vector3.one * 0.02f;
+    notifObject.transform.localScale = Vector3.one * 0.026f;
     NotificationFollower follower = notifObject.AddComponent<NotificationFollower>();
 
     TextMeshProUGUI notifText = notifObject.transform.Find("Base/Text")?.GetComponent<TextMeshProUGUI>();
@@ -436,6 +529,7 @@ private static void TryShowNotificationNow(string text, float duration)
     activeNotifications.Add(entry);
     RestackNotifications(false);
 
+    Main.PlayNotificationSound();
     GetNotificationCoroutineHandler().StartCoroutine(NotificationLifetime(entry, duration));
 }
 private static CoroutineHandler GetNotificationCoroutineHandler()
@@ -566,7 +660,7 @@ private static Vector3 GetNotificationStackPosition(int index)
     return new Vector3(
         0f,
         NotificationBaseY + (NotificationStackSpacing * index),
-        0.3f
+        0.6f
     );
 }
 private static IEnumerator MoveNotification(NotificationEntry entry, Vector3 targetPosition, float duration, float delay)
@@ -635,8 +729,11 @@ private readonly struct NotificationRequest
 
 private static Dictionary<VRRig, float> volumes = new Dictionary<VRRig, float>();
 
-private static bool muteToggled;
+private const float MinSliderVolume = 0.1f;
+private const float MaxSliderVolume = 2f;
 private static bool muteElseToggled;
+private static readonly Dictionary<VRRig, float> mutedPreviousVolumes = new Dictionary<VRRig, float>();
+private static readonly Dictionary<VRRig, float> muteElsePreviousVolumes = new Dictionary<VRRig, float>();
 
 private static Speaker GetSpeaker(VRRig rig)
 {
@@ -692,15 +789,24 @@ private static void ApplyVolumes()
 }
 
 private static float displayedVolume = 1f;
+private static float Slider01ToVolume(float value) => Mathf.Lerp(MinSliderVolume, MaxSliderVolume, Mathf.Clamp01(value));
+private static float VolumeToSlider01(float volume)
+{
+    if (volume <= 0.001f)
+        return 0f;
+
+    return Mathf.InverseLerp(MinSliderVolume, MaxSliderVolume, Mathf.Clamp(volume, MinSliderVolume, MaxSliderVolume));
+}
+
 private static void UpdateVolumeUI(float targetVolume)
 {
+    targetVolume = Mathf.Clamp(targetVolume, 0f, MaxSliderVolume);
+    displayedVolume = targetVolume;
+    Main.Instance?.SetVolumeDisplayVolume(targetVolume);
+
     if (Main.volumeText == null) return;
-
-    float t = 1f - Mathf.Exp(-12f * Time.deltaTime);
-    displayedVolume = Mathf.Lerp(displayedVolume, targetVolume, t);
-
-    int percent = Mathf.RoundToInt(displayedVolume * 100f);
-    Main.volumeText.text = percent + "%";
+    int percent = Mathf.RoundToInt(targetVolume * 100f);
+    Main.volumeText.text = $"Volume - {percent}%";
 }
 
 private static void SaveVolumes()
@@ -755,70 +861,95 @@ private static void LoadVolumes()
     }
 }
 
+public static void SetSelectedVolumeFromSlider(float value)
+{
+    if (selectedRig == null) { Debug.LogWarning("[TUP VOLUME SLIDER] ignored: no selected player rig"); return; }
+
+    float newVol = Slider01ToVolume(value);
+    SetRigVolume(selectedRig, newVol, true);
+    mutedPreviousVolumes.Remove(selectedRig);
+    UpdateVolumeUI(newVol);
+    SaveVolumes();
+    Debug.Log($"[TUP] Volume slider -> {newVol * 100f}%");
+}
+
+public static float GetSelectedVolume01()
+{
+    if (selectedRig == null) return VolumeToSlider01(1f);
+    return VolumeToSlider01(volumes.ContainsKey(selectedRig) ? volumes[selectedRig] : 1f);
+}
+
+public static float GetSelectedVolume()
+{
+    if (selectedRig == null) return 1f;
+    return volumes.TryGetValue(selectedRig, out float volume) ? volume : 1f;
+}
+
+private static void SetRigVolume(VRRig rig, float volume, bool saveManual)
+{
+    if (rig == null) return;
+
+    float clamped = Mathf.Clamp(volume, 0f, MaxSliderVolume);
+    volumes[rig] = clamped;
+    if (!currentVolumes.ContainsKey(rig))
+        currentVolumes[rig] = clamped;
+
+    if (saveManual && GetRigID(rig, out string id))
+        manuallyAdjusted.Add(id);
+}
+
+private static float GetRigVolume(VRRig rig)
+{
+    if (rig == null) return 1f;
+    return volumes.TryGetValue(rig, out float volume) ? volume : 1f;
+}
+
 private static void VolumeUp()
 {
     if (selectedRig == null) return;
 
-    float current = volumes.ContainsKey(selectedRig) ? volumes[selectedRig] : 1f;
-    float newVol = Mathf.Clamp(current + 0.1f, 0f, 2f);
-
-    volumes[selectedRig] = newVol;
-
-    Debug.Log($"[TUP] Volume UP -> {newVol * 100f}%");
-    
-    if (GetRigID(selectedRig, out string id))
-    {
-        manuallyAdjusted.Add(id);
-    }
-
+    float newVol = Mathf.Clamp(GetRigVolume(selectedRig) + 0.1f, MinSliderVolume, MaxSliderVolume);
+    SetRigVolume(selectedRig, newVol, true);
+    mutedPreviousVolumes.Remove(selectedRig);
+    UpdateVolumeUI(newVol);
     SaveVolumes();
+    Debug.Log($"[TUP] Volume UP -> {newVol * 100f}%");
 }
 
 private static void VolumeDown()
 {
     if (selectedRig == null) return;
 
-    float current = volumes.ContainsKey(selectedRig) ? volumes[selectedRig] : 1f;
-    float newVol = Mathf.Clamp(current - 0.1f, 0f, 2f);
-
-    volumes[selectedRig] = newVol;
-
-    Debug.Log($"[TUP] Volume DOWN -> {newVol * 100f}%");
-    
-    if (GetRigID(selectedRig, out string id))
-    {
-        manuallyAdjusted.Add(id);
-    }
-    
+    float newVol = Mathf.Clamp(GetRigVolume(selectedRig) - 0.1f, 0f, MaxSliderVolume);
+    SetRigVolume(selectedRig, newVol, true);
+    mutedPreviousVolumes.Remove(selectedRig);
+    UpdateVolumeUI(newVol);
     SaveVolumes();
+    Debug.Log($"[TUP] Volume DOWN -> {newVol * 100f}%");
 }
 
 private static void Mute()
 {
     if (selectedRig == null) return;
 
-    muteToggled = !muteToggled;
-
-    if (muteToggled)
+    float current = GetRigVolume(selectedRig);
+    bool shouldMute = current > 0.001f;
+    if (shouldMute)
     {
-        if (!volumes.ContainsKey(selectedRig))
-            volumes[selectedRig] = 1f;
-
-        volumes[selectedRig] = 0f;
+        mutedPreviousVolumes[selectedRig] = Mathf.Clamp(current, MinSliderVolume, MaxSliderVolume);
+        SetRigVolume(selectedRig, 0f, true);
+        UpdateVolumeUI(0f);
     }
     else
     {
-        volumes[selectedRig] = 1f;
+        float restore = mutedPreviousVolumes.TryGetValue(selectedRig, out float previous) ? previous : 1f;
+        mutedPreviousVolumes.Remove(selectedRig);
+        SetRigVolume(selectedRig, Mathf.Clamp(restore, MinSliderVolume, MaxSliderVolume), true);
+        UpdateVolumeUI(restore);
     }
 
-    Debug.Log($"[TUP] {(muteToggled ? "Muted" : "Unmuted")} {selectedRig.playerNameVisible}");
-    
-    if (GetRigID(selectedRig, out string id))
-    {
-        manuallyAdjusted.Add(id);
-    }
-    
     SaveVolumes();
+    Debug.Log($"[TUP] {(shouldMute ? "Muted" : "Unmuted")} {selectedRig.playerNameVisible}");
 }
 
 private static void MuteElse()
@@ -826,21 +957,31 @@ private static void MuteElse()
     if (selectedRig == null) return;
 
     muteElseToggled = !muteElseToggled;
+    if (muteElseToggled)
+        muteElsePreviousVolumes.Clear();
 
     foreach (VRRig rig in Object.FindObjectsOfType<VRRig>())
     {
-        if (rig == null || rig.isLocal) continue;
+        if (rig == null || rig.isLocal || rig == selectedRig) continue;
 
-        if (rig == selectedRig)
+        if (muteElseToggled)
         {
-            volumes[rig] = 1f;
+            float current = GetRigVolume(rig);
+            if (current > 0.001f)
+                muteElsePreviousVolumes[rig] = Mathf.Clamp(current, MinSliderVolume, MaxSliderVolume);
+            SetRigVolume(rig, 0f, true);
         }
         else
         {
-            volumes[rig] = muteElseToggled ? 0f : 1f;
+            float restore = muteElsePreviousVolumes.TryGetValue(rig, out float previous) ? previous : 1f;
+            SetRigVolume(rig, Mathf.Clamp(restore, MinSliderVolume, MaxSliderVolume), true);
         }
     }
 
+    if (!muteElseToggled)
+        muteElsePreviousVolumes.Clear();
+
+    SaveVolumes();
     Debug.Log($"[TUP] MuteElse {(muteElseToggled ? "ENABLED" : "DISABLED")}");
 }
 
@@ -892,7 +1033,6 @@ private static void MuteElse()
         }
         if (lastTargetRig != null)
         {
-            //removeSkeletonHighlight(lastTargetRig);
             lastTargetRig = null;
         }
         checkerCoroutine = null;
@@ -950,6 +1090,74 @@ private static void MuteElse()
                && rig.mainSkin.bones != null;
     }
     
+    private static bool IsLocalPlayerCollider(Collider collider)
+    {
+        if (collider == null)
+            return false;
+
+        Transform hit = collider.transform;
+        if (GTPlayer.Instance != null && hit.IsChildOf(GTPlayer.Instance.transform))
+            return true;
+
+        if (GorillaTagger.Instance != null)
+        {
+            if (GorillaTagger.Instance.offlineVRRig != null && hit.IsChildOf(GorillaTagger.Instance.offlineVRRig.transform))
+                return true;
+
+            if (GorillaTagger.Instance.bodyCollider != null && (hit == GorillaTagger.Instance.bodyCollider.transform || hit.IsChildOf(GorillaTagger.Instance.bodyCollider.transform)))
+                return true;
+        }
+
+        return false;
+    }
+public static List<VRRig> GetSelectableRigs()
+{
+    List<VRRig> rigs = new List<VRRig>();
+    foreach (VRRig rig in VRRigCache.ActiveRigs)
+    {
+        if (!IsRigValid(rig) || rig.isLocal)
+            continue;
+
+        rigs.Add(rig);
+    }
+
+    return rigs;
+}
+
+public static string GetRigDisplayName(VRRig rig)
+{
+    if (!IsRigValid(rig))
+        return "Unknown";
+
+    string name = rig.playerNameVisible;
+    if (string.IsNullOrWhiteSpace(name))
+        name = "Player";
+
+    name = name.Replace("\r", " ").Replace("\n", " ").Trim();
+    return name.Length > 16 ? name.Substring(0, 16) : name;
+}
+
+public static void SelectRigFromMenu(VRRig rig)
+{
+    if (!IsRigValid(rig) || rig.isLocal)
+        return;
+
+    selectedRig = rig;
+    snappedRig = rig;
+
+    if (GetRigID(rig, out string id))
+    {
+        selectedUserId = id;
+        if (savedVolumes.ContainsKey(id))
+        {
+            volumes[rig] = savedVolumes[id];
+            currentVolumes[rig] = savedVolumes[id];
+        }
+    }
+
+    displayedVolume = volumes.ContainsKey(rig) ? volumes[rig] : 1f;
+    ShowPlayerInfo(rig);
+}
 public static void UpdateChecker()
 {
     if (!checkerEnabled)
@@ -1050,23 +1258,28 @@ public static void UpdateChecker()
     RaycastHit firstHit = default;
     bool firstHitFound = false;
 
-    foreach (RaycastHit h in hits)
+    foreach (RaycastHit h in hits.OrderBy(hit => hit.distance))
     {
-        if (!firstHitFound || h.distance < firstHit.distance)
+        if (h.collider == null)
+            continue;
+
+        if (h.collider.GetComponentInParent<ButtonPresser>() != null)
+            continue;
+
+        VRRig hitRig = h.collider.GetComponentInParent<VRRig>();
+        if (hitRig != null && (!IsRigValid(hitRig) || hitRig.isLocal))
+            continue;
+
+        if (!firstHitFound)
         {
             firstHit = h;
             firstHitFound = true;
         }
 
-        VRRig rig = h.collider.GetComponentInParent<VRRig>();
-
-        if (!IsRigValid(rig) || rig.isLocal)
-            continue;
-
-        if (h.distance < minDistance)
+        if (IsRigValid(hitRig) && h.distance < minDistance)
         {
             minDistance = h.distance;
-            targetRig = rig;
+            targetRig = hitRig;
         }
     }
 
@@ -1173,7 +1386,7 @@ public static void UpdateChecker()
     if (IsRigValid(snappedRig))
         currentBeamEnd = endPos;
     else
-        currentBeamEnd = Vector3.Lerp(currentBeamEnd, endPos, 15f * Time.deltaTime);
+        currentBeamEnd = Vector3.SmoothDamp(currentBeamEnd, endPos, ref beamVelocity, 0.055f, 80f, Time.deltaTime);
 
     line.SetPosition(0, startPos);
     line.SetPosition(1, currentBeamEnd);
@@ -1338,12 +1551,7 @@ private static void BoneHighlight(VRRig rig, Color color, float width = 0.02f)
     {
         lines = new List<LineRenderer>();
 
-        // Head line
-        //LineRenderer headLine = rig.head.rigTarget.gameObject.GetOrAddComponent<LineRenderer>();
-        //headLine.material = new Material(Shader.Find("GUI/Text Shader"));
-        //lines.Add(headLine);
 
-        // Bone lines
         for (int i = 0; i < 19; i++)
         {
             LineRenderer line = rig.mainSkin.bones[bones[i * 2]].gameObject.GetOrAddComponent<LineRenderer>();
@@ -1354,17 +1562,8 @@ private static void BoneHighlight(VRRig rig, Color color, float width = 0.02f)
         boneESP.Add(rig, lines);
     }
 
-    // HEAD
-    //LineRenderer head = lines[0];
-    //head.startWidth = width;
-    //head.endWidth = width;
-    //head.startColor = color;
-    //head.endColor = color;
 
-    //head.SetPosition(0, rig.head.rigTarget.position + new Vector3(0f, 0.16f, 0f));
-    //head.SetPosition(1, rig.head.rigTarget.position - new Vector3(0f, 0.4f, 0f));
 
-    // BONES
     for (int i = 0; i < 19; i++)
     {
         LineRenderer line = lines[i];
@@ -1443,6 +1642,16 @@ public static void DisableBoneHighlight(VRRig rig)
             $"RGB({Mathf.RoundToInt(color.r * 9)}, {Mathf.RoundToInt(color.g * 9)}, {Mathf.RoundToInt(color.b * 9)})";
 
         Debug.Log($"[TUP CHECKER]\nName: {name}\nColor: {colorStr}\nFPS: {fps}\nPlatform: {platform}");
+
+        string creationDate = "Unknown";
+        try { creationDate = GetCreationDate(GetPlayerFromVRRig(rig).UserId); }
+        catch (Exception e) { Debug.LogWarning("[TUP CHECKER] Failed to get creation date: " + e.Message); }
+
+        int ping = 0;
+        try { ping = GetPingThrottled(rig); }
+        catch (Exception e) { Debug.LogWarning("[TUP CHECKER] Failed to get ping: " + e.Message); }
+
+        Main.Instance?.UpdateCheckerText(name, fps, platform, creationDate, colorStr, color, ping);
         UpdateSelectedPlayerProperties(rig);
     }
 
@@ -1489,6 +1698,641 @@ public static void DisableBoneHighlight(VRRig rig)
         Main.Instance?.UpdateCheckerProperties(legalText, illegalText);
     }
     
+    private static bool speedboostCheckEnabled = true;
+    private static bool requireThreeSpeedFlags = true;
+    private static readonly string[] speedStrictnessNames = { "Strict", "Moderate", "Low" };
+    private static readonly float[] speedStrictnessBuffers = { 0f, 1.25f, 2.75f };
+    private static int speedStrictnessIndex = 1;
+    private const float SpeedSampleMinDelta = 0.08f;
+    private const float SpeedSampleMaxDelta = 0.5f;
+    private const float SpeedNotifyCooldown = 5f;
+    private const float SpeedTeleportIgnoreDistance = 8f;
+
+    public static string GetSpeedStrictnessLabel() => speedStrictnessNames[Mathf.Clamp(speedStrictnessIndex, 0, speedStrictnessNames.Length - 1)];
+
+    private static void ToggleSpeedboostCheck()
+    {
+        speedboostCheckEnabled = !speedboostCheckEnabled;
+        SavedToggleStates["Speedboost Check"] = speedboostCheckEnabled;
+        SaveButtonStates();
+        if (!speedboostCheckEnabled)
+        {
+            speedSamples.Clear();
+            speedFlagCounts.Clear();
+        }
+    }
+
+    private static void ToggleSpeedFlagRequirement()
+    {
+        requireThreeSpeedFlags = !requireThreeSpeedFlags;
+        SavedToggleStates["3 Flag Notify"] = requireThreeSpeedFlags;
+        SaveButtonStates();
+    }
+
+    private static void CycleSpeedStrictness()
+    {
+        speedStrictnessIndex = (speedStrictnessIndex + 1) % speedStrictnessNames.Length;
+        SaveButtonStates();
+
+        if (Main.speedStrictnessText != null)
+            Main.speedStrictnessText.text = "Speed Strictness  :  " + GetSpeedStrictnessLabel();
+    }
+
+    public static void AntiCheatLoop()
+    {
+        if (!speedboostCheckEnabled)
+            return;
+
+        float now = Time.time;
+        HashSet<VRRig> active = new HashSet<VRRig>();
+
+        foreach (VRRig rig in VRRigCache.ActiveRigs)
+        {
+            if (rig == null || rig.isLocal) continue;
+            active.Add(rig);
+
+            Vector3 position = GetSpeedCheckPosition(rig);
+            if (!speedSamples.TryGetValue(rig, out SpeedSample sample))
+            {
+                speedSamples[rig] = new SpeedSample(position, now);
+                continue;
+            }
+
+            float delta = now - sample.Time;
+            if (delta < SpeedSampleMinDelta)
+                continue;
+
+            speedSamples[rig] = new SpeedSample(position, now);
+            if (delta > SpeedSampleMaxDelta)
+                continue;
+
+            float distance = Vector3.Distance(position, sample.Position);
+            if (distance > SpeedTeleportIgnoreDistance)
+            {
+                speedFlagCounts[rig] = 0;
+                continue;
+            }
+
+            float speed = distance / Mathf.Max(delta, 0.001f);
+            float cap = GetSpeedCap() + speedStrictnessBuffers[Mathf.Clamp(speedStrictnessIndex, 0, speedStrictnessBuffers.Length - 1)];
+
+            if (speed <= cap)
+            {
+                speedFlagCounts[rig] = 0;
+                continue;
+            }
+
+            speedFlagCounts.TryGetValue(rig, out int flags);
+            flags++;
+            speedFlagCounts[rig] = flags;
+
+            int requiredFlags = requireThreeSpeedFlags ? 3 : 1;
+            nextSpeedNotifyTimes.TryGetValue(rig, out float nextNotify);
+            if (flags < requiredFlags || now < nextNotify)
+                continue;
+
+            string playerName = GetSafeRigName(rig);
+            ShowNotification($"{playerName} flagged for speedboost ({speed:0.0}/{cap:0.0})", 3f);
+            nextSpeedNotifyTimes[rig] = now + SpeedNotifyCooldown;
+            speedFlagCounts[rig] = 0;
+        }
+
+        foreach (VRRig rig in speedSamples.Keys.Where(rig => rig == null || !active.Contains(rig)).ToList())
+        {
+            speedSamples.Remove(rig);
+            speedFlagCounts.Remove(rig);
+            nextSpeedNotifyTimes.Remove(rig);
+        }
+    }
+
+    private static Vector3 GetSpeedCheckPosition(VRRig rig)
+    {
+        if (rig?.bodyTransform != null) return rig.bodyTransform.position;
+        if (rig?.headMesh != null) return rig.headMesh.transform.position;
+        return rig != null ? rig.transform.position : Vector3.zero;
+    }
+
+    private static float GetSpeedCap()
+    {
+        try
+        {
+            if (GTPlayer.Instance != null && GTPlayer.Instance.maxJumpSpeed > 0f)
+                return GTPlayer.Instance.maxJumpSpeed;
+        }
+        catch { }
+
+        return 6.5f;
+    }
+
+    private static string GetSafeRigName(VRRig rig)
+    {
+        try
+        {
+            Player player = rig.GetPhotonPlayer();
+            if (player != null && !string.IsNullOrWhiteSpace(player.NickName))
+                return player.NickName;
+        }
+        catch { }
+
+        return !string.IsNullOrWhiteSpace(rig?.playerNameVisible) ? rig.playerNameVisible : "Player";
+    }
+
+    private readonly struct SpeedSample
+    {
+        public readonly Vector3 Position;
+        public readonly float Time;
+
+        public SpeedSample(Vector3 position, float time)
+        {
+            Position = position;
+            Time = time;
+        }
+    }
+    public readonly struct SpotifyTrackInfo
+{
+    public readonly string Song;
+    public readonly string Artist;
+    public readonly string Duration;
+    public readonly string Status;
+    public readonly bool HasTrack;
+    public readonly Texture2D Icon;
+    public readonly string ThumbnailBase64;
+    public readonly float StartTime;
+    public readonly float EndTime;
+    public readonly float ElapsedTime;
+
+    public SpotifyTrackInfo(string song, string artist, string duration, string status, bool hasTrack)
+    {
+        Song = song;
+        Artist = artist;
+        Duration = duration;
+        Status = status;
+        HasTrack = hasTrack;
+        Icon = null;
+        ThumbnailBase64 = "";
+        StartTime = 0f;
+        EndTime = 0f;
+        ElapsedTime = 0f;
+    }
+
+    public SpotifyTrackInfo(string song, string artist, string duration, string status, bool hasTrack, Texture2D icon, float startTime, float endTime, float elapsedTime, string thumbnailBase64 = "")
+    {
+        Song = song;
+        Artist = artist;
+        Duration = duration;
+        Status = status;
+        HasTrack = hasTrack;
+        Icon = icon;
+        ThumbnailBase64 = thumbnailBase64 ?? "";
+        StartTime = startTime;
+        EndTime = endTime;
+        ElapsedTime = elapsedTime;
+    }
+}
+private const byte SpotifyKeyPrevious = 0xB1;
+private const byte SpotifyKeyPlayPause = 0xB3;
+private const byte SpotifyKeyNext = 0xB0;
+private const uint SpotifyKeyUp = 0x0002;
+
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
+private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+private static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
+
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+[System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+private static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int maxCount);
+
+[System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+private static extern int GetWindowTextLength(IntPtr hWnd);
+
+public static void InvalidateSpotifyCache()
+{
+    nextSpotifyInfoQueryTime = 0f;
+}
+
+public static void SpotifyPlayPause()
+{
+    SendSpotifyMediaKey(SpotifyKeyPlayPause);
+    InvalidateSpotifyCache();
+    Main.Instance?.RefreshSpotifyHudDelayed(0.35f);
+}
+
+public static void SpotifyNext()
+{
+    SendSpotifyMediaKey(SpotifyKeyNext);
+    InvalidateSpotifyCache();
+    Main.Instance?.RefreshSpotifyHudDelayed(0.35f);
+}
+
+public static void SpotifyPrevious()
+{
+    SendSpotifyMediaKey(SpotifyKeyPrevious);
+    InvalidateSpotifyCache();
+    Main.Instance?.RefreshSpotifyHudDelayed(0.35f);
+}
+
+public static void SpotifyRefresh()
+{
+    InvalidateSpotifyCache();
+    Main.Instance?.RefreshSpotifyHud();
+}
+
+private static void SendSpotifyMediaKey(byte virtualKey)
+{
+    try
+    {
+        keybd_event(virtualKey, 0, 0, UIntPtr.Zero);
+        keybd_event(virtualKey, 0, SpotifyKeyUp, UIntPtr.Zero);
+    }
+    catch (Exception e)
+    {
+        Debug.LogWarning("[TUP] Spotify media key failed: " + e.Message);
+    }
+}
+
+private static SpotifyTrackInfo cachedSpotifyInfo = new SpotifyTrackInfo("No song", "Spotify not open", "--:--", "Offline", false);
+private static float nextSpotifyInfoQueryTime;
+private static string quickSongPath;
+private static Texture2D cachedSpotifyIcon;
+private static string lastSpotifyDebugMessage;
+private static float nextSpotifyDebugRepeatTime;
+private static float nextForcedSpotifyDebugTime;
+private static readonly object spotifyQueryLock = new object();
+private static bool spotifyQueryRunning;
+
+public static void SpotifyDebugLoop() { }
+public static SpotifyTrackInfo GetSpotifyTrackInfo()
+{
+    if (Time.realtimeSinceStartup >= nextSpotifyInfoQueryTime)
+    {
+        nextSpotifyInfoQueryTime = Time.realtimeSinceStartup + 1f;
+        StartSpotifyInfoQuery();
+    }
+
+    lock (spotifyQueryLock)
+        return cachedSpotifyInfo;
+}
+
+private static void StartSpotifyInfoQuery()
+{
+    lock (spotifyQueryLock)
+    {
+        if (spotifyQueryRunning)
+            return;
+        spotifyQueryRunning = true;
+    }
+
+    string helperPath = GetQuickSongPath();
+    System.Threading.Tasks.Task.Run(() =>
+    {
+        SpotifyTrackInfo result;
+        try
+        {
+            result = QueryQuickSongTrackInfo(helperPath);
+            if (!result.HasTrack && result.Status != "Paused")
+            {
+                SpotifyTrackInfo windowInfo = GetSpotifyWindowTitleTrackInfo();
+                result = windowInfo.HasTrack ? windowInfo : result;
+            }
+        }
+        catch (Exception e)
+        {
+            result = new SpotifyTrackInfo("No song", "Spotify error: " + e.Message, "--:--", "Offline", false);
+        }
+
+        lock (spotifyQueryLock)
+        {
+            cachedSpotifyInfo = result;
+            spotifyQueryRunning = false;
+        }
+    });
+}
+
+private static SpotifyTrackInfo QueryQuickSongTrackInfo(string helperPath)
+{
+    if (string.IsNullOrEmpty(helperPath) || !System.IO.File.Exists(helperPath))
+        return new SpotifyTrackInfo("No song", "QuickSong.exe missing", "--:--", "Offline", false);
+
+    System.Diagnostics.ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = helperPath,
+        Arguments = "-all",
+        UseShellExecute = false,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        CreateNoWindow = true
+    };
+
+    using System.Diagnostics.Process process = new System.Diagnostics.Process { StartInfo = startInfo };
+    process.Start();
+    if (!process.WaitForExit(900))
+    {
+        try { process.Kill(); } catch { }
+        return new SpotifyTrackInfo("No song", "QuickSong timeout", "--:--", "Offline", false);
+    }
+
+    string output = process.StandardOutput.ReadToEnd();
+    if (string.IsNullOrWhiteSpace(output))
+        return new SpotifyTrackInfo("No song", "Spotify not open", "--:--", "Offline", false);
+
+    int jsonStart = output.IndexOf('{');
+    if (jsonStart > 0) output = output.Substring(jsonStart);
+    JObject data = JObject.Parse(output);
+
+    string title = CleanSpotifyText((string)data["Title"]);
+    string artist = CleanSpotifyText((string)data["Artist"]);
+    string status = CleanSpotifyText((string)data["Status"]);
+    float startTime = (float?)data["StartTime"] ?? 0f;
+    float endTime = (float?)data["EndTime"] ?? 0f;
+    float elapsedTime = (float?)data["ElapsedTime"] ?? 0f;
+    string thumbnailBase64 = CleanSpotifyText((string)data["ThumbnailBase64"]);
+
+    if (IsEmptySpotifyTitle(title) || IsIdleSpotifyTitle(title) || IsJunkSpotifyTitle(title)) title = "No song";
+    if (IsEmptySpotifyTitle(artist)) artist = "Unknown Artist";
+
+    bool paused = !status.Equals("Playing", StringComparison.OrdinalIgnoreCase);
+    bool hasTrack = !title.Equals("No song", StringComparison.OrdinalIgnoreCase);
+    string duration = endTime > 0f ? FormatSpotifyTimeNoUnity(elapsedTime) + " / " + FormatSpotifyTimeNoUnity(endTime) : "--:--";
+    return new SpotifyTrackInfo(title, artist, duration, paused ? "Paused" : "Playing", hasTrack, null, startTime, endTime, elapsedTime, thumbnailBase64);
+}
+private static SpotifyTrackInfo GetQuickSongTrackInfo()
+{
+    try
+    {
+        string helperPath = GetQuickSongPath();
+        if (string.IsNullOrEmpty(helperPath) || !System.IO.File.Exists(helperPath))
+            return new SpotifyTrackInfo("No song", "QuickSong.exe missing", "--:--", "Offline", false);
+
+        System.Diagnostics.ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = helperPath,
+            Arguments = "-all",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+
+        using System.Diagnostics.Process process = new System.Diagnostics.Process { StartInfo = startInfo };
+        process.Start();
+        if (!process.WaitForExit(1600))
+        {
+            try { process.Kill(); } catch { }
+            return cachedSpotifyInfo;
+        }
+
+        string output = process.StandardOutput.ReadToEnd();
+        if (string.IsNullOrWhiteSpace(output))
+            return new SpotifyTrackInfo("No song", "Spotify not open", "--:--", "Offline", false);
+
+        int jsonStart = output.IndexOf('{' );
+        if (jsonStart > 0) output = output.Substring(jsonStart);
+        JObject data = JObject.Parse(output);
+        string title = CleanSpotifyText((string)data["Title"]);
+        string artist = CleanSpotifyText((string)data["Artist"]);
+        string status = CleanSpotifyText((string)data["Status"]);
+        float startTime = (float?)data["StartTime"] ?? 0f;
+        float endTime = (float?)data["EndTime"] ?? 0f;
+        float elapsedTime = (float?)data["ElapsedTime"] ?? 0f;
+
+        if (IsEmptySpotifyTitle(title) || IsIdleSpotifyTitle(title) || IsJunkSpotifyTitle(title)) title = "No song";
+        if (IsEmptySpotifyTitle(artist)) artist = "Unknown Artist";
+
+        Texture2D icon = cachedSpotifyIcon;
+        string thumbnailBase64 = (string)data["ThumbnailBase64"];
+        if (!string.IsNullOrWhiteSpace(thumbnailBase64))
+        {
+            byte[] bytes = Convert.FromBase64String(thumbnailBase64);
+            if (cachedSpotifyIcon == null)
+                cachedSpotifyIcon = new Texture2D(2, 2);
+            cachedSpotifyIcon.LoadImage(bytes);
+            icon = cachedSpotifyIcon;
+        }
+
+        bool paused = !status.Equals("Playing", StringComparison.OrdinalIgnoreCase);
+        bool hasTrack = !title.Equals("No song", StringComparison.OrdinalIgnoreCase);
+        string duration = endTime > 0f ? FormatSpotifyTime(elapsedTime) + " / " + FormatSpotifyTime(endTime) : "--:--";
+        DebugSpotify("QuickSong parsed: Title=" + title + ", Artist=" + artist + ", Status=" + status + ", HasTrack=" + hasTrack + ", End=" + endTime + ", Elapsed=" + elapsedTime + ", Thumb=" + !string.IsNullOrWhiteSpace(thumbnailBase64) + ", ThumbLen=" + (thumbnailBase64 == null ? 0 : thumbnailBase64.Length) + ", Icon=" + (icon == null ? "null" : icon.width + "x" + icon.height));
+        return new SpotifyTrackInfo(title, artist, duration, paused ? "Paused" : "Playing", hasTrack, icon, startTime, endTime, elapsedTime);
+    }
+    catch (Exception e)
+    {
+        Debug.LogWarning("[TUP] QuickSong query failed: " + e.Message);
+        return new SpotifyTrackInfo("No song", "QuickSong error", "--:--", "Offline", false);
+    }
+}
+
+private static string GetQuickSongPath()
+{
+    if (!string.IsNullOrEmpty(quickSongPath) && System.IO.File.Exists(quickSongPath))
+        return quickSongPath;
+
+    string configDir = System.IO.Path.Combine(BepInEx.Paths.ConfigPath, "ThatUtilsPad");
+    string configPath = System.IO.Path.Combine(configDir, "QuickSong.exe");
+    if (System.IO.File.Exists(configPath))
+    {
+        quickSongPath = configPath;
+        return quickSongPath;
+    }
+
+    string pluginPath = System.IO.Path.Combine(BepInEx.Paths.PluginPath, "QuickSong.exe");
+    if (System.IO.File.Exists(pluginPath))
+    {
+        quickSongPath = pluginPath;
+        return quickSongPath;
+    }
+
+    Assembly assembly = Assembly.GetExecutingAssembly();
+    string resourceName = assembly.GetManifestResourceNames()
+        .FirstOrDefault(name => name.EndsWith("QuickSong.exe", StringComparison.OrdinalIgnoreCase));
+    if (!string.IsNullOrEmpty(resourceName))
+    {
+        try
+        {
+            System.IO.Directory.CreateDirectory(configDir);
+            using System.IO.Stream stream = assembly.GetManifestResourceStream(resourceName);
+            if (stream != null)
+            {
+                using (System.IO.FileStream file = new System.IO.FileStream(configPath, System.IO.FileMode.Create, System.IO.FileAccess.Write, System.IO.FileShare.None))
+                    stream.CopyTo(file);
+
+                quickSongPath = configPath;
+                return quickSongPath;
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning("[TUP SPOTIFY] helper extract failed: " + e.Message);
+        }
+    }
+
+    string tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "QuickSong.exe");
+    if (System.IO.File.Exists(tempPath))
+    {
+        quickSongPath = tempPath;
+        return quickSongPath;
+    }
+
+    return null;
+}
+private static SpotifyTrackInfo GetSpotifyWindowTitleTrackInfo()
+{
+    try
+    {
+        System.Diagnostics.Process[] processes = System.Diagnostics.Process.GetProcessesByName("Spotify");
+        List<string> titles = GetSpotifyWindowTitles(processes);
+        string title = titles.FirstOrDefault(windowTitle => IsUsefulSpotifyWindowTitle(windowTitle));
+        if (string.IsNullOrWhiteSpace(title))
+            title = processes.Select(process => process.MainWindowTitle)
+                .FirstOrDefault(windowTitle => IsUsefulSpotifyWindowTitle(windowTitle));
+
+        if (string.IsNullOrWhiteSpace(title))
+            return new SpotifyTrackInfo("No song", "Spotify not open", "--:--", "Offline", false);
+
+        title = title.Trim();
+        string artist = "Unknown Artist";
+        string song = title;
+        int splitIndex = title.IndexOf(" - ", StringComparison.Ordinal);
+        if (splitIndex > 0)
+        {
+            artist = title.Substring(0, splitIndex).Trim();
+            song = title.Substring(splitIndex + 3).Trim();
+        }
+
+        if (IsEmptySpotifyTitle(song) || IsIdleSpotifyTitle(song) || IsJunkSpotifyTitle(song))
+            return new SpotifyTrackInfo("No song", "Spotify not open", "--:--", "Offline", false);
+        if (IsEmptySpotifyTitle(artist))
+            artist = "Unknown Artist";
+
+        return new SpotifyTrackInfo(song, artist, "--:--", "Playing", true);
+    }
+    catch (Exception e)
+    {
+        return new SpotifyTrackInfo("Spotify error", e.Message, "--:--", "Error", false);
+    }
+}
+
+private static List<string> GetSpotifyWindowTitles(System.Diagnostics.Process[] processes)
+{
+    HashSet<uint> processIds = new HashSet<uint>(processes.Select(process => (uint)process.Id));
+    List<string> titles = new List<string>();
+    EnumWindows((hWnd, lParam) =>
+    {
+        GetWindowThreadProcessId(hWnd, out uint processId);
+        if (!processIds.Contains(processId))
+            return true;
+
+        int length = GetWindowTextLength(hWnd);
+        if (length <= 0)
+            return true;
+
+        System.Text.StringBuilder builder = new System.Text.StringBuilder(length + 1);
+        GetWindowText(hWnd, builder, builder.Capacity);
+        string title = builder.ToString().Trim();
+        if (!string.IsNullOrWhiteSpace(title) && !titles.Contains(title))
+            titles.Add(title);
+        return true;
+    }, IntPtr.Zero);
+    return titles;
+}
+private static void DebugSpotify(string message)
+{
+    float now = Time.realtimeSinceStartup;
+    if (message == lastSpotifyDebugMessage && now < nextSpotifyDebugRepeatTime)
+        return;
+
+    lastSpotifyDebugMessage = message;
+    nextSpotifyDebugRepeatTime = now + 10f;
+    Debug.Log("[TUP SPOTIFY] " + message);
+}
+
+private static string TrimForLog(string value)
+{
+    if (string.IsNullOrEmpty(value)) return "<empty>";
+    value = value.Replace("\r", " ").Replace("\n", " ").Trim();
+    return value.Length > 300 ? value.Substring(0, 300) + "..." : value;
+}
+private static string FormatSpotifyTimeNoUnity(float seconds)
+{
+    seconds = Math.Max(0f, seconds);
+    return ((int)(seconds / 60f)) + ":" + ((int)(seconds % 60f)).ToString("00");
+}
+
+private static string FormatSpotifyTime(float seconds)
+{
+    seconds = Mathf.Max(0f, seconds);
+    return Mathf.FloorToInt(seconds / 60f) + ":" + Mathf.FloorToInt(seconds % 60f).ToString("00");
+}
+
+private static string CleanSpotifyText(string value)
+{
+    return string.IsNullOrWhiteSpace(value) ? "" : value.Trim().Replace("\r", " ").Replace("\n", " ");
+}
+
+private static bool IsJunkSpotifyTitle(string value)
+{
+    if (string.IsNullOrWhiteSpace(value)) return true;
+    value = value.Trim();
+    if (value.Equals("MSCTFIME UI", StringComparison.OrdinalIgnoreCase)) return true;
+    if (value.IndexOf("Window (Spotify.exe)", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+    if (value.IndexOf("Spotify.exe", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+    if (value.StartsWith("GDI+", StringComparison.OrdinalIgnoreCase)) return true;
+    return false;
+}
+private static bool IsUsefulSpotifyWindowTitle(string value)
+{
+    if (IsEmptySpotifyTitle(value) || IsIdleSpotifyTitle(value) || IsJunkSpotifyTitle(value)) return false;
+    value = value.Trim();
+    if (value.IndexOf("Window (Spotify.exe)", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+    if (value.IndexOf("Spotify.exe", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+    if (value.StartsWith("GDI+", StringComparison.OrdinalIgnoreCase)) return false;
+    if (value.Contains("Default IME")) return false;
+    return true;
+}
+private static bool IsIdleSpotifyTitle(string value)
+{
+    if (string.IsNullOrWhiteSpace(value)) return true;
+    value = value.Trim();
+    return value.Equals("Spotify", StringComparison.OrdinalIgnoreCase) ||
+           value.Equals("Spotify Premium", StringComparison.OrdinalIgnoreCase) ||
+           value.Equals("Spotify Free", StringComparison.OrdinalIgnoreCase);
+}
+private static bool IsEmptySpotifyTitle(string value)
+{
+    if (string.IsNullOrWhiteSpace(value)) return true;
+    value = value.Trim();
+    return value.Equals("null", StringComparison.OrdinalIgnoreCase) ||
+           value.Equals("unknown", StringComparison.OrdinalIgnoreCase) ||
+           value.Equals("unknown artist", StringComparison.OrdinalIgnoreCase) ||
+           value.Equals("null unknown artist", StringComparison.OrdinalIgnoreCase);
+}
+private enum ScanLobbyMode
+    {
+        CheatsOnly,
+        ModsOnly,
+        ModsAndCheats
+    }
+
+    private static readonly string[] scanModeNames = { "Cheats", "Mods", "Mods + Cheats" };
+    private static int scanModeIndex;
+
+    public static string GetScanModeLabel() => scanModeNames[Mathf.Clamp(scanModeIndex, 0, scanModeNames.Length - 1)];
+
+    private static void CycleScanMode()
+    {
+        scanModeIndex = (scanModeIndex + 1) % scanModeNames.Length;
+        SaveButtonStates();
+
+        if (Main.scanModeText != null)
+            Main.scanModeText.text = "Scan Mode  :  " + GetScanModeLabel();
+
+        Debug.Log("Scan Mode : " + GetScanModeLabel());
+    }
     private static FieldInfo rigSerializerField = typeof(VRRig).GetField(
         "rigSerializer",
         BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy
@@ -1509,38 +2353,130 @@ public static void DisableBoneHighlight(VRRig rig)
     public static Player NetPlayerToPlayer(NetPlayer p) =>
         p.GetPlayerRef();
     
+    private static void ToggleAutoScan()
+    {
+        autoScanEnabled = !autoScanEnabled;
+        SavedToggleStates["Auto Scan"] = autoScanEnabled;
+        SaveButtonStates();
+
+        if (!autoScanEnabled)
+        {
+            autoScanRoomKey = "";
+            autoScannedActorNumbers.Clear();
+        }
+        else
+        {
+            autoScanRoomKey = "";
+        }
+
+        Debug.Log("Auto Scan : " + (autoScanEnabled ? "ON" : "OFF"));
+    }
+
+    public static void AutoScanLoop()
+    {
+        if (!autoScanEnabled)
+            return;
+
+        if (!PhotonNetwork.InRoom)
+        {
+            autoScanRoomKey = "";
+            autoScannedActorNumbers.Clear();
+            return;
+        }
+
+        string roomKey = PhotonNetwork.CurrentRoom != null ? PhotonNetwork.CurrentRoom.Name : "room";
+        if (!roomKey.Equals(autoScanRoomKey, StringComparison.Ordinal))
+        {
+            autoScanRoomKey = roomKey;
+            autoScannedActorNumbers.Clear();
+        }
+
+        foreach (Player player in PhotonNetwork.PlayerList)
+        {
+            if (player == null || player == PhotonNetwork.LocalPlayer)
+                continue;
+
+            if (!autoScannedActorNumbers.Add(player.ActorNumber))
+                continue;
+
+            ScanPhotonPlayerAndNotify(player, true);
+        }
+    }
     public static void PrintPhotonPlayerCustomProperties()
     {
         if (!PhotonNetwork.InRoom)
         {
-            Debug.Log("[TUP] Cannot print Photon custom properties: not in a room.");
+            Debug.Log("[TUP] Cannot scan lobby: not in a room.");
+            ShowNotification("No players detected");
             return;
         }
 
-        EnsurePropertySignatureDictionary();
-
+        int detectedPlayers = 0;
         foreach (Player player in PhotonNetwork.PlayerList)
         {
-            string playerLabel = $"actor={player.ActorNumber}, name={player.NickName}, userId={player.UserId}";
-
-            if (player.CustomProperties == null || player.CustomProperties.Count == 0)
-            {
-                Debug.Log($"[TUP] Photon custom properties for {playerLabel}: <none>");
+            if (player == null || player == PhotonNetwork.LocalPlayer)
                 continue;
-            }
 
-            List<string> props = new List<string>();
-            foreach (object key in player.CustomProperties.Keys)
-            {
-                object value = player.CustomProperties[key];
-                props.Add($"{key}={FormatPhotonCustomPropertyValue(value)}");
-            }
-
-            Debug.Log($"[TUP] Photon custom properties for {playerLabel}: {string.Join(", ", props)}");
-            PrintDetectedPropertySignatures(player, playerLabel);
+            if (ScanPhotonPlayerAndNotify(player, false))
+                detectedPlayers++;
         }
+
+        if (detectedPlayers == 0)
+            ShowNotification("No players detected");
     }
 
+    private static bool ScanPhotonPlayerAndNotify(Player player, bool suppressEmpty)
+    {
+        if (player == null)
+            return false;
+
+        EnsurePropertySignatureDictionary();
+        Dictionary<string, List<string>> hits = FindPropertySignatureHits(player);
+        if (hits.Count == 0)
+            return false;
+
+        int modCount = 0;
+        int cheatCount = 0;
+        foreach (string key in hits.Keys)
+        {
+            if (!propertySignatures.TryGetValue(key, out PropertySignature signature))
+                continue;
+
+            if (signature.IsLegal)
+                modCount++;
+            else
+                cheatCount++;
+        }
+
+        ScanLobbyMode mode = (ScanLobbyMode)Mathf.Clamp(scanModeIndex, 0, scanModeNames.Length - 1);
+        string message = BuildScanNotificationMessage(player, modCount, cheatCount, mode);
+        if (string.IsNullOrEmpty(message))
+            return false;
+
+        ShowNotification(message);
+        return true;
+    }
+
+    private static string BuildScanNotificationMessage(Player player, int modCount, int cheatCount, ScanLobbyMode mode)
+    {
+        string playerName = string.IsNullOrWhiteSpace(player.NickName) ? "Player " + player.ActorNumber : player.NickName;
+
+        switch (mode)
+        {
+            case ScanLobbyMode.CheatsOnly:
+                return cheatCount > 0 ? $"{playerName} has {cheatCount} Cheats installed" : "";
+            case ScanLobbyMode.ModsOnly:
+                return modCount > 0 ? $"{playerName} has {modCount} Mods installed" : "";
+            default:
+                if (modCount > 0 && cheatCount > 0)
+                    return $"{playerName} has {modCount} Mods and {cheatCount} Cheats installed";
+                if (modCount > 0)
+                    return $"{playerName} has {modCount} Mods installed";
+                if (cheatCount > 0)
+                    return $"{playerName} has {cheatCount} Cheats installed";
+                return "";
+        }
+    }
     public static Dictionary<string, bool> GetPropertyLegalityDictionary()
     {
         EnsurePropertySignatureDictionary();
@@ -2041,8 +2977,8 @@ public static void DisableBoneHighlight(VRRig rig)
 
     private static bool smoothMenuEnabled = true;
 
-    private static readonly string[] smoothingStrengthNames = { "Soft", "Normal", "Sharp", "Locked" };
-    private static readonly float[] smoothingStrengthValues = { 10f, 30f, 60f, 120f };
+    private static readonly string[] smoothingStrengthNames = { "Soft", "Normal", "Sharp" };
+    private static readonly float[] smoothingStrengthValues = { 10f, 30f, 60f };
     private static int smoothingStrengthIndex = 1;
 
     private static readonly string[] menuScaleNames = { "Compact", "Normal", "Large" };
@@ -2148,6 +3084,7 @@ public static void DisableBoneHighlight(VRRig rig)
     {
         themeIndex = (themeIndex + 1) % themePalettes.Length;
         ApplyTheme();
+                SaveButtonStates();
         UpdateSettingsLabels();
         Debug.Log("Theme : " + GetThemeLabel());
     }
@@ -2157,7 +3094,6 @@ public static void DisableBoneHighlight(VRRig rig)
         themeIndex = Mathf.Clamp(themeIndex, 0, themePalettes.Length - 1);
         if (Main.menuObj != null)
             MenuTheme.Assign(Main.menuObj, themePalettes[themeIndex]);
-        Main.Instance?.RefreshCurrentPage();
     }
 
     public static string GetThemeLabel() => themeNames[Mathf.Clamp(themeIndex, 0, themeNames.Length - 1)];
@@ -2206,6 +3142,15 @@ public static void DisableBoneHighlight(VRRig rig)
 
         if (Main.themeText != null)
             Main.themeText.text = "Theme  :  " + GetThemeLabel();
+
+        if (Main.scanModeText != null)
+            Main.scanModeText.text = "Scan Mode  :  " + GetScanModeLabel();
+
+        if (Main.nameTagSizeText != null)
+            Main.nameTagSizeText.text = "Nametag Size  :  " + GetNameTagSizeLabel();
+
+        if (Main.nameTagFadeDistanceText != null)
+            Main.nameTagFadeDistanceText.text = "Nametag Fade Distance  :  " + GetNameTagFadeDistanceLabel();
     }
     
     
@@ -2214,9 +3159,20 @@ public static void DisableBoneHighlight(VRRig rig)
     public static AssetBundle nameBundle;
     private static GameObject nameTagPrefab;
     private static bool loggedMissingNameTagPrefab;
-    private static readonly Dictionary<VRRig, int> cachedNameTagModCounts = new Dictionary<VRRig, int>();
+    private static readonly Dictionary<VRRig, NameTagModStatus> cachedNameTagModStatuses = new Dictionary<VRRig, NameTagModStatus>();
     private static readonly Dictionary<VRRig, float> nextNameTagModScanTimes = new Dictionary<VRRig, float>();
+    private static readonly Dictionary<VRRig, float> nextNameTagInfoUpdateTimes = new Dictionary<VRRig, float>();
+    private const float NameTagInfoRefreshSeconds = 0.5f;
+    private const float NameTagModScanSeconds = 4f;
     private static float targetNameTagScale = 0.0725f;
+    private static bool nameTagDistanceFadeEnabled = true;
+    private static readonly float[] nameTagFadeDistanceValues = { 2f, 4f, 8f, 16f, 32f };
+    private static readonly string[] nameTagFadeDistanceNames = { "2m", "4m", "8m", "16m", "32m" };
+    private static int nameTagFadeDistanceIndex = 2;
+    private static readonly Color NameTagGoodColor = new Color(0.35f, 0.9f, 0.45f, 1f);
+    private static readonly Color NameTagWarnColor = new Color(1f, 0.86f, 0.25f, 1f);
+    private static readonly Color NameTagBadColor = new Color(1f, 0.25f, 0.25f, 1f);
+    private static readonly Color NameTagNeutralColor = Color.white;
 
     public static void UpdateNameTags()
     {
@@ -2227,6 +3183,9 @@ public static void DisableBoneHighlight(VRRig rig)
             {
                 Object.Destroy(pair.Value);
                 nametags.Remove(pair.Key);
+                nextNameTagInfoUpdateTimes.Remove(pair.Key);
+                cachedNameTagModStatuses.Remove(pair.Key);
+                nextNameTagModScanTimes.Remove(pair.Key);
             }
         }
         
@@ -2251,6 +3210,9 @@ public static void DisableBoneHighlight(VRRig rig)
             if (nametag == null)
             {
                 nametags.Remove(rig);
+                nextNameTagInfoUpdateTimes.Remove(rig);
+                cachedNameTagModStatuses.Remove(rig);
+                nextNameTagModScanTimes.Remove(rig);
                 continue;
             }
             
@@ -2263,14 +3225,39 @@ public static void DisableBoneHighlight(VRRig rig)
                 nametag.transform.LookAt(camera.transform.position);
                 nametag.transform.Rotate(0f, 450f, 0f);
             }
-            nametag.transform.localScale = Vector3.Lerp(nametag.transform.localScale, Vector3.one * targetNameTagScale, Time.deltaTime * 12f);
+            float visibleScale = targetNameTagScale;
+            if (nameTagDistanceFadeEnabled && camera != null)
+            {
+                float distance = Vector3.Distance(camera.transform.position, anchor.position);
+                visibleScale = distance <= nameTagFadeDistanceValues[nameTagFadeDistanceIndex] ? targetNameTagScale : 0f;
+            }
+            nametag.transform.localScale = Vector3.Lerp(nametag.transform.localScale, Vector3.one * visibleScale, Time.deltaTime * 10f);
             if (!nametag.activeSelf)
                 nametag.SetActive(true);
-            
-            SetTagText(nametag.transform.Find("Name"), GetPlayerFromVRRig(rig).NickName);
-            SetTagText(nametag.transform.Find("FPS"), RigHelper.GetFPS(rig) + "Hz");
-            SetTagText(nametag.transform.Find("Ping"), GetPingThrottled(rig) + "Ms");
-            SetTagText(nametag.transform.Find("Mods"), GetDetectedModCount(rig) + "Mods");
+
+            if (visibleScale <= 0.0001f)
+                continue;
+
+            float nextInfoUpdate;
+            if (nextNameTagInfoUpdateTimes.TryGetValue(rig, out nextInfoUpdate) && Time.time < nextInfoUpdate)
+                continue;
+            nextNameTagInfoUpdateTimes[rig] = Time.time + NameTagInfoRefreshSeconds + (Mathf.Abs(rig.GetInstanceID() % 8) * 0.02f);
+
+            NetPlayer netPlayer = GetPlayerFromVRRig(rig);
+            SetTagText(nametag.transform.Find("Name"), netPlayer != null ? netPlayer.NickName : rig.playerNameVisible);
+
+            int fps = RigHelper.GetFPS(rig);
+            int ping = GetPingThrottled(rig);
+            NameTagModStatus modStatus = GetDetectedModStatus(rig);
+
+            SetTagText(nametag.transform.Find("FPS"), fps + "Hz");
+            SetTagMetricColor(nametag.transform, "FPS", GetFpsStatusColor(fps));
+
+            SetTagText(nametag.transform.Find("Ping"), ping + "Ms");
+            SetTagMetricColor(nametag.transform, "Ping", GetPingStatusColor(ping));
+
+            SetTagText(nametag.transform.Find("Mods"), FormatNameTagModStatus(modStatus));
+            SetTagMetricColor(nametag.transform, "Mods", GetModStatusColor(modStatus));
 
             var iconsLeft = nametag.transform.Find("IconsLeft");
 
@@ -2364,39 +3351,162 @@ public static void DisableBoneHighlight(VRRig rig)
             uiText.text = value;
     }
 
-    private static int GetDetectedModCount(VRRig rig)
+    private static NameTagModStatus GetDetectedModStatus(VRRig rig)
     {
-        if (rig == null) return 0;
+        if (rig == null) return default;
 
-        if (cachedNameTagModCounts.TryGetValue(rig, out int cached) &&
+        if (cachedNameTagModStatuses.TryGetValue(rig, out NameTagModStatus cached) &&
             nextNameTagModScanTimes.TryGetValue(rig, out float nextScan) &&
             Time.time < nextScan)
             return cached;
 
-        int count = 0;
+        if (!cachedNameTagModStatuses.ContainsKey(rig) && !nextNameTagModScanTimes.ContainsKey(rig))
+        {
+            nextNameTagModScanTimes[rig] = Time.time + (Mathf.Abs(rig.GetInstanceID() % 100) * 0.03f);
+            return default;
+        }
+
+        NameTagModStatus status = default;
         try
         {
             Player player = rig.GetPhotonPlayer();
             if (player != null)
-                count = FindPropertySignatureHits(player).Count;
+            {
+                Dictionary<string, List<string>> hits = FindPropertySignatureHits(player);
+                foreach (string key in hits.Keys)
+                {
+                    if (!propertySignatures.TryGetValue(key, out PropertySignature signature))
+                        continue;
+
+                    if (signature.IsLegal)
+                        status.LegalCount++;
+                    else
+                        status.IllegalCount++;
+                }
+            }
         }
         catch
         {
-            count = 0;
+            status = default;
         }
 
-        cachedNameTagModCounts[rig] = count;
-        nextNameTagModScanTimes[rig] = Time.time + 1f;
-        return count;
+        cachedNameTagModStatuses[rig] = status;
+        nextNameTagModScanTimes[rig] = Time.time + NameTagModScanSeconds + (Mathf.Abs(rig.GetInstanceID() % 10) * 0.1f);
+        return status;
     }
 
+    private static string FormatNameTagModStatus(NameTagModStatus status)
+    {
+        if (status.IllegalCount > 0)
+            return status.IllegalCount == 1 ? "1 Illegal Mod" : status.IllegalCount + " Illegal Mods";
+
+        if (status.LegalCount > 0)
+            return status.LegalCount == 1 ? "1 Mod" : status.LegalCount + " Mods";
+
+        return "0 Mods";
+    }
+
+    private static Color GetFpsStatusColor(int fps)
+    {
+        if (fps < 60) return NameTagBadColor;
+        if (fps <= 80) return NameTagWarnColor;
+        return NameTagGoodColor;
+    }
+
+    private static Color GetPingStatusColor(int ping)
+    {
+        if (ping < 50) return NameTagGoodColor;
+        if (ping <= 120) return NameTagWarnColor;
+        return NameTagBadColor;
+    }
+
+    private static Color GetModStatusColor(NameTagModStatus status)
+    {
+        if (status.IllegalCount > 0) return NameTagBadColor;
+        if (status.LegalCount > 0) return NameTagGoodColor;
+        return NameTagNeutralColor;
+    }
+
+    private static void SetTagMetricColor(Transform root, string metricName, Color color)
+    {
+        if (root == null) return;
+
+        SetTagColor(root.Find(metricName), color);
+
+        foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
+        {
+            string name = child.name ?? "";
+            bool metricMatch = name.IndexOf(metricName, StringComparison.OrdinalIgnoreCase) >= 0;
+            bool iconMatch = name.IndexOf("icon", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                             name.IndexOf("image", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                             name.IndexOf("sprite", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (metricMatch && iconMatch)
+                SetTagColor(child, color);
+        }
+    }
+
+    private static void SetTagColor(Transform target, Color color)
+    {
+        if (target == null) return;
+
+        TMP_Text tmp = target.GetComponent<TMP_Text>();
+        if (tmp != null) tmp.color = color;
+
+        UnityEngine.UI.Text uiText = target.GetComponent<UnityEngine.UI.Text>();
+        if (uiText != null) uiText.color = color;
+
+        foreach (Image image in target.GetComponentsInChildren<Image>(true))
+            image.color = color;
+
+        foreach (RawImage rawImage in target.GetComponentsInChildren<RawImage>(true))
+            rawImage.color = color;
+
+        SpriteRenderer spriteRenderer = target.GetComponent<SpriteRenderer>();
+        if (spriteRenderer != null) spriteRenderer.color = color;
+
+        Renderer renderer = target.GetComponent<Renderer>();
+        if (renderer != null)
+        {
+            foreach (Material material in renderer.materials)
+                material.color = color;
+        }
+    }
+
+    private struct NameTagModStatus
+    {
+        public int LegalCount;
+        public int IllegalCount;
+    }
     private static readonly float[] nameTagScaleSteps = { 0.0475f, 0.06f, 0.0725f, 0.085f, 0.0975f, 0.11f };
+    private static readonly string[] nameTagScaleNames = { "Tiny", "Small", "Normal", "Large", "XL", "XXL" };
     private static int nameTagScaleIndex = 2;
+
+    public static string GetNameTagSizeLabel() => nameTagScaleNames[Mathf.Clamp(nameTagScaleIndex, 0, nameTagScaleNames.Length - 1)];
+    public static string GetNameTagFadeDistanceLabel() => nameTagFadeDistanceNames[Mathf.Clamp(nameTagFadeDistanceIndex, 0, nameTagFadeDistanceNames.Length - 1)];
 
     private static void CycleNameTagSize()
     {
         nameTagScaleIndex = (nameTagScaleIndex + 1) % nameTagScaleSteps.Length;
         targetNameTagScale = nameTagScaleSteps[nameTagScaleIndex];
+        SaveButtonStates();
+        if (Main.nameTagSizeText != null)
+            Main.nameTagSizeText.text = "Nametag Size  :  " + GetNameTagSizeLabel();
+    }
+
+    private static void ToggleNameTagDistanceFade()
+    {
+        nameTagDistanceFadeEnabled = !nameTagDistanceFadeEnabled;
+        SavedToggleStates["Nametag Distance Fade"] = nameTagDistanceFadeEnabled;
+        SaveButtonStates();
+    }
+
+    private static void CycleNameTagFadeDistance()
+    {
+        nameTagFadeDistanceIndex = (nameTagFadeDistanceIndex + 1) % nameTagFadeDistanceValues.Length;
+        SaveButtonStates();
+        if (Main.nameTagFadeDistanceText != null)
+            Main.nameTagFadeDistanceText.text = "Nametag Fade Distance  :  " + GetNameTagFadeDistanceLabel();
     }
 
     public static void ToggleNameTags()
@@ -2416,6 +3526,9 @@ public static void DisableBoneHighlight(VRRig rig)
             if (tag != null)
                 tag.SetActive(false);
         }
+        nextNameTagInfoUpdateTimes.Clear();
+        cachedNameTagModStatuses.Clear();
+        nextNameTagModScanTimes.Clear();
     }
     
     public static void NameTagsLoop()
@@ -2445,26 +3558,19 @@ public static void DisableBoneHighlight(VRRig rig)
         spinnerObj.transform.position =
             Camera.main.transform.position + Camera.main.transform.forward * 0.4f - Camera.main.transform.up * 0.4f;
         spinnerObj.transform.localRotation = Quaternion.identity;
-        spinnerObj.transform.LookAt(GTPlayer.Instance.bodyCollider.transform); //GTPlayer.Instance.transform
+        spinnerObj.transform.LookAt(GTPlayer.Instance.bodyCollider.transform);
         spinnerObj.transform.localScale = Vector3.one;
         
         
-        // Switch buttons
-
         var buttons =
             root.transform.Find("LocalObjects_Prefab/TreeRoom/TreeRoomInteractables/UI/SatelliteWardrobe/UI/OutfitButtons/");
         
         GameObject btnsOj = GameObject.Instantiate(buttons.gameObject);
-        //btnsOj.transform.SetParent(GTPlayer.Instance.transform);
-        //var follow = btnsOj.transform.AddComponent<MenuComponents.FollowMenu>();
-        //follow.Target = GTPlayer.Instance.transform;
-        //follow.Position = Camera.main.transform.position + Camera.main.transform.forward * 0.4f - Camera.main.transform.up * 0.4f;
-        //follow.Rotation = Quaternion.identity;
         
         btnsOj.transform.position =
             Camera.main.transform.position + Camera.main.transform.forward * 0.4f - Camera.main.transform.up * 0.4f;
         btnsOj.transform.localRotation = Quaternion.identity;
-        btnsOj.transform.LookAt(GTPlayer.Instance.bodyCollider.transform); //GTPlayer.Instance.transform
+        btnsOj.transform.LookAt(GTPlayer.Instance.bodyCollider.transform);
         btnsOj.transform.localScale = Vector3.one;
     }
 
@@ -2533,7 +3639,7 @@ public static void DisableBoneHighlight(VRRig rig)
 
     public static void InitOutfitSlotActions()
     {
-        int count = 5; // GT default fallback
+        int count = 5;
 
         var controller = CosmeticsController.instance;
         if (controller != null)
@@ -2574,10 +3680,10 @@ public static void DisableBoneHighlight(VRRig rig)
         currentRenameText = outfitSlotNames.TryGetValue(outfitN, out string saved) ? saved : "";
         if (renamingLabel != null) renamingLabel.text = currentRenameText;
 
-        SmoothFollowMenu smooth = Main.menuObj?.GetComponent<SmoothFollowMenu>();
-        if (smooth != null) smooth.Frozen = true;
+        Main.Instance?.ConfigureKeyboardMenuFollow();
 
         Main.ShowKeyboard(keyboard);
+        Main.Instance?.SetKeyboardPreview(keyboard, currentRenameText, false);
     }
 
     public static void TypeChar(char c)
@@ -2585,6 +3691,7 @@ public static void DisableBoneHighlight(VRRig rig)
         if (!isRenaming || currentRenameText.Length >= 10) return;
         currentRenameText += c;
         if (renamingLabel != null) renamingLabel.text = currentRenameText;
+        Main.Instance?.SetKeyboardPreview(renameKeyboard, currentRenameText, true);
     }
 
     public static void DeleteChar()
@@ -2592,6 +3699,7 @@ public static void DisableBoneHighlight(VRRig rig)
         if (!isRenaming || currentRenameText.Length == 0) return;
         currentRenameText = currentRenameText[..^1];
         if (renamingLabel != null) renamingLabel.text = currentRenameText;
+        Main.Instance?.SetKeyboardPreview(renameKeyboard, currentRenameText, false);
     }
 
     public static void ConfirmRename()
@@ -2619,8 +3727,7 @@ public static void DisableBoneHighlight(VRRig rig)
 
     private static void CloseRename()
     {
-        SmoothFollowMenu smooth = Main.menuObj?.GetComponent<SmoothFollowMenu>();
-        if (smooth != null) smooth.Frozen = false;
+        Main.Instance?.RestoreMenuFollowAfterKeyboard();
 
         Main.HideKeyboard(renameKeyboard);
 
@@ -2781,8 +3888,3 @@ public class ClickSoundEntry
         Clip = clip;
     }
 }
-
-
-
-
-
