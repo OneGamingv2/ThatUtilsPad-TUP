@@ -84,7 +84,6 @@
         <EmbeddedResource Include="Assets\Sounds\Wii.wav" />
         <None Remove="Assets\Sounds\untitled.wav" />
         <EmbeddedResource Include="Assets\Sounds\untitled.wav" />
-        <EmbeddedResource Include="Assets\QuickSong.exe" Condition="Exists('Assets\QuickSong.exe')" />
         <None Remove="Assets\UI\nametag" />
         <None Remove="Assets\Models\buttonmodel-masked" />
         <None Remove="Assets\Models\buttonmodel-trash" />
@@ -112,7 +111,11 @@
         <None Remove="Assets\Models\tup-overv14" />
         <None Remove="Assets\Models\tup-overv15" />
         <None Remove="Assets\Models\tup-overv16" />
-        <EmbeddedResource Include="Assets\Models\tup-overv16" />
+        <None Remove="Assets\Models\tup-overv17" />
+        <None Remove="Assets\UI\nametagdarkmode" />
+        <EmbeddedResource Include="Assets\UI\notifdarkmode" />
+        <None Remove="Assets\Models\tup-overv18" />
+        <EmbeddedResource Include="Assets\Models\tup-overv18" />
     </ItemGroup>
 
     <ItemGroup>

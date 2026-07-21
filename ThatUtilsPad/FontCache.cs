@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Reflection;
 using UnityEngine;
 
@@ -11,10 +11,6 @@ public static class FontCache
     public static void LoadFonts()
     {
         Assembly assembly = Assembly.GetExecutingAssembly();
-
-        foreach (var name in assembly.GetManifestResourceNames())
-            Debug.Log("[TUP RESOURCE] " + name);
-        
         minecraftiaBundle        = LoadBundle(assembly, "ThatUtilsPad.Assets.Fonts.minecraftia");
         figtreeBundle            = LoadBundle(assembly, "ThatUtilsPad.Assets.Fonts.figtree");
     }

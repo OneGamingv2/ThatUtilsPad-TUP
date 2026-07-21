@@ -48,13 +48,12 @@ public class ButtonTrigger : MonoBehaviour
         if (button == null) return;
         if (button.IsOnCooldown || GetRemainingCooldown(button.BtnIdentifier) > 0f) return;
         if (Mods.IsRenaming && !button.IsKeyboardKey) return;
-
-        Debug.Log("Pressed: " + button.BtnIdentifier);
         Main.Instance.PlayBtnCickSound();
+        if (!button.IsKeyboardKey)
+            StartButtonUiPulse(button);
 
         if (button.SkipSwitchAnimation && button.CustomAction != null)
         {
-            Debug.Log("[TUP PRESS] direct custom action: " + button.BtnIdentifier);
             button.CustomAction.Invoke();
             return;
         }
@@ -95,16 +94,20 @@ public class ButtonTrigger : MonoBehaviour
 
             button.IsOn = !button.IsOn;
             Mods.SaveToggleState(button.BtnIdentifier, button.IsOn);
-            button.SwitchRoutine = Tools.SafeStartCoroutine(button.IsOn
-                ? MenuEffects.ActivateSwitch(button.Knob, button.Slider, button.BodyRenderer, button.OutlineRenderer)
-                : MenuEffects.DeactivateSwitch(button.Knob, button.Slider, button.BodyRenderer, button.OutlineRenderer));
+            if (button.Knob != null && button.Slider != null)
+            {
+                button.SwitchRoutine = Tools.SafeStartCoroutine(button.IsOn
+                    ? MenuEffects.ActivateSwitch(button.Knob, button.Slider, button.BodyRenderer, button.OutlineRenderer)
+                    : MenuEffects.DeactivateSwitch(button.Knob, button.Slider, button.BodyRenderer, button.OutlineRenderer));
+            }
         }
         else
         {
             if (button.SwitchRoutine != null)
                 Tools.SafeStopCoroutine(ref button.SwitchRoutine);
 
-            button.SwitchRoutine = Tools.SafeStartCoroutine(MenuEffects.ToggleSwitch(button.Knob, button.Slider, button.BodyRenderer, button.OutlineRenderer));
+            if (button.Knob != null && button.Slider != null)
+                button.SwitchRoutine = Tools.SafeStartCoroutine(MenuEffects.ToggleSwitch(button.Knob, button.Slider, button.BodyRenderer, button.OutlineRenderer));
         }
 
         if (button.Cooldown > 0f)
@@ -125,6 +128,112 @@ public class ButtonTrigger : MonoBehaviour
             Debug.LogWarning($"[TUP: WARNING] No mod found for button: {button.BtnIdentifier}");
     }
 
+    private static void StartButtonUiPulse(ButtonTrigger button)
+    {
+        if (button == null || button.ButtonRoot == null)
+            return;
+
+        if (button.KeyboardPressRoutine != null)
+        {
+            Tools.SafeStopCoroutine(ref button.KeyboardPressRoutine);
+            RestoreButtonUiPulse(button);
+        }
+
+        UnityEngine.UI.Graphic body = button.ButtonRoot.GetComponent<UnityEngine.UI.Graphic>();
+        Transform outlineTransform = button.ButtonRoot.Find("Outline");
+        UnityEngine.UI.Graphic outline = outlineTransform != null ? outlineTransform.GetComponent<UnityEngine.UI.Graphic>() : null;
+        if (body == null && outline == null)
+            return;
+
+        button.KeyboardPressRoutine = Tools.SafeStartCoroutine(ButtonUiPulse(button, body, outline));
+    }
+
+    private static void RestoreButtonUiPulse(ButtonTrigger button)
+    {
+        if (button == null || button.ButtonRoot == null)
+            return;
+
+        UnityEngine.UI.Graphic body = button.ButtonRoot.GetComponent<UnityEngine.UI.Graphic>();
+        Transform outlineTransform = button.ButtonRoot.Find("Outline");
+        UnityEngine.UI.Graphic outline = outlineTransform != null ? outlineTransform.GetComponent<UnityEngine.UI.Graphic>() : null;
+        if (body != null && ButtonPulseOriginals.TryGetValue(body, out Color bodyColor))
+        {
+            body.color = bodyColor;
+            ButtonPulseOriginals.Remove(body);
+        }
+        if (outline != null && ButtonPulseOriginals.TryGetValue(outline, out Color outlineColor))
+        {
+            outline.color = outlineColor;
+            ButtonPulseOriginals.Remove(outline);
+        }
+    }
+
+    private static readonly Dictionary<UnityEngine.UI.Graphic, Color> ButtonPulseOriginals = new Dictionary<UnityEngine.UI.Graphic, Color>();
+    private static readonly Color ButtonPulseColor = new Color32(26, 26, 36, 255);
+    private static readonly Color ButtonOutlinePulseColor = new Color32(34, 34, 52, 255);
+
+    private static IEnumerator ButtonUiPulse(ButtonTrigger button, UnityEngine.UI.Graphic body, UnityEngine.UI.Graphic outline)
+    {
+        Color bodyStart = body != null ? GetStoredPulseColor(body) : Color.white;
+        Color outlineStart = outline != null ? GetStoredPulseColor(outline) : Color.white;
+        Color bodyTarget = WithAlpha(ButtonPulseColor, bodyStart.a);
+        Color outlineTarget = WithAlpha(ButtonOutlinePulseColor, outlineStart.a);
+
+        yield return LerpButtonPulse(body, outline, bodyStart, outlineStart, bodyTarget, outlineTarget, 0.25f, true);
+        yield return LerpButtonPulse(body, outline, bodyTarget, outlineTarget, bodyStart, outlineStart, 0.25f, false);
+
+        if (body != null)
+        {
+            body.color = bodyStart;
+            ButtonPulseOriginals.Remove(body);
+        }
+        if (outline != null)
+        {
+            outline.color = outlineStart;
+            ButtonPulseOriginals.Remove(outline);
+        }
+        if (button != null)
+            button.KeyboardPressRoutine = null;
+    }
+
+    private static Color GetStoredPulseColor(UnityEngine.UI.Graphic image)
+    {
+        if (image == null)
+            return Color.white;
+        if (!ButtonPulseOriginals.TryGetValue(image, out Color color))
+        {
+            color = image.color;
+            ButtonPulseOriginals[image] = color;
+        }
+        return color;
+    }
+
+    private static Color WithAlpha(Color color, float alpha)
+    {
+        color.a = alpha;
+        return color;
+    }
+
+    private static IEnumerator LerpButtonPulse(UnityEngine.UI.Graphic body, UnityEngine.UI.Graphic outline, Color bodyFrom, Color outlineFrom, Color bodyTo, Color outlineTo, float duration, bool easeIn)
+    {
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            t = easeIn ? t * t : 1f - (1f - t) * (1f - t);
+            if (body != null)
+                body.color = Color.Lerp(bodyFrom, bodyTo, t);
+            if (outline != null)
+                outline.color = Color.Lerp(outlineFrom, outlineTo, t);
+            yield return null;
+        }
+
+        if (body != null)
+            body.color = bodyTo;
+        if (outline != null)
+            outline.color = outlineTo;
+    }
     public static void RestoreCooldown(ButtonTrigger button)
     {
         if (button == null || button.Cooldown <= 0f) return;
@@ -164,6 +273,7 @@ public class ButtonTrigger : MonoBehaviour
 
         if (main != root) main.gameObject.SetActive(true);
         overlayT.gameObject.SetActive(true);
+        if (delayT != null) delayT.gameObject.SetActive(true);
 
         SetGraphicAlpha(overlayRI, overlayI, 0f);
         SetGraphicAlpha(delayRI, delayI, 0f);
@@ -172,7 +282,7 @@ public class ButtonTrigger : MonoBehaviour
 
         for (float t = 0f; t < fadeDuration; t += Time.deltaTime)
         {
-            float p = t / fadeDuration;
+            float p = 1f - Mathf.Pow(1f - Mathf.Clamp01(t / fadeDuration), 2f);
             SetGraphicAlpha(overlayRI, overlayI, Mathf.Lerp(0f, 0.2f, p));
             SetGraphicAlpha(delayRI, delayI, Mathf.Lerp(0f, 1f, p));
             yield return null;
@@ -185,21 +295,28 @@ public class ButtonTrigger : MonoBehaviour
         {
             float remaining = GetRemainingCooldown(button.BtnIdentifier);
             if (delayT != null)
-                delayT.localScale = new Vector3(delayStartScale.x * Mathf.Clamp01(remaining / startRemaining), delayStartScale.y, delayStartScale.z);
+                delayT.localScale = new Vector3(delayStartScale.x * Mathf.Pow(Mathf.Clamp01(remaining / startRemaining), 2f), delayStartScale.y, delayStartScale.z);
             yield return null;
         }
         if (delayT != null) delayT.localScale = new Vector3(0f, delayStartScale.y, delayStartScale.z);
 
         for (float t = 0f; t < fadeDuration; t += Time.deltaTime)
         {
-            float p = t / fadeDuration;
+            float p = 1f - Mathf.Pow(1f - Mathf.Clamp01(t / fadeDuration), 2f);
             SetGraphicAlpha(overlayRI, overlayI, Mathf.Lerp(0.2f, 0f, p));
             SetGraphicAlpha(delayRI, delayI, Mathf.Lerp(1f, 0f, p));
             yield return null;
         }
 
+        SetGraphicAlpha(overlayRI, overlayI, 0f);
+        SetGraphicAlpha(delayRI, delayI, 0f);
+        overlayT.gameObject.SetActive(false);
+        if (delayT != null)
+        {
+            delayT.localScale = delayStartScale;
+            delayT.gameObject.SetActive(false);
+        }
         if (main != root) main.gameObject.SetActive(false);
-        if (delayT != null) delayT.localScale = delayStartScale;
         CooldownEnds.Remove(button.BtnIdentifier);
         button.IsOnCooldown = false;
     }
@@ -275,7 +392,7 @@ public class VolumeSliderCollider : MonoBehaviour
     private float currentValue;
     private float targetValue;
     private float fillVelocity;
-    private bool fillInitialized;
+    private bool fillKnowsItsSize;
     private BoxCollider hitBox;
     private void Awake()
     {
@@ -295,7 +412,7 @@ public class VolumeSliderCollider : MonoBehaviour
 
     private void Update()
     {
-        if (FillRect == null || !fillInitialized)
+        if (FillRect == null || !fillKnowsItsSize)
             return;
 
         currentValue = Mathf.SmoothDamp(currentValue, targetValue, ref fillVelocity, FillSmoothDuration, Mathf.Infinity, Time.deltaTime);
@@ -328,7 +445,6 @@ public class VolumeSliderCollider : MonoBehaviour
             float min = hitBox.center.x - hitBox.size.x * 0.5f;
             float max = hitBox.center.x + hitBox.size.x * 0.5f;
             float sliderValue = Mathf.InverseLerp(min, max, hitLocal.x);
-            Debug.Log($"[TUP VOLUME SLIDER] world={worldPoint} localX={hitLocal.x:F5} min={min:F5} max={max:F5} value={sliderValue:F3}");
             SetValue01(sliderValue, true);
             return;
         }
@@ -346,9 +462,9 @@ public class VolumeSliderCollider : MonoBehaviour
     {
         value = Mathf.Clamp01(value);
         targetValue = value;
-        if (!fillInitialized)
+        if (!fillKnowsItsSize)
         {
-            fillInitialized = true;
+            fillKnowsItsSize = true;
             currentValue = value;
             fillVelocity = 0f;
             ApplyFill(value);
@@ -358,7 +474,6 @@ public class VolumeSliderCollider : MonoBehaviour
             return;
 
         lastSetTime = Time.time;
-        Debug.Log($"[TUP VOLUME SLIDER] notify value={value:F3}");
         OnValueChanged?.Invoke(value);
     }
 
@@ -464,7 +579,7 @@ public static class Tools
     private static readonly Dictionary<Transform, Vector3> originalScales =
         new Dictionary<Transform, Vector3>();
 
-    public static void CacheCheckerScales(Transform menuRoot)
+    public static void RememberPanelSizes(Transform menuRoot)
     {
         if (menuRoot == null)
             return;
@@ -520,7 +635,7 @@ public static class Tools
         return root.GetComponentsInChildren<Transform>(true)
             .FirstOrDefault(child => child != null && child.name.Equals(name, StringComparison.OrdinalIgnoreCase));
     }
-    public static Vector3 GetCachedScale(Transform t)
+    public static Vector3 GetRememberedSize(Transform t)
     {
         if (t != null && originalScales.TryGetValue(t, out Vector3 scale))
             return scale;
@@ -643,7 +758,7 @@ public static class MenuEffects
             t.localScale = Vector3.zero;
 
             CoroutineHandler.Instance.StartCoroutine(
-                PopTransform(t, Tools.GetCachedScale(t))
+                PopTransform(t, Tools.GetRememberedSize(t))
             );
         }
         
@@ -818,7 +933,6 @@ public static class MenuEffects
     {
         if (slider == null || knob == null)
         {
-            Debug.Log("Not found knob or slider");
             yield break;
         }
 
@@ -865,7 +979,6 @@ public static class MenuEffects
     {
         if (slider == null || knob == null)
         {
-            Debug.Log("Not found knob or slider");
             yield break;
         }
 
