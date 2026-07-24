@@ -4,6 +4,7 @@ using GorillaLocomotion;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using GorillaGameModes;
 using GorillaNetworking;
 using Photon.Pun;
@@ -23,7 +24,6 @@ using Debug = UnityEngine.Debug;
 
 namespace ThatUtilsPad;
 
-
 public static partial class Mods
 {
 private enum ScanLobbyMode
@@ -35,6 +35,44 @@ private enum ScanLobbyMode
 
     private static readonly string[] scanModeNames = { "Cheats", "Mods", "Mods + Cheats" };
     private static int scanModeIndex;
+    private const float AutoScanTraversalInterval = 0.5f;
+    private const float PropertyScanCacheSeconds = 2f;
+    private static float nextAutoScanTraversalTime;
+    private static float nextAutoScanFullRefreshTime;
+    private const float AutoScanFullRefreshInterval = 8f;
+
+    private readonly struct NormalizedScanSource
+    {
+        public readonly string Key;
+        public readonly string Normalized;
+        public readonly string Compact;
+
+        public NormalizedScanSource(string key, string value)
+        {
+            Key = key;
+            Normalized = SquishPropertyText(value);
+            Compact = Normalized.Replace(" ", "");
+        }
+    }
+
+    private sealed class PropertyHitCacheEntry
+    {
+        public float ExpiresAt;
+        public Dictionary<string, List<string>> Hits;
+    }
+
+    private struct PropertyCountCacheEntry
+    {
+        public float ExpiresAt;
+        public int LegalCount;
+        public int IllegalCount;
+    }
+
+    private static readonly Dictionary<string, PropertyHitCacheEntry> propertyHitCache =
+        new Dictionary<string, PropertyHitCacheEntry>(StringComparer.Ordinal);
+    private static readonly Dictionary<string, PropertyCountCacheEntry> propertyCountCache =
+        new Dictionary<string, PropertyCountCacheEntry>(StringComparer.Ordinal);
+    private static string propertyCacheRoomKey = "";
 
     public static string GetScanModeLabel() => scanModeNames[Mathf.Clamp(scanModeIndex, 0, scanModeNames.Length - 1)];
 
@@ -69,7 +107,7 @@ private enum ScanLobbyMode
     
     private static void ToggleAutoScan()
     {
-        autoScanEnabled = !autoScanEnabled;
+        autoScanEnabled = GetSavedToggle("Auto Scan", autoScanEnabled);
         SavedToggleStates["Auto Scan"] = autoScanEnabled;
         SaveButtonStates();
 
@@ -82,18 +120,34 @@ private enum ScanLobbyMode
         {
             autoScanRoomKey = "";
         }
-
     }
 
     public static void AutoScanLoop()
     {
+        try
+        {
+            AutoScanLoopInternal();
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning("[TUP] AutoScanLoop: " + ex.Message);
+        }
+    }
+
+    private static void AutoScanLoopInternal()
+    {
         if (!autoScanEnabled)
             return;
+
+        if (Time.time < nextAutoScanTraversalTime)
+            return;
+        nextAutoScanTraversalTime = Time.time + AutoScanTraversalInterval;
 
         if (!PhotonNetwork.InRoom)
         {
             autoScanRoomKey = "";
             autoScannedActorNumbers.Clear();
+            ClearPropertyScanCaches();
             return;
         }
 
@@ -102,6 +156,14 @@ private enum ScanLobbyMode
         {
             autoScanRoomKey = roomKey;
             autoScannedActorNumbers.Clear();
+            ClearPropertyScanCaches();
+        }
+
+        if (Time.time >= nextAutoScanFullRefreshTime)
+        {
+            nextAutoScanFullRefreshTime = Time.time + AutoScanFullRefreshInterval;
+            autoScannedActorNumbers.Clear();
+            ClearPropertyScanCaches();
         }
 
         foreach (Player player in PhotonNetwork.PlayerList)
@@ -109,10 +171,20 @@ private enum ScanLobbyMode
             if (player == null || player == PhotonNetwork.LocalPlayer)
                 continue;
 
-            if (!autoScannedActorNumbers.Add(player.ActorNumber))
-                continue;
+            try
+            {
 
-            ScanPhotonPlayerAndNotify(player, true);
+                FindPropertySignatureHits(player);
+
+                if (!autoScannedActorNumbers.Add(player.ActorNumber))
+                    continue;
+
+                ScanPhotonPlayerAndNotify(player, true);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[TUP] AutoScan player failed: " + ex.Message);
+            }
         }
     }
     public static void PrintPhotonPlayerCustomProperties()
@@ -213,55 +285,239 @@ private enum ScanLobbyMode
 
     private static Dictionary<string, List<string>> FindPropertySignatureHits(Player player)
     {
+        try
+        {
+            return FindPropertySignatureHitsUnsafe(player);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning("[TUP PROP SCAN] FindPropertySignatureHits failed: " + ex.Message);
+            return new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private static Dictionary<string, List<string>> FindPropertySignatureHitsUnsafe(Player player)
+    {
         LoadPropertyListIfNeeded();
 
+        string cacheKey = GetPropertyScanCacheKey(player);
+        if (propertyHitCache.TryGetValue(cacheKey, out PropertyHitCacheEntry cached) &&
+            Time.time < cached.ExpiresAt)
+            return cached.Hits;
+
+        VRRig rig = GetRigForPhotonPlayer(player);
+        NormalizedScanSource[] sources = BuildNormalizedPropertyScanSources(player, rig);
         Dictionary<string, List<string>> hits = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var source in BuildPropertyScanSources(player))
+        for (int sourceIndex = 0; sourceIndex < sources.Length; sourceIndex++)
         {
+            NormalizedScanSource source = sources[sourceIndex];
             foreach (PropertySignature signature in propertySignatures.Values)
             {
-                if (!TextContainsSignature(source.Value, signature.Name))
+                if (!NormalizedTextContainsSignature(source, signature))
                     continue;
 
-                if (!hits.TryGetValue(signature.Name, out List<string> sources))
+                if (!hits.TryGetValue(signature.Name, out List<string> sourceNames))
                 {
-                    sources = new List<string>();
-                    hits[signature.Name] = sources;
+                    sourceNames = new List<string>();
+                    hits[signature.Name] = sourceNames;
                 }
 
-                if (!sources.Contains(source.Key))
-                    sources.Add(source.Key);
+                if (!sourceNames.Contains(source.Key))
+                    sourceNames.Add(source.Key);
             }
         }
 
+        propertyHitCache[cacheKey] = new PropertyHitCacheEntry
+        {
+            ExpiresAt = Time.time + PropertyScanCacheSeconds,
+            Hits = hits
+        };
         return hits;
     }
 
-    private static Dictionary<string, string> BuildPropertyScanSources(Player player)
+    public static void GetPropertySignatureCounts(VRRig rig, Player player, out int legalCount, out int illegalCount)
     {
-        Dictionary<string, string> sources = new Dictionary<string, string>();
-        sources["PhotonPlayer"] = $"{player.NickName} {player.UserId} {player.ActorNumber}";
+        legalCount = 0;
+        illegalCount = 0;
+        if (player == null)
+            return;
 
+        LoadPropertyListIfNeeded();
+        string cacheKey = GetPropertyScanCacheKey(player);
+        if (propertyCountCache.TryGetValue(cacheKey, out PropertyCountCacheEntry cached) &&
+            Time.time < cached.ExpiresAt)
+        {
+            legalCount = cached.LegalCount;
+            illegalCount = cached.IllegalCount;
+            return;
+        }
+
+        NormalizedScanSource[] sources = BuildNormalizedPropertyScanSources(player, rig);
+        foreach (PropertySignature signature in propertySignatures.Values)
+        {
+            bool matched = false;
+            for (int i = 0; i < sources.Length; i++)
+            {
+                if (!NormalizedTextContainsSignature(sources[i], signature))
+                    continue;
+                matched = true;
+                break;
+            }
+
+            if (!matched)
+                continue;
+            if (signature.IsLegal)
+                legalCount++;
+            else
+                illegalCount++;
+        }
+
+        propertyCountCache[cacheKey] = new PropertyCountCacheEntry
+        {
+            ExpiresAt = Time.time + PropertyScanCacheSeconds,
+            LegalCount = legalCount,
+            IllegalCount = illegalCount
+        };
+    }
+
+    private static NormalizedScanSource[] BuildNormalizedPropertyScanSources(Player player, VRRig rig)
+    {
+        List<NormalizedScanSource> sources = new List<NormalizedScanSource>(32);
+        sources.Add(new NormalizedScanSource(
+            "PhotonPlayer",
+            $"{player.NickName} {player.UserId} {player.ActorNumber}"));
+
+        StringBuilder allProperties = new StringBuilder();
         if (player.CustomProperties != null)
         {
-            List<string> props = new List<string>();
-            foreach (object key in player.CustomProperties.Keys)
+            foreach (object keyObj in player.CustomProperties.Keys)
             {
-                object value = player.CustomProperties[key];
-                props.Add($"{key} {FormatPhotonCustomPropertyValue(value)}");
+                string key = keyObj != null ? keyObj.ToString() : "";
+                object rawValue = player.CustomProperties[keyObj];
+                string valueText = FormatPhotonCustomPropertyValue(rawValue);
+                string pairText = key + " " + valueText;
+
+                if (allProperties.Length > 0)
+                    allProperties.Append(' ');
+                allProperties.Append(pairText);
+
+                string safeKey = string.IsNullOrEmpty(key) ? "unnamed" : key;
+                sources.Add(new NormalizedScanSource("Prop:" + safeKey, pairText));
+                if (!string.IsNullOrEmpty(key))
+                    sources.Add(new NormalizedScanSource("PropKey:" + safeKey, key));
+                if (!string.IsNullOrEmpty(valueText) &&
+                    !string.Equals(valueText, "null", StringComparison.OrdinalIgnoreCase))
+                {
+                    sources.Add(new NormalizedScanSource("PropVal:" + safeKey, valueText));
+                }
+
+                AppendNestedPropertyScanSources(sources, safeKey, rawValue, 0);
             }
-            sources["CustomProperties"] = string.Join(" ", props);
         }
 
-        VRRig rig = GetRigForPhotonPlayer(player);
+        sources.Add(new NormalizedScanSource("CustomProperties", allProperties.ToString()));
+
         if (rig != null)
         {
-            try { sources["Cosmetics"] = rig.Cosmetics(); } catch { }
-            try { sources["Platform"] = rig.GetPlatform(); } catch { }
-            try { sources["FPS"] = RigBits.GetFPS(rig).ToString(); } catch { }
+            try { sources.Add(new NormalizedScanSource("Cosmetics", rig.Cosmetics())); } catch { }
+            try { sources.Add(new NormalizedScanSource("Platform", rig.GetPlatform())); } catch { }
+            try { sources.Add(new NormalizedScanSource("FPS", RigBits.GetFPS(rig).ToString())); } catch { }
         }
 
-        return sources;
+        return sources.ToArray();
+    }
+
+    private static void AppendNestedPropertyScanSources(
+        List<NormalizedScanSource> sources,
+        string parentKey,
+        object value,
+        int depth)
+    {
+        if (sources == null || value == null || depth > 4)
+            return;
+
+        if (value is ExitGames.Client.Photon.Hashtable table)
+        {
+            foreach (object nestedKeyObj in table.Keys)
+            {
+                string nestedKey = nestedKeyObj != null ? nestedKeyObj.ToString() : "";
+                object nestedValue = table[nestedKeyObj];
+                string path = parentKey + "." + (string.IsNullOrEmpty(nestedKey) ? "item" : nestedKey);
+                string nestedText = nestedKey + " " + FormatPhotonCustomPropertyValue(nestedValue);
+                sources.Add(new NormalizedScanSource("Prop:" + path, nestedText));
+                AppendNestedPropertyScanSources(sources, path, nestedValue, depth + 1);
+            }
+            return;
+        }
+
+        if (value is System.Collections.IDictionary dictionary)
+        {
+            foreach (System.Collections.DictionaryEntry entry in dictionary)
+            {
+                string nestedKey = entry.Key != null ? entry.Key.ToString() : "";
+                string path = parentKey + "." + (string.IsNullOrEmpty(nestedKey) ? "item" : nestedKey);
+                sources.Add(new NormalizedScanSource(
+                    "Prop:" + path,
+                    nestedKey + " " + FormatPhotonCustomPropertyValue(entry.Value)));
+                AppendNestedPropertyScanSources(sources, path, entry.Value, depth + 1);
+            }
+            return;
+        }
+
+        if (value is string || value is byte[] || value.GetType().IsPrimitive)
+            return;
+
+        if (value is System.Collections.IEnumerable enumerable)
+        {
+            int index = 0;
+            foreach (object item in enumerable)
+            {
+                if (item == null || item is string || item.GetType().IsPrimitive)
+                {
+                    index++;
+                    continue;
+                }
+
+                string path = parentKey + "[" + index + "]";
+                sources.Add(new NormalizedScanSource("Prop:" + path, FormatPhotonCustomPropertyValue(item)));
+                AppendNestedPropertyScanSources(sources, path, item, depth + 1);
+                index++;
+                if (index > 64)
+                    break;
+            }
+        }
+    }
+
+    public static void InvalidatePropertyScanCache(Player player = null)
+    {
+        if (player == null)
+        {
+            ClearPropertyScanCaches();
+            return;
+        }
+
+        string key = GetPropertyScanCacheKey(player);
+        propertyHitCache.Remove(key);
+        propertyCountCache.Remove(key);
+    }
+
+    private static string GetPropertyScanCacheKey(Player player)
+    {
+        string room = PhotonNetwork.CurrentRoom != null ? PhotonNetwork.CurrentRoom.Name : "";
+        if (!string.Equals(propertyCacheRoomKey, room, StringComparison.Ordinal))
+        {
+            ClearPropertyScanCaches();
+            propertyCacheRoomKey = room;
+        }
+        return !string.IsNullOrEmpty(player.UserId)
+            ? room + "|u:" + player.UserId
+            : room + "|a:" + player.ActorNumber;
+    }
+
+    private static void ClearPropertyScanCaches()
+    {
+        propertyHitCache.Clear();
+        propertyCountCache.Clear();
     }
 
     private static VRRig GetRigForPhotonPlayer(Player player)
@@ -319,7 +575,13 @@ private enum ScanLobbyMode
                     continue;
 
                 bool isLegal = IsLegalPropertySignature(section, entry);
-                propertySignatures[entry] = new PropertySignature(entry, isLegal, section);
+                string normalized = SquishPropertyText(entry);
+                propertySignatures[entry] = new PropertySignature(
+                    entry,
+                    isLegal,
+                    section,
+                    normalized,
+                    normalized.Replace(" ", ""));
                 propertyLegality[entry] = isLegal;
             }
         }
@@ -368,76 +630,115 @@ private enum ScanLobbyMode
         {
             "cheat", "menu", "seralyth", "seralith", "void", "shiba", "mango", "nebula", "pulsar",
             "cosmos", "hydra", "spectre", "viper", "eclipse", "phantom", "sentinel", "oblivion",
-            "resurgence", "elixir", "orbit", "rexon", "cosmetx"
+            "resurgence", "elixir", "orbit", "rexon", "cosmetx", "bananaos", "walksimulator",
+            "recroomrig", "hansolo", "genesis", "dtasloi", "polkadotted", "zlothy", "kigui"
         };
 
-        return !illegalTokens.Any(token => normalized.Contains(token));
+        for (int i = 0; i < illegalTokens.Length; i++)
+            if (normalized.Contains(illegalTokens[i]))
+                return false;
+        return true;
     }
 
-    private static bool TextContainsSignature(string text, string signature)
+    private static bool NormalizedTextContainsSignature(NormalizedScanSource source, PropertySignature signature)
     {
-        if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(signature))
+        if (string.IsNullOrEmpty(source.Normalized) || string.IsNullOrEmpty(signature.Normalized))
             return false;
 
-        string normalizedText = SquishPropertyText(text);
-        string normalizedSignature = SquishPropertyText(signature);
-        if (string.IsNullOrEmpty(normalizedSignature))
-            return false;
-
-        if (normalizedSignature.Length <= 3 && !normalizedSignature.All(char.IsDigit))
-            return normalizedText.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)
-                .Any(token => token.Equals(normalizedSignature, StringComparison.OrdinalIgnoreCase));
-
-        if (normalizedText.Contains(normalizedSignature))
+        if (signature.RequiresWholeToken)
+            return ContainsWholeNormalizedToken(source.Normalized, signature.Normalized);
+        if (source.Normalized.Contains(signature.Normalized))
             return true;
+        return signature.Compact.Length > 3 && source.Compact.Contains(signature.Compact);
+    }
 
-        string compactText = normalizedText.Replace(" ", "");
-        string compactSignature = normalizedSignature.Replace(" ", "");
-        return compactSignature.Length > 3 && compactText.Contains(compactSignature);
+    private static bool ContainsWholeNormalizedToken(string text, string token)
+    {
+        int start = 0;
+        while ((start = text.IndexOf(token, start, StringComparison.Ordinal)) >= 0)
+        {
+            int end = start + token.Length;
+            if ((start == 0 || text[start - 1] == ' ') && (end == text.Length || text[end] == ' '))
+                return true;
+            start = end;
+        }
+        return false;
     }
 
     private static string SquishPropertyText(string text)
     {
-        char[] chars = text.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : ' ').ToArray();
-        return string.Join(" ", new string(chars).Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries));
+        if (string.IsNullOrEmpty(text))
+            return "";
+
+        StringBuilder result = new StringBuilder(text.Length);
+        bool pendingSpace = false;
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = char.ToLowerInvariant(text[i]);
+            if (char.IsLetterOrDigit(c))
+            {
+                if (pendingSpace && result.Length > 0)
+                    result.Append(' ');
+                result.Append(c);
+                pendingSpace = false;
+            }
+            else
+            {
+                pendingSpace = true;
+            }
+        }
+        return result.ToString();
     }
 
     private static string FormatPhotonCustomPropertyValue(object value)
     {
         if (value == null) return "null";
         if (value is string) return value.ToString();
+        if (value is byte[] bytes)
+            return BitConverter.ToString(bytes);
+        if (value is ExitGames.Client.Photon.Hashtable table)
+        {
+            StringBuilder tableResult = new StringBuilder("{");
+            bool first = true;
+            foreach (object tableKey in table.Keys)
+            {
+                if (!first) tableResult.Append(' ');
+                first = false;
+                tableResult.Append(tableKey).Append('=')
+                    .Append(FormatPhotonCustomPropertyValue(table[tableKey]));
+            }
+            return tableResult.Append('}').ToString();
+        }
+        if (value is System.Collections.IDictionary dictionary)
+        {
+            StringBuilder dictResult = new StringBuilder("{");
+            bool first = true;
+            foreach (System.Collections.DictionaryEntry entry in dictionary)
+            {
+                if (!first) dictResult.Append(' ');
+                first = false;
+                dictResult.Append(entry.Key).Append('=')
+                    .Append(FormatPhotonCustomPropertyValue(entry.Value));
+            }
+            return dictResult.Append('}').ToString();
+        }
         if (value is System.Collections.IEnumerable values)
-            return "[" + string.Join(", ", values.Cast<object>().Select(FormatPhotonCustomPropertyValue)) + "]";
+        {
+            StringBuilder result = new StringBuilder("[");
+            bool first = true;
+            foreach (object item in values)
+            {
+                if (!first)
+                    result.Append(", ");
+                result.Append(FormatPhotonCustomPropertyValue(item));
+                first = false;
+            }
+            return result.Append(']').ToString();
+        }
 
         return value.ToString();
     }
 
-    public static string GetPlatform(this VRRig rig)
-    {
-        int suspiciouslySteam = 0;
-        int suspiciouslyPC = 0;
-        int suspiciouslyQuest = 0;
-        string concatStringOfCosmeticsAllowed = rig.Cosmetics();
-
-        if (concatStringOfCosmeticsAllowed.Contains("S. FIRST LOGIN"))
-            suspiciouslySteam++;
-
-        if (concatStringOfCosmeticsAllowed.Contains("FIRST LOGIN") || rig.GetPhotonPlayer().CustomProperties.Count >= 2)
-            suspiciouslyPC++;
-
-        if (RigBits.GetPCTier(rig) > 0)
-            suspiciouslySteam++;
-        else if (RigBits.GetQuestTier(rig) > 0)
-            suspiciouslyQuest++;
-
-
-        if (suspiciouslySteam > suspiciouslyPC && suspiciouslySteam > suspiciouslyQuest) return "Steam";
-        if (suspiciouslyPC > suspiciouslySteam && suspiciouslyPC > suspiciouslyQuest) return "PC";
-        if (suspiciouslyQuest > suspiciouslySteam && suspiciouslyQuest > suspiciouslyPC) return "Standalone";
-
-        return "Standalone";
-    }
-    
     public static readonly Dictionary<string, float> waitingForCreationDate = new Dictionary<string, float>();
     public static readonly Dictionary<string, string> creationDates = new Dictionary<string, string>();
     public static string GetCreationDate(string input, Action<string> onTranslated = null, string format = "MM/dd/yyyy")
@@ -471,9 +772,16 @@ private enum ScanLobbyMode
         {
             string creationDate = result.AccountInfo.Created.ToString(format);
             creationDates[userId] = creationDate;
+            CachePlatformFromPlayFab(userId, result.AccountInfo);
 
             onTranslated?.Invoke(creationDate);
-        }, delegate { creationDates[userId] = "Error"; onTranslated?.Invoke("Error"); });
+        }, delegate
+        {
+            creationDates[userId] = "Error";
+
+            pendingSupportPlatformLookups.Remove(userId);
+            onTranslated?.Invoke("Error");
+        });
     }
     
 }

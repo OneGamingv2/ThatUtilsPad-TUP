@@ -251,29 +251,49 @@ public class ButtonTrigger : MonoBehaviour
         return 0f;
     }
 
+    private static bool IsAlive(UnityEngine.Object obj) => obj != null;
+
     private static IEnumerator RunCooldown(ButtonTrigger button)
     {
+        if (!IsAlive(button))
+            yield break;
+
+        string identifier = button.BtnIdentifier;
         button.IsOnCooldown = true;
-        float remainingCooldown = GetRemainingCooldown(button.BtnIdentifier);
+        float remainingCooldown = GetRemainingCooldown(identifier);
 
         Transform root = button.ButtonRoot;
-        Transform main = root != null ? root.Find("Main") ?? root : null;
-        if (main == null) { button.IsOnCooldown = false; yield break; }
+        if (!IsAlive(root))
+        {
+            if (IsAlive(button)) button.IsOnCooldown = false;
+            yield break;
+        }
+
+        Transform main = root.Find("Main") ?? root;
+        if (!IsAlive(main))
+        {
+            if (IsAlive(button)) button.IsOnCooldown = false;
+            yield break;
+        }
 
         Transform overlayT = main.Find("Overlay") ?? root.Find("Overlay");
-        if (overlayT == null) { button.IsOnCooldown = false; yield break; }
+        if (!IsAlive(overlayT))
+        {
+            if (IsAlive(button)) button.IsOnCooldown = false;
+            yield break;
+        }
 
         Transform delayT = overlayT.Find("Delay") ?? main.Find("Delay") ?? root.Find("Delay");
-        Vector3 delayStartScale = delayT != null ? delayT.localScale : Vector3.one;
+        Vector3 delayStartScale = IsAlive(delayT) ? delayT.localScale : Vector3.one;
 
         RawImage overlayRI = overlayT.GetComponent<RawImage>();
-        RawImage delayRI   = delayT?.GetComponent<RawImage>();
+        RawImage delayRI   = IsAlive(delayT) ? delayT.GetComponent<RawImage>() : null;
         UIImage overlayI   = overlayT.GetComponent<UIImage>();
-        UIImage delayI     = delayT?.GetComponent<UIImage>();
+        UIImage delayI     = IsAlive(delayT) ? delayT.GetComponent<UIImage>() : null;
 
         if (main != root) main.gameObject.SetActive(true);
         overlayT.gameObject.SetActive(true);
-        if (delayT != null) delayT.gameObject.SetActive(true);
+        if (IsAlive(delayT)) delayT.gameObject.SetActive(true);
 
         SetGraphicAlpha(overlayRI, overlayI, 0f);
         SetGraphicAlpha(delayRI, delayI, 0f);
@@ -282,43 +302,60 @@ public class ButtonTrigger : MonoBehaviour
 
         for (float t = 0f; t < fadeDuration; t += Time.deltaTime)
         {
+            if (!IsAlive(button) || !IsAlive(overlayT))
+                yield break;
             float p = 1f - Mathf.Pow(1f - Mathf.Clamp01(t / fadeDuration), 2f);
             SetGraphicAlpha(overlayRI, overlayI, Mathf.Lerp(0f, 0.2f, p));
             SetGraphicAlpha(delayRI, delayI, Mathf.Lerp(0f, 1f, p));
             yield return null;
         }
+
+        if (!IsAlive(button) || !IsAlive(overlayT))
+            yield break;
+
         SetGraphicAlpha(overlayRI, overlayI, 0.2f);
         SetGraphicAlpha(delayRI, delayI, 1f);
 
         float startRemaining = Mathf.Max(0.001f, remainingCooldown > 0f ? remainingCooldown : button.Cooldown);
-        while (GetRemainingCooldown(button.BtnIdentifier) > 0f)
+        while (GetRemainingCooldown(identifier) > 0f)
         {
-            float remaining = GetRemainingCooldown(button.BtnIdentifier);
-            if (delayT != null)
+            if (!IsAlive(button))
+                yield break;
+            float remaining = GetRemainingCooldown(identifier);
+            if (IsAlive(delayT))
                 delayT.localScale = new Vector3(delayStartScale.x * Mathf.Pow(Mathf.Clamp01(remaining / startRemaining), 2f), delayStartScale.y, delayStartScale.z);
             yield return null;
         }
-        if (delayT != null) delayT.localScale = new Vector3(0f, delayStartScale.y, delayStartScale.z);
+
+        if (!IsAlive(button) || !IsAlive(overlayT))
+            yield break;
+
+        if (IsAlive(delayT)) delayT.localScale = new Vector3(0f, delayStartScale.y, delayStartScale.z);
 
         for (float t = 0f; t < fadeDuration; t += Time.deltaTime)
         {
+            if (!IsAlive(button) || !IsAlive(overlayT))
+                yield break;
             float p = 1f - Mathf.Pow(1f - Mathf.Clamp01(t / fadeDuration), 2f);
             SetGraphicAlpha(overlayRI, overlayI, Mathf.Lerp(0.2f, 0f, p));
             SetGraphicAlpha(delayRI, delayI, Mathf.Lerp(1f, 0f, p));
             yield return null;
         }
 
+        if (!IsAlive(button) || !IsAlive(overlayT))
+            yield break;
+
         SetGraphicAlpha(overlayRI, overlayI, 0f);
         SetGraphicAlpha(delayRI, delayI, 0f);
         overlayT.gameObject.SetActive(false);
-        if (delayT != null)
+        if (IsAlive(delayT))
         {
             delayT.localScale = delayStartScale;
             delayT.gameObject.SetActive(false);
         }
-        if (main != root) main.gameObject.SetActive(false);
-        CooldownEnds.Remove(button.BtnIdentifier);
-        button.IsOnCooldown = false;
+        if (IsAlive(main) && main != root) main.gameObject.SetActive(false);
+        CooldownEnds.Remove(identifier);
+        if (IsAlive(button)) button.IsOnCooldown = false;
     }
 
     private static void SetGraphicAlpha(RawImage raw, UIImage image, float alpha)
@@ -328,7 +365,6 @@ public class ButtonTrigger : MonoBehaviour
         if (image != null)
             image.color = new Color(image.color.r, image.color.g, image.color.b, alpha);
     }
-
 
         
         
@@ -356,8 +392,13 @@ public class ButtonCollider : MonoBehaviour
 
     private void OnTriggerEnter(Collider other)
     {
-        if (gameObject.name.IndexOf("HoverCollider", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            !(gameObject.name.Equals("Collider", StringComparison.OrdinalIgnoreCase) || gameObject.name.EndsWith("Collider", StringComparison.OrdinalIgnoreCase)))
+        if (gameObject.name.IndexOf("HoverCollider", StringComparison.OrdinalIgnoreCase) >= 0)
+            return;
+
+        bool namedCollider =
+            gameObject.name.Equals("Collider", StringComparison.OrdinalIgnoreCase) ||
+            gameObject.name.EndsWith("Collider", StringComparison.OrdinalIgnoreCase);
+        if (!namedCollider && trigger == null)
             return;
 
         if (Time.time - lastGlobalTime < 0.1f || Time.time - lastLocalTime < 0.2f)
@@ -378,7 +419,6 @@ public class ButtonCollider : MonoBehaviour
     }
 }
 
-
 public class VolumeSliderCollider : MonoBehaviour
 {
     public RectTransform SliderRect;
@@ -393,7 +433,9 @@ public class VolumeSliderCollider : MonoBehaviour
     private float targetValue;
     private float fillVelocity;
     private bool fillKnowsItsSize;
+    private bool fillAnimating;
     private BoxCollider hitBox;
+    private const float FillSettleEpsilon = 0.0001f;
     private void Awake()
     {
         gameObject.layer = 2;
@@ -412,10 +454,17 @@ public class VolumeSliderCollider : MonoBehaviour
 
     private void Update()
     {
-        if (FillRect == null || !fillKnowsItsSize)
+        if (!fillAnimating || FillRect == null || !fillKnowsItsSize)
             return;
 
         currentValue = Mathf.SmoothDamp(currentValue, targetValue, ref fillVelocity, FillSmoothDuration, Mathf.Infinity, Time.deltaTime);
+        if (Mathf.Abs(currentValue - targetValue) <= FillSettleEpsilon &&
+            Mathf.Abs(fillVelocity) <= FillSettleEpsilon)
+        {
+            currentValue = targetValue;
+            fillVelocity = 0f;
+            fillAnimating = false;
+        }
         ApplyFill(currentValue);
     }
 
@@ -461,13 +510,19 @@ public class VolumeSliderCollider : MonoBehaviour
     public void SetValue01(float value, bool notify)
     {
         value = Mathf.Clamp01(value);
+        bool targetChanged = Mathf.Abs(targetValue - value) > FillSettleEpsilon;
         targetValue = value;
         if (!fillKnowsItsSize)
         {
             fillKnowsItsSize = true;
             currentValue = value;
             fillVelocity = 0f;
+            fillAnimating = false;
             ApplyFill(value);
+        }
+        else if (targetChanged || Mathf.Abs(currentValue - targetValue) > FillSettleEpsilon)
+        {
+            fillAnimating = true;
         }
 
         if (!notify || Time.time - lastSetTime < 0.025f)
@@ -605,7 +660,6 @@ public static class Tools
             "MuteElse",
             "Mute",
             "ModsTitle",
-            "CheatsTitle",
             "AddToSaved",
             "SavedPlayers",
             "Saved Players"
@@ -621,7 +675,6 @@ public static class Tools
                 originalScales[t] = t.localScale;
         }
     }
-
 
     public static Transform FindCheckerPart(Transform root, string name)
     {
@@ -724,7 +777,6 @@ public static class MenuEffects
         if (sideHolder == null)
             yield break;
 
-
         string[] paths =
         {
             "Name",
@@ -739,17 +791,13 @@ public static class MenuEffects
             "VolumePercent",
             "MuteElse",
             "Mute",
-            "ModsTitle",
-            "CheatsTitle",
             "AddToSaved",
             "SavedPlayers",
             "Saved Players"
         };
 
-
         const float delayBetween = 0.06f;
         Vector3 hiddenScale = Vector3.zero;
-
 
         void StartPop(Transform t)
         {
@@ -777,7 +825,6 @@ public static class MenuEffects
             yield return new WaitForSeconds(delayBetween);
         }
     }
-    
 
     private static IEnumerator PopTransform(Transform target, Vector3 targetScale)
     {
@@ -805,8 +852,7 @@ public static class MenuEffects
         if (target != null)
             target.localScale = targetScale;
     }
-    
-    
+
     public static IEnumerator ButtonHover(ButtonTrigger button, bool enter)
     {
         if (button == null)
@@ -855,6 +901,17 @@ public static class MenuEffects
         SafeSetImageColor(sliderImage, MenuTheme.Current.Accent);
         SafeSetRendererColor(bodyRenderer, MenuTheme.Current.Button);
         SafeSetRendererColor(outlineRenderer, MenuTheme.Current.ButtonLight);
+    }
+
+    public static void SnapDeactivated(Transform knob, Transform slider, Renderer bodyRenderer = null, Renderer outlineRenderer = null)
+    {
+        if (knob != null) knob.localPosition = Vector3.zero;
+        SpriteRenderer sr = slider?.GetComponent<SpriteRenderer>();
+        UIImage sliderImage = slider?.GetComponent<UIImage>();
+        if (sr != null) sr.color = MenuTheme.Current.ButtonBase;
+        SafeSetImageColor(sliderImage, MenuTheme.Current.ButtonBase);
+        SafeSetRendererColor(bodyRenderer, MenuTheme.Current.Main);
+        SafeSetRendererColor(outlineRenderer, MenuTheme.Current.Button);
     }
 
     public static IEnumerator ActivateSwitch(Transform knob, Transform slider, Renderer bodyRenderer = null, Renderer outlineRenderer = null)
@@ -931,10 +988,8 @@ public static class MenuEffects
 
     private static IEnumerator SliderEnumActivate(Transform knob, Transform slider, Renderer bodyRenderer, Renderer outlineRenderer)
     {
-        if (slider == null || knob == null)
-        {
+        if (knob == null || slider == null)
             yield break;
-        }
 
         float duration = 0.225f;
         float time = 0f;
@@ -956,6 +1011,10 @@ public static class MenuEffects
 
         while (time < duration)
         {
+
+            if (knob == null || slider == null)
+                yield break;
+
             float easeT = EaseOut(time / duration);
 
             knob.localPosition = Vector3.Lerp(startPosition, endPosition, easeT);
@@ -968,6 +1027,9 @@ public static class MenuEffects
             yield return null;
         }
 
+        if (knob == null || slider == null)
+            yield break;
+
         knob.localPosition = endPosition;
         if (sr != null) sr.color = sliderTarget;
         SafeSetImageColor(sliderImage, sliderTarget);
@@ -977,10 +1039,8 @@ public static class MenuEffects
 
     private static IEnumerator SliderEnumDeActivate(Transform knob, Transform slider, Renderer bodyRenderer, Renderer outlineRenderer)
     {
-        if (slider == null || knob == null)
-        {
+        if (knob == null || slider == null)
             yield break;
-        }
 
         float duration = 0.225f;
         float time = 0f;
@@ -1002,6 +1062,10 @@ public static class MenuEffects
 
         while (time < duration)
         {
+
+            if (knob == null || slider == null)
+                yield break;
+
             float easeT = EaseOut(time / duration);
 
             knob.localPosition = Vector3.Lerp(startPosition, endPosition, easeT);
@@ -1013,6 +1077,9 @@ public static class MenuEffects
             time += Time.deltaTime;
             yield return null;
         }
+
+        if (knob == null || slider == null)
+            yield break;
 
         knob.localPosition = endPosition;
         if (sr != null) sr.color = sliderTarget;
@@ -1053,7 +1120,6 @@ public static class MenuEffects
             float newAlpha = Mathf.Lerp(startAlpha, targetAlpha, easeT);
             sr.color = new Color(startColor.r, startColor.g, startColor.b, newAlpha);
 
-            
             time += Time.deltaTime;
             yield return null;
         }
@@ -1195,6 +1261,9 @@ public class SmoothFollowMenu : MonoBehaviour
 
     public void Snap()
     {
+        if (Target == null)
+            return;
+
         Quaternion targetRotation = GetTargetRotation();
         transform.position = Target.position + targetRotation * LocalPosition;
         transform.rotation = targetRotation * LocalRotation;
@@ -1263,8 +1332,115 @@ public static class MenuTheme
 {
     public static class Themes
     {
-        public static readonly MenuThemePalette Default = new();
-        public static readonly MenuThemePalette Sakura = new() { SakuraParts = true };
+        public static readonly MenuThemePalette Default = new()
+        {
+            SakuraParts = true
+        };
+
+        public static readonly MenuThemePalette Sakura = new()
+        {
+            Main = new Color32(18, 10, 16, 255),
+            Border = new Color32(12, 6, 10, 255),
+            Button = new Color32(28, 16, 24, 255),
+            ButtonLight = new Color32(56, 32, 48, 255),
+            ButtonBase = new Color32(16, 8, 14, 255),
+            Accent = new Color32(255, 143, 186, 255),
+            Mid = new Color32(14, 8, 12, 255),
+            MidDark = new Color32(10, 6, 9, 255),
+            DarkAccent = new Color32(84, 36, 58, 255),
+            LightMain = new Color32(32, 18, 28, 255),
+            SakuraParts = true
+        };
+
+        public static readonly MenuThemePalette Ocean = new()
+        {
+            Main = new Color32(8, 14, 20, 255),
+            Border = new Color32(5, 10, 15, 255),
+            Button = new Color32(14, 24, 34, 255),
+            ButtonLight = new Color32(30, 52, 72, 255),
+            ButtonBase = new Color32(8, 16, 24, 255),
+            Accent = new Color32(94, 196, 232, 255),
+            Mid = new Color32(7, 12, 18, 255),
+            MidDark = new Color32(5, 9, 14, 255),
+            DarkAccent = new Color32(28, 70, 92, 255),
+            LightMain = new Color32(18, 30, 42, 255),
+            SakuraParts = true
+        };
+
+        public static readonly MenuThemePalette Ember = new()
+        {
+            Main = new Color32(18, 10, 8, 255),
+            Border = new Color32(12, 6, 5, 255),
+            Button = new Color32(28, 16, 12, 255),
+            ButtonLight = new Color32(58, 34, 24, 255),
+            ButtonBase = new Color32(16, 10, 8, 255),
+            Accent = new Color32(255, 122, 64, 255),
+            Mid = new Color32(14, 8, 6, 255),
+            MidDark = new Color32(10, 6, 5, 255),
+            DarkAccent = new Color32(92, 42, 24, 255),
+            LightMain = new Color32(32, 18, 14, 255),
+            SakuraParts = true
+        };
+
+        public static readonly MenuThemePalette Mint = new()
+        {
+            Main = new Color32(8, 16, 14, 255),
+            Border = new Color32(5, 11, 10, 255),
+            Button = new Color32(14, 26, 22, 255),
+            ButtonLight = new Color32(32, 58, 48, 255),
+            ButtonBase = new Color32(8, 18, 15, 255),
+            Accent = new Color32(110, 231, 183, 255),
+            Mid = new Color32(7, 14, 12, 255),
+            MidDark = new Color32(5, 10, 9, 255),
+            DarkAccent = new Color32(28, 78, 60, 255),
+            LightMain = new Color32(18, 34, 28, 255),
+            SakuraParts = true
+        };
+
+        public static readonly MenuThemePalette Midnight = new()
+        {
+            Main = new Color32(8, 10, 22, 255),
+            Border = new Color32(5, 6, 14, 255),
+            Button = new Color32(14, 16, 34, 255),
+            ButtonLight = new Color32(32, 36, 72, 255),
+            ButtonBase = new Color32(8, 10, 24, 255),
+            Accent = new Color32(122, 148, 255, 255),
+            Mid = new Color32(7, 8, 18, 255),
+            MidDark = new Color32(5, 6, 14, 255),
+            DarkAccent = new Color32(36, 42, 96, 255),
+            LightMain = new Color32(18, 20, 42, 255),
+            SakuraParts = true
+        };
+
+        public static readonly MenuThemePalette Amber = new()
+        {
+            Main = new Color32(16, 12, 6, 255),
+            Border = new Color32(11, 8, 4, 255),
+            Button = new Color32(26, 20, 10, 255),
+            ButtonLight = new Color32(54, 42, 20, 255),
+            ButtonBase = new Color32(14, 11, 6, 255),
+            Accent = new Color32(245, 186, 72, 255),
+            Mid = new Color32(13, 10, 5, 255),
+            MidDark = new Color32(9, 7, 4, 255),
+            DarkAccent = new Color32(92, 64, 22, 255),
+            LightMain = new Color32(30, 24, 12, 255),
+            SakuraParts = true
+        };
+
+        public static readonly MenuThemePalette Crimson = new()
+        {
+            Main = new Color32(16, 8, 10, 255),
+            Border = new Color32(11, 5, 7, 255),
+            Button = new Color32(28, 12, 16, 255),
+            ButtonLight = new Color32(58, 24, 32, 255),
+            ButtonBase = new Color32(14, 8, 10, 255),
+            Accent = new Color32(239, 71, 111, 255),
+            Mid = new Color32(13, 6, 8, 255),
+            MidDark = new Color32(9, 4, 6, 255),
+            DarkAccent = new Color32(96, 28, 42, 255),
+            LightMain = new Color32(30, 14, 18, 255),
+            SakuraParts = true
+        };
     }
     public static MenuThemePalette Current { get; private set; } = Themes.Default;
 
@@ -1411,7 +1587,6 @@ public static class MenuTheme
     public static Renderer ApplyKeyboardOutline(Transform outline)
         => ApplyRenderer(outline, Current.Button);
 
-
     private static void ApplyKeyboardSafe(Transform root, string name, Color32 color)
     {
         if (root == null) return;
@@ -1554,16 +1729,4 @@ public static class MenuTheme
         return renderer;
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
 

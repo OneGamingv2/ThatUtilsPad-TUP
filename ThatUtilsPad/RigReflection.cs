@@ -43,7 +43,7 @@ public static class VRRigCosmeticsExtensions
             return "";
 
         if (value is System.Collections.IEnumerable enumerable)
-            return string.Join(",", enumerable.Cast<object>());
+            return string.Concat(enumerable.Cast<object>());
 
         return value.ToString();
     }

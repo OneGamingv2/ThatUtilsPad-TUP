@@ -26,6 +26,7 @@ namespace ThatUtilsPad;
 
 public static partial class Mods
 {
+private static GameObject notificationPrefab;
 
 public static void ShowNotification(string text, float duration)
 {
@@ -72,14 +73,15 @@ private static void TryShowNotificationNow(string text, float duration)
         return;
     }
 
-    GameObject prefab = Main.notifBundle.LoadAsset<GameObject>(NotificationPrefabPath);
-    if (prefab == null)
+    if (notificationPrefab == null)
+        notificationPrefab = Main.notifBundle.LoadAsset<GameObject>(NotificationPrefabPath);
+    if (notificationPrefab == null)
     {
         Debug.LogWarning("[TUP] Notification prefab not found: " + NotificationPrefabPath);
         return;
     }
 
-    GameObject notifObject = Object.Instantiate(prefab);
+    GameObject notifObject = Object.Instantiate(notificationPrefab);
     notifObject.transform.localScale = Vector3.one * 0.026f;
     NotificationFollower follower = notifObject.AddComponent<NotificationFollower>();
 

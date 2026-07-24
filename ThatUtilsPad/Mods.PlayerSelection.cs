@@ -23,11 +23,24 @@ using Debug = UnityEngine.Debug;
 
 namespace ThatUtilsPad;
 
-
 public static partial class Mods
 {
 
 private static Dictionary<VRRig, float> volumes = new Dictionary<VRRig, float>();
+private sealed class VoiceComponents
+{
+    public Speaker Speaker;
+    public AudioSource Source;
+}
+
+private static readonly Dictionary<VRRig, VoiceComponents> voiceComponentsByRig = new Dictionary<VRRig, VoiceComponents>();
+private static readonly List<VRRig> deadVolumeRigs = new List<VRRig>();
+private static readonly RaycastHit[] checkerRaycastBuffer = new RaycastHit[64];
+private static LineRenderer checkerLineRenderer;
+private static bool checkerLineConfigured;
+private static Material checkerSphereMaterial;
+private static float nextSelectedPlayerRefreshTime;
+private const float SelectedPlayerRefreshInterval = 0.5f;
 
 private const float MinSliderVolume = 0.1f;
 private const float MaxSliderVolume = 2f;
@@ -35,23 +48,32 @@ private static bool muteElseToggled;
 private static readonly Dictionary<VRRig, float> mutedPreviousVolumes = new Dictionary<VRRig, float>();
 private static readonly Dictionary<VRRig, float> muteElsePreviousVolumes = new Dictionary<VRRig, float>();
 
-private static Speaker GetSpeaker(VRRig rig)
+private static VoiceComponents GetVoiceComponents(VRRig rig)
 {
     if (rig == null) return null;
-    return rig.GetComponentInChildren<Speaker>();
+    if (voiceComponentsByRig.TryGetValue(rig, out VoiceComponents cached) &&
+        cached.Speaker != null && cached.Source != null)
+        return cached;
+
+    Speaker speaker = rig.GetComponentInChildren<Speaker>();
+    if (speaker == null)
+        return null;
+    AudioSource source = speaker.GetComponent<AudioSource>();
+    if (source == null)
+        return null;
+
+    cached = new VoiceComponents { Speaker = speaker, Source = source };
+    voiceComponentsByRig[rig] = cached;
+    return cached;
 }
 
 private static void SetVoiceVolume(VRRig rig, float volume)
 {
     if (rig == null) return;
 
-    Speaker speaker = GetSpeaker(rig);
-    if (speaker == null) return;
-
-    AudioSource source = speaker.GetComponent<AudioSource>();
-    if (source == null) return;
-
-    source.volume = Mathf.Clamp(volume, 0f, 2f);
+    VoiceComponents components = GetVoiceComponents(rig);
+    if (components == null) return;
+    components.Source.volume = Mathf.Clamp(volume, 0f, 2f);
 }
 
 private static void ApplyVolumes()
@@ -80,12 +102,18 @@ private static void ApplyVolumes()
             UpdateVolumeUI(currentVolumes[rig]);
     }
     
-    var dead = volumes.Keys.Where(r => r == null).ToList();
-    foreach (var r in dead)
+    deadVolumeRigs.Clear();
+    foreach (VRRig rig in volumes.Keys)
+        if (rig == null)
+            deadVolumeRigs.Add(rig);
+    for (int i = 0; i < deadVolumeRigs.Count; i++)
     {
+        VRRig r = deadVolumeRigs[i];
         volumes.Remove(r);
         currentVolumes.Remove(r);
+        voiceComponentsByRig.Remove(r);
     }
+    deadVolumeRigs.Clear();
 }
 
 private static float displayedVolume = 1f;
@@ -101,6 +129,8 @@ private static float VolumeToSlider01(float volume)
 private static void UpdateVolumeUI(float targetVolume)
 {
     targetVolume = Mathf.Clamp(targetVolume, 0f, MaxSliderVolume);
+    if (Mathf.Abs(displayedVolume - targetVolume) < 0.001f)
+        return;
     displayedVolume = targetVolume;
     Main.Instance?.SetVolumeDisplayVolume(targetVolume);
 
@@ -306,9 +336,13 @@ private static void MuteElse()
 
         return Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame;
     }
-    
-    
+
     private static Coroutine? checkerCoroutine;
+    private static bool selectTriggerWasHeld;
+    private static VRRig highlightedAimRig;
+    private static readonly Color32 SelectedBoneColor = new Color32(203, 166, 247, 255);
+    private static readonly Color32 AimBoneColor = new Color32(161, 98, 237, 180);
+
     private static IEnumerator CheckerLoop()
     {
         while (checkerEnabled)
@@ -316,33 +350,131 @@ private static void MuteElse()
             UpdateChecker();
             yield return null;
         }
+
+        CleanupCheckerVisuals(false);
+        checkerCoroutine = null;
+    }
+
+    private static void CleanupCheckerVisuals(bool clearSelection)
+    {
         if (checkerLine != null)
         {
             Object.Destroy(checkerLine);
             checkerLine = null;
+            checkerLineRenderer = null;
+            checkerLineConfigured = false;
         }
+
         if (checkerSphere != null)
         {
             Object.Destroy(checkerSphere);
             checkerSphere = null;
         }
-        if (lastTargetRig != null)
-        {
-            lastTargetRig = null;
-        }
-        checkerCoroutine = null;
+
+        ClearAimHighlight();
+        SetBoneHighlightVisible(selectedRig, false);
+
+        if (clearSelection)
+            ClearSelectedPlayer(true);
+
+        lastTargetRig = null;
+        selectTriggerWasHeld = false;
     }
-    
+
     private static void ToggleChecker()
     {
-        checkerEnabled = !checkerEnabled;
+        checkerEnabled = GetSavedToggle("Select User", checkerEnabled);
+        SavedToggleStates["Select User"] = checkerEnabled;
+        SaveButtonStates();
 
         if (checkerEnabled)
         {
-            if (checkerCoroutine == null)
+            if (checkerCoroutine == null && CoroutineHandler.Instance != null)
                 checkerCoroutine = CoroutineHandler.Instance.StartCoroutine(CheckerLoop());
         }
-        else {}
+        else
+        {
+            CleanupCheckerVisuals(false);
+        }
+    }
+
+    private static bool SelectJustPressed(bool selectHeld)
+    {
+        bool pressed = selectHeld && !selectTriggerWasHeld;
+        selectTriggerWasHeld = selectHeld;
+        return pressed;
+    }
+
+    private static void ClearAimHighlight()
+    {
+        if (highlightedAimRig != null && highlightedAimRig != selectedRig)
+            SetBoneHighlightVisible(highlightedAimRig, false);
+        highlightedAimRig = null;
+        snappedRig = null;
+    }
+
+    private static void ClearSelectedPlayer(bool clearUi)
+    {
+        if (selectedRig != null)
+            SetBoneHighlightVisible(selectedRig, false);
+
+        selectedRig = null;
+        selectedUserId = null;
+
+        if (clearUi)
+            Main.Instance?.ClearCheckerSelectionUi();
+    }
+
+    private static bool TryResolveSelectedRig()
+    {
+        if (IsRigValid(selectedRig))
+            return true;
+
+        if (string.IsNullOrEmpty(selectedUserId))
+        {
+            selectedRig = null;
+            return false;
+        }
+
+        foreach (VRRig rig in VRRigCache.ActiveRigs)
+        {
+            if (!IsRigValid(rig) || rig.isLocal)
+                continue;
+            if (!GetRigID(rig, out string id) || id != selectedUserId)
+                continue;
+
+            selectedRig = rig;
+            return true;
+        }
+
+        selectedRig = null;
+        return false;
+    }
+
+    private static void ApplyPlayerSelection(VRRig rig)
+    {
+        if (!IsRigValid(rig) || rig.isLocal)
+            return;
+
+        if (selectedRig != null && selectedRig != rig)
+            SetBoneHighlightVisible(selectedRig, false);
+
+        selectedRig = rig;
+        snappedRig = rig;
+
+        if (GetRigID(rig, out string id))
+        {
+            selectedUserId = id;
+            if (savedVolumes.ContainsKey(id))
+            {
+                volumes[rig] = savedVolumes[id];
+                currentVolumes[rig] = savedVolumes[id];
+            }
+        }
+
+        UpdateVolumeUI(volumes.ContainsKey(rig) ? volumes[rig] : 1f);
+        ShowPlayerInfo(rig);
+        BoneHighlight(rig, SelectedBoneColor, 0.004f);
     }
 
     private static void CopyRoomCode()
@@ -351,9 +483,6 @@ private static void MuteElse()
         {
             string roomCode = PhotonNetwork.CurrentRoom.Name;
             GUIUtility.systemCopyBuffer = roomCode;
-        }
-        else
-        {
         }
     }
 
@@ -431,69 +560,47 @@ public static string GetRigDisplayName(VRRig rig)
 
 public static void SelectRigFromMenu(VRRig rig)
 {
-    if (!IsRigValid(rig) || rig.isLocal)
-        return;
-
-    selectedRig = rig;
-    snappedRig = rig;
-
-    if (GetRigID(rig, out string id))
-    {
-        selectedUserId = id;
-        if (savedVolumes.ContainsKey(id))
-        {
-            volumes[rig] = savedVolumes[id];
-            currentVolumes[rig] = savedVolumes[id];
-        }
-    }
-
-    displayedVolume = volumes.ContainsKey(rig) ? volumes[rig] : 1f;
-    ShowPlayerInfo(rig);
+    ApplyPlayerSelection(rig);
+    Main.Instance?.RefreshSelectUserButtonStates();
 }
+
+public static bool IsSelectedPlayerButton(string buttonName)
+{
+    if (string.IsNullOrEmpty(buttonName) || !IsRigValid(selectedRig))
+        return false;
+    return string.Equals(buttonName, GetRigDisplayName(selectedRig), StringComparison.Ordinal);
+}
+
+public static void ClearSelectionOnMenuClose()
+{
+    ClearSelectedPlayer(true);
+    ClearAimHighlight();
+    ClearAllBoneHighlights();
+}
+
 public static void UpdateChecker()
 {
     if (!checkerEnabled)
         return;
 
     ApplyVolumes();
-
-    void ClearSnapped()
-    {
-        if (snappedRig != null)
-        {
-            DisableBoneHighlight(snappedRig);
-            removeSkeletonHighlight(snappedRig);
-        }
-        snappedRig = null;
-    }
-
-    void ClearSelected()
-    {
-        if (selectedRig != null)
-            Main.Instance?.UpdateCheckerProperties("None", "None");
-
-        selectedRig = null;
-    }
-
-    if (!IsRigValid(snappedRig))
-        ClearSnapped();
-
-    if (!IsRigValid(selectedRig))
-        ClearSelected();
+    TryResolveSelectedRig();
 
     bool snapHeld;
-    bool selectPressed;
+    bool selectHeld;
 
     if (XRSettings.isDeviceActive)
     {
         snapHeld = ControllerInputPoller.instance.rightControllerGripFloat > 0.75f;
-        selectPressed = ControllerInputPoller.instance.rightControllerIndexFloat > 0.75f;
+        selectHeld = ControllerInputPoller.instance.rightControllerIndexFloat > 0.75f;
     }
     else
     {
         snapHeld = Mouse.current != null && Mouse.current.rightButton.isPressed;
-        selectPressed = Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame;
+        selectHeld = Mouse.current != null && Mouse.current.leftButton.isPressed;
     }
+
+    bool selectPressed = SelectJustPressed(selectHeld);
 
     Vector3 startPos;
     Vector3 forward;
@@ -525,33 +632,45 @@ public static void UpdateChecker()
     }
 
     if (checkerLine == null)
-        checkerLine = new GameObject("CheckerLine");
-
-    LineRenderer line = checkerLine.GetComponent<LineRenderer>();
-    if (line == null)
     {
-        line = checkerLine.AddComponent<LineRenderer>();
+        checkerLine = new GameObject("CheckerLine");
+        checkerLineRenderer = checkerLine.AddComponent<LineRenderer>();
+    }
+    if (checkerLineRenderer == null)
+        checkerLineRenderer = checkerLine.GetComponent<LineRenderer>() ?? checkerLine.AddComponent<LineRenderer>();
+
+    LineRenderer line = checkerLineRenderer;
+    if (!checkerLineConfigured)
+    {
         if (lineMat == null)
             lineMat = new Material(ShaderCache.TextShader);
-        line.material = lineMat;
-        line.material = lineMat;
+        line.sharedMaterial = lineMat;
         line.startWidth = 0.002f;
         line.endWidth = 0.002f;
         line.positionCount = 2;
         line.startColor = new Color32(161, 98, 237, 255);
         line.endColor = new Color32(203, 166, 247, 255);
+        checkerLineConfigured = true;
     }
 
-    RaycastHit[] hits = Physics.RaycastAll(ray, 512f, NoInvisLayerMask());
+    int hitCount = Physics.RaycastNonAlloc(ray, checkerRaycastBuffer, 512f, NoInvisLayerMask());
+    RaycastHit[] hits = checkerRaycastBuffer;
+    if (hitCount == checkerRaycastBuffer.Length)
+    {
+        hits = Physics.RaycastAll(ray, 512f, NoInvisLayerMask());
+        hitCount = hits.Length;
+    }
 
     float minDistance = float.MaxValue;
+    float firstHitDistance = float.MaxValue;
     VRRig targetRig = null;
 
     RaycastHit firstHit = default;
     bool firstHitFound = false;
 
-    foreach (RaycastHit h in hits.OrderBy(hit => hit.distance))
+    for (int hitIndex = 0; hitIndex < hitCount; hitIndex++)
     {
+        RaycastHit h = hits[hitIndex];
         if (h.collider == null)
             continue;
 
@@ -562,10 +681,11 @@ public static void UpdateChecker()
         if (hitRig != null && (!IsRigValid(hitRig) || hitRig.isLocal))
             continue;
 
-        if (!firstHitFound)
+        if (h.distance < firstHitDistance)
         {
             firstHit = h;
             firstHitFound = true;
+            firstHitDistance = h.distance;
         }
 
         if (IsRigValid(hitRig) && h.distance < minDistance)
@@ -587,89 +707,79 @@ public static void UpdateChecker()
         if (snappedRig == null && targetRig != null)
             snappedRig = targetRig;
 
+        if (!IsRigValid(snappedRig) && targetRig != null)
+            snappedRig = targetRig;
+
         if (IsRigValid(snappedRig))
         {
-            try
-            {
-                BoneHighlight(snappedRig, new Color32(203, 166, 247, 255), 0.005f);
-                skeletonHighlight(snappedRig);
-            }
-            catch { }
-
-            Transform head = null;
-
-            if (snappedRig.headMesh != null)
-                head = snappedRig.headMesh.transform;
-            else if (snappedRig.transform != null)
-                head = snappedRig.transform;
-
+            Transform head = snappedRig.headMesh != null
+                ? snappedRig.headMesh.transform
+                : snappedRig.transform;
             if (head != null)
                 endPos = head.position;
 
+            if (highlightedAimRig != snappedRig && highlightedAimRig != selectedRig)
+                SetBoneHighlightVisible(highlightedAimRig, false);
+
+            highlightedAimRig = snappedRig;
+            if (snappedRig != selectedRig)
+                BoneHighlight(snappedRig, AimBoneColor, 0.003f);
+
             if (selectPressed)
             {
-                selectedRig = snappedRig;
-
-                if (GetRigID(snappedRig, out string id))
-                {
-                    selectedUserId = id;
-
-                    if (savedVolumes.ContainsKey(id))
-                    {
-                        volumes[snappedRig] = savedVolumes[id];
-                        currentVolumes[snappedRig] = savedVolumes[id];
-                    }
-                }
-
-                displayedVolume = volumes.ContainsKey(snappedRig)
-                    ? volumes[snappedRig]
-                    : 1f;
-
-                ShowPlayerInfo(snappedRig);
+                if (selectedRig == snappedRig)
+                    ClearSelectedPlayer(true);
+                else
+                    ApplyPlayerSelection(snappedRig);
             }
         }
         else
         {
-            ClearSnapped();
+            ClearAimHighlight();
+            if (selectPressed)
+                ClearSelectedPlayer(true);
         }
     }
     else
     {
-        ClearSnapped();
+        ClearAimHighlight();
+        if (selectPressed && targetRig != null)
+            ApplyPlayerSelection(targetRig);
+        else if (selectPressed && targetRig == null && IsRigValid(selectedRig))
+            ClearSelectedPlayer(true);
     }
 
-    if (IsRigValid(selectedRig))
+    if (TryResolveSelectedRig())
     {
-        try
+        BoneHighlight(selectedRig, SelectedBoneColor, 0.004f);
+
+        if (Time.time >= nextSelectedPlayerRefreshTime)
         {
-            string name = selectedRig.playerNameVisible;
-            Color color = selectedRig.playerColor;
+            nextSelectedPlayerRefreshTime = Time.time + SelectedPlayerRefreshInterval;
+            try
+            {
+                string name = selectedRig.playerNameVisible;
+                Color color = selectedRig.playerColor;
+                int fps = RigBits.GetFPS(selectedRig);
 
-            int fps = RigBits.GetFPS(selectedRig);
+                string platform;
+                try { platform = GetPlatform(selectedRig); }
+                catch { platform = "Unknown"; }
 
-            string platform;
-            try { platform = GetPlatform(selectedRig); }
-            catch { platform = "Unknown"; }
+                string creationDate = GetCreationDate(GetPlayerFromVRRig(selectedRig).UserId);
+                string colorStr =
+                    $"({Mathf.RoundToInt(color.r * 9)} {Mathf.RoundToInt(color.g * 9)} {Mathf.RoundToInt(color.b * 9)})";
+                Color colorBaseForm = selectedRig.playerColor;
+                int plrPing = GetPingThrottled(selectedRig);
 
-            string creationDate = GetCreationDate(GetPlayerFromVRRig(selectedRig).UserId);
+                ThatUtilsPad.Main.Instance.UpdateCheckerText(name, fps, platform, creationDate, colorStr, colorBaseForm, plrPing);
+                UpdateSelectedPlayerProperties(selectedRig);
+            }
+            catch
+            {
 
-            string colorStr =
-                $"({Mathf.RoundToInt(color.r * 9)} {Mathf.RoundToInt(color.g * 9)} {Mathf.RoundToInt(color.b * 9)})";
-
-            Color colorBaseForm = selectedRig.playerColor;
-
-            int plrPing = GetPingThrottled(selectedRig);
-
-            ThatUtilsPad.Main.Instance.UpdateCheckerText(name, fps, platform, creationDate, colorStr, colorBaseForm, plrPing);
+            }
         }
-        catch
-        {
-            ClearSelected();
-        }
-    }
-    else
-    {
-        ClearSelected();
     }
 
     if (currentBeamEnd == Vector3.zero)
@@ -695,62 +805,24 @@ public static void UpdateChecker()
         var rend = checkerSphere.GetComponent<Renderer>();
         if (rend != null)
         {
-            rend.material.shader = ShaderCache.TextShader;
-            rend.material.color = new Color32(203, 166, 247, 255);
+            if (checkerSphereMaterial == null)
+            {
+                checkerSphereMaterial = new Material(ShaderCache.TextShader);
+                checkerSphereMaterial.color = new Color32(203, 166, 247, 255);
+            }
+            rend.sharedMaterial = checkerSphereMaterial;
         }
     }
 
     checkerSphere.transform.position = currentBeamEnd;
-
-    if (IsRigValid(targetRig))
-    {
-        if (lastTargetRig != null && lastTargetRig != targetRig)
-        {
-        }
-
-        if (lastTargetRig != targetRig)
-        {
-            lastTargetRig = targetRig;
-        }
-    }
-    else if (lastTargetRig != null)
-    {
-        lastTargetRig = null;
-    }
+    lastTargetRig = targetRig;
 }
-
 
 private static FieldInfo _historyField;
 private static PropertyInfo _countProp;
 private static PropertyInfo _indexerProp;
 private static FieldInfo _timeField;
-
-private static bool doorsOpenAlready = false;
-
-private static void InitReflection(object historySample, object itemSample)
-{
-    if (doorsOpenAlready) return;
-
-    _historyField = typeof(VRRig).GetField(
-        "velocityHistoryList",
-        BindingFlags.NonPublic | BindingFlags.Instance
-    );
-
-    if (historySample != null)
-    {
-        var historyType = historySample.GetType();
-
-        _countProp = historyType.GetProperty("Count");
-        _indexerProp = historyType.GetProperty("Item");
-    }
-
-    if (itemSample != null)
-    {
-        _timeField = itemSample.GetType().GetField("time");
-    }
-
-    doorsOpenAlready = true;
-}
+private static readonly object[] PingFirstIndexArguments = { 0 };
 
 private static int GetPing(VRRig rig)
 {
@@ -758,7 +830,7 @@ private static int GetPing(VRRig rig)
     {
         if (rig == null)
             return int.MaxValue;
-        
+
         if (_historyField == null)
         {
             _historyField = typeof(VRRig).GetField(
@@ -766,42 +838,40 @@ private static int GetPing(VRRig rig)
                 BindingFlags.NonPublic | BindingFlags.Instance
             );
         }
+        if (_historyField == null)
+            return int.MaxValue;
 
-        var history = _historyField?.GetValue(rig);
+        object history = _historyField.GetValue(rig);
         if (history == null)
             return int.MaxValue;
-        
-        if (!doorsOpenAlready)
-        {
-            object firstItem = null;
 
-            var historyType = history.GetType();
+        Type historyType = history.GetType();
+        if (_countProp == null || _countProp.DeclaringType == null || !_countProp.DeclaringType.IsAssignableFrom(historyType))
             _countProp = historyType.GetProperty("Count");
+        if (_indexerProp == null || _indexerProp.DeclaringType == null || !_indexerProp.DeclaringType.IsAssignableFrom(historyType))
             _indexerProp = historyType.GetProperty("Item");
+        if (_countProp == null || _indexerProp == null)
+            return int.MaxValue;
 
-            int count = (int)(_countProp?.GetValue(history) ?? 0);
-            if (count > 0)
-            {
-                firstItem = _indexerProp?.GetValue(history, new object[] { 0 });
-                if (firstItem != null)
-                {
-                    _timeField = firstItem.GetType().GetField("time");
-                }
-            }
-
-            doorsOpenAlready = true;
-        }
-
-        int currentCount = (int)(_countProp?.GetValue(history) ?? 0);
+        int currentCount = (int)(_countProp.GetValue(history) ?? 0);
         if (currentCount <= 0)
             return int.MaxValue;
 
-        var item = _indexerProp?.GetValue(history, new object[] { 0 });
+        object item = _indexerProp.GetValue(history, PingFirstIndexArguments);
         if (item == null)
             return int.MaxValue;
 
-        double time = (double)(_timeField?.GetValue(item) ?? 0d);
+        Type itemType = item.GetType();
+        if (_timeField == null || _timeField.DeclaringType == null || !_timeField.DeclaringType.IsAssignableFrom(itemType))
+        {
+            _timeField = itemType.GetField(
+                "time",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        }
+        if (_timeField == null)
+            return int.MaxValue;
 
+        double time = Convert.ToDouble(_timeField.GetValue(item) ?? 0d);
         double ping = Math.Abs((time - PhotonNetwork.Time) * 1000);
         return (int)Math.Clamp(Math.Round(ping), 0, int.MaxValue);
     }
@@ -811,23 +881,58 @@ private static int GetPing(VRRig rig)
     }
 }
 
-private static float _nextUpdateTime = 0f;
-private static int pingInPocket = int.MaxValue;
+private struct RigPingCache
+{
+    public float NextUpdateTime;
+    public int Ping;
+}
+
+private static readonly Dictionary<VRRig, RigPingCache> pingCacheByRig = new Dictionary<VRRig, RigPingCache>();
 
 private static int GetPingThrottled(VRRig rig)
 {
-    if (UnityEngine.Time.time >= _nextUpdateTime)
-    {
-        pingInPocket = GetPing(rig);
-        _nextUpdateTime = UnityEngine.Time.time + 1f;
-    }
+    if (rig == null)
+        return int.MaxValue;
 
-    return pingInPocket;
+    float now = UnityEngine.Time.time;
+    if (pingCacheByRig.TryGetValue(rig, out RigPingCache cached) && now < cached.NextUpdateTime)
+        return cached.Ping;
+
+    int ping = GetPing(rig);
+    pingCacheByRig[rig] = new RigPingCache
+    {
+        Ping = ping,
+        NextUpdateTime = now + 1f
+    };
+    return ping;
 }
 
+private static void RemovePingCache(VRRig rig)
+{
+    if (!ReferenceEquals(rig, null))
+        pingCacheByRig.Remove(rig);
+}
 
-private static readonly Dictionary<VRRig, List<LineRenderer>> boneESP 
-    = new Dictionary<VRRig, List<LineRenderer>>();
+private static void ClearPingCaches()
+{
+    pingCacheByRig.Clear();
+    _historyField = null;
+    _countProp = null;
+    _indexerProp = null;
+    _timeField = null;
+}
+
+private sealed class BoneHighlightCache
+{
+    public readonly LineRenderer[] Lines = new LineRenderer[19];
+    public readonly Transform[] Starts = new Transform[19];
+    public readonly Transform[] Ends = new Transform[19];
+    public bool Visible;
+}
+
+private static readonly Dictionary<VRRig, BoneHighlightCache> boneESP =
+    new Dictionary<VRRig, BoneHighlightCache>();
+private static Material boneHighlightMaterial;
 
 public static readonly int[] bones = {
     4, 3, 5, 4, 19, 18, 20, 19, 3, 18,
@@ -835,96 +940,138 @@ public static readonly int[] bones = {
     27, 25, 24, 22, 6, 5, 7, 6, 10, 6,
     14, 6, 16, 14, 12, 10, 9, 7
 };
-private static void BoneHighlight(VRRig rig, Color color, float width = 0.02f)
+
+private static void EnsureBoneHighlightMaterial()
 {
-    if (rig == null || rig.isLocal) return;
 
-    if (!boneESP.TryGetValue(rig, out List<LineRenderer> lines))
+    if (boneHighlightMaterial != null &&
+        ShaderCache.TextShader != null &&
+        boneHighlightMaterial.shader == ShaderCache.TextShader)
     {
-        lines = new List<LineRenderer>();
-
-
-        for (int i = 0; i < 19; i++)
-        {
-            LineRenderer line = rig.mainSkin.bones[bones[i * 2]].gameObject.GetOrAddComponent<LineRenderer>();
-            line.material = new Material(Shader.Find("GUI/Text Shader"));
-            lines.Add(line);
-        }
-
-        boneESP.Add(rig, lines);
+        ClearAllBoneHighlights();
+        UnityEngine.Object.Destroy(boneHighlightMaterial);
+        boneHighlightMaterial = null;
     }
 
+    if (boneHighlightMaterial != null)
+        return;
 
+    Shader shader = ShaderCache.UberShader != null ? ShaderCache.UberShader : Shader.Find("GorillaTag/UberShader");
+    if (shader == null)
+        shader = Shader.Find("Universal Render Pipeline/Unlit");
+    if (shader == null)
+        shader = Shader.Find("Sprites/Default");
 
+    boneHighlightMaterial = new Material(shader);
+    if (boneHighlightMaterial.HasProperty("_Color"))
+        boneHighlightMaterial.color = Color.white;
+}
+
+private static void BoneHighlight(VRRig rig, Color color, float width = 0.02f)
+{
+    if (rig == null || rig.isLocal || !IsRigValid(rig))
+        return;
+
+    EnsureBoneHighlightMaterial();
+
+    if (!boneESP.TryGetValue(rig, out BoneHighlightCache cache))
+    {
+        cache = new BoneHighlightCache();
+        Transform[] skinBones = rig.mainSkin.bones;
+        for (int i = 0; i < 19; i++)
+        {
+            int startIndex = bones[i * 2];
+            int endIndex = bones[i * 2 + 1];
+            if (startIndex >= skinBones.Length || endIndex >= skinBones.Length)
+                continue;
+
+            cache.Starts[i] = skinBones[startIndex];
+            cache.Ends[i] = skinBones[endIndex];
+            if (cache.Starts[i] == null || cache.Ends[i] == null)
+                continue;
+
+            GameObject lineObject = new GameObject("TUP_BoneLine_" + i);
+            lineObject.transform.SetParent(null, false);
+            LineRenderer line = lineObject.AddComponent<LineRenderer>();
+            line.sharedMaterial = boneHighlightMaterial;
+            line.positionCount = 2;
+            line.useWorldSpace = true;
+            line.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            line.receiveShadows = false;
+            line.allowOcclusionWhenDynamic = true;
+            cache.Lines[i] = line;
+        }
+        boneESP[rig] = cache;
+    }
+
+    cache.Visible = true;
     for (int i = 0; i < 19; i++)
     {
-        LineRenderer line = lines[i];
+        LineRenderer line = cache.Lines[i];
+        Transform start = cache.Starts[i];
+        Transform end = cache.Ends[i];
+        if (line == null || start == null || end == null)
+            continue;
+
+        if (!line.enabled)
+            line.enabled = true;
 
         line.startWidth = width;
         line.endWidth = width;
         line.startColor = color;
         line.endColor = color;
+        line.SetPosition(0, start.position);
+        line.SetPosition(1, end.position);
+    }
+}
 
-        line.SetPosition(0, rig.mainSkin.bones[bones[i * 2]].position);
-        line.SetPosition(1, rig.mainSkin.bones[bones[i * 2 + 1]].position);
+private static void SetBoneHighlightVisible(VRRig rig, bool visible)
+{
+    if (rig == null || !boneESP.TryGetValue(rig, out BoneHighlightCache cache))
+        return;
+
+    cache.Visible = visible;
+    for (int i = 0; i < cache.Lines.Length; i++)
+    {
+        LineRenderer line = cache.Lines[i];
+        if (line != null)
+            line.enabled = visible;
     }
 }
 
 public static void DisableBoneHighlight(VRRig rig)
 {
-    foreach (var renderer in boneESP.SelectMany(bones => bones.Value))
-        Object.Destroy(renderer);
+    if (rig == null || !boneESP.TryGetValue(rig, out BoneHighlightCache cache))
+        return;
 
-    boneESP.Clear();
+    for (int i = 0; i < cache.Lines.Length; i++)
+    {
+        if (cache.Lines[i] != null)
+            Object.Destroy(cache.Lines[i].gameObject);
+    }
+
+    boneESP.Remove(rig);
 }
 
-    private static void skeletonHighlight(VRRig rig)
+private static void ClearAllBoneHighlights()
+{
+    foreach (var kvp in boneESP)
     {
-        if (rig == null) return;
-        if (rig.skeleton == null) return;
-        if (rig.skeleton.renderer == null) return;
-        if (rig.skeleton.renderer.material == null) return;
-        
-        rig.skeleton.renderer.enabled = true;
-        rig.skeleton.renderer.material.shader = ShaderCache.TextShader;
-        rig.skeleton.renderer.material.color = rig.playerColor;
-        
-        Color skeletonColor = new Color(rig.skeleton.renderer.material.color.r, rig.skeleton.renderer.material.color.g, rig.skeleton.renderer.material.color.b, 0.3f);
-        Color themeColor = new Color(0.796f, 0.651f, 0.969f, 0.1f);
-        rig.skeleton.renderer.material.color = themeColor;
+        BoneHighlightCache cache = kvp.Value;
+        if (cache == null)
+            continue;
+        for (int i = 0; i < cache.Lines.Length; i++)
+        {
+            if (cache.Lines[i] != null)
+                Object.Destroy(cache.Lines[i].gameObject);
+        }
     }
-    
-    private static void removeSkeletonHighlight(VRRig rig)
-    {
-        if (rig?.skeleton?.renderer == null) return;
-        rig.skeleton.renderer.enabled = false;
-    }
-    
-    private static void HighlightRig(VRRig rig)
-    {
-        SkinnedMeshRenderer? renderer = rig.mainSkin;
-
-        if (renderer == null)
-            return;
-
-        renderer.material.shader = ShaderCache.TextShader;
-        renderer.material.color= new Color32(203, 166, 247, 255);
-    }
-
-    private static void ResetRigMaterial(VRRig rig)
-    {
-        SkinnedMeshRenderer? renderer = rig.mainSkin;
-
-        if (renderer == null)
-            return;
-
-        renderer.material.shader = ShaderCache.TextShader;
-        if (renderer.material.name.Contains("gorilla_body"))
-            renderer.material.color = rig.playerColor;
-    }
+    boneESP.Clear();
+}
     
     private static void ShowPlayerInfo(VRRig rig)
     {
+        nextSelectedPlayerRefreshTime = Time.time + SelectedPlayerRefreshInterval;
         string name  = rig.playerNameVisible;
         Color  color = rig.playerColor;
         int fps = RigBits.GetFPS(rig);
@@ -932,7 +1079,6 @@ public static void DisableBoneHighlight(VRRig rig)
 
         string colorStr =
             $"RGB({Mathf.RoundToInt(color.r * 9)}, {Mathf.RoundToInt(color.g * 9)}, {Mathf.RoundToInt(color.b * 9)})";
-
 
         string creationDate = "Unknown";
         try { creationDate = GetCreationDate(GetPlayerFromVRRig(rig).UserId); }
@@ -944,6 +1090,8 @@ public static void DisableBoneHighlight(VRRig rig)
 
         Main.Instance?.UpdateCheckerText(name, fps, platform, creationDate, colorStr, color, ping);
         UpdateSelectedPlayerProperties(rig);
+        Main.Instance?.SetMoreInfoVisible(true);
+        Main.Instance?.StartPlayerModelPreview(rig);
     }
 
     private static void UpdateSelectedPlayerProperties(VRRig rig)
@@ -956,12 +1104,13 @@ public static void DisableBoneHighlight(VRRig rig)
             Player player = rig.GetPhotonPlayer();
             if (player != null)
             {
+                InvalidatePropertyScanCache(player);
                 Dictionary<string, List<string>> hits = FindPropertySignatureHits(player);
 
                 List<string> legalMods = hits.Keys
                     .Select(key => propertySignatures[key])
                     .Where(signature => signature.IsLegal)
-                    .Select(signature => signature.Name)
+                    .Select(signature => FormatDetectedModName(signature.Name))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
                     .ToList();
@@ -969,7 +1118,7 @@ public static void DisableBoneHighlight(VRRig rig)
                 List<string> illegalMods = hits.Keys
                     .Select(key => propertySignatures[key])
                     .Where(signature => !signature.IsLegal)
-                    .Select(signature => signature.Name)
+                    .Select(signature => FormatDetectedModName(signature.Name))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
                     .ToList();

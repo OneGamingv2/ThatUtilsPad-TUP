@@ -41,7 +41,6 @@ public partial class Main : BaseUnityPlugin
     public bool   IsAdmin;
     public string AdminName = "";
 
-
     private readonly List<GameObject> buttons     = [];
     private readonly List<GameObject> tabButtonObjs = new List<GameObject>();
     private readonly List<GameObject> pageButtonObjs      = new List<GameObject>();
@@ -63,8 +62,11 @@ public partial class Main : BaseUnityPlugin
     private TMP_Text keyboardPreviewText;
     private Coroutine keyboardPreviewCharRoutine;
 
-    private readonly Vector3 menuGripPosition = new(0f, -0.17f, 0f);
-    private readonly Vector3 menuHandOffset   = new(0f,  0f,    0f);
+    private float menuOffsetRight = 0.03f;
+    private float menuOffsetUp = -0.13f;
+    private float menuOffsetOut = 0.024f;
+    private readonly Vector3 menuHandOffset = new(0f, 0f, 0f);
+    private float menuGripTilt = 45f;
 
     private GameObject  btnPrefab;
     private Transform buttonShelf;
@@ -90,9 +92,10 @@ public partial class Main : BaseUnityPlugin
     private bool        isMenuClosing = false;
 
     private AssetBundle menuBundle;
-    private float       menuGripRotaton = 45f;
     private float       menuScale = 0.375f;
     private float       headMenuDistance = 0.6f;
+    private const float HeadMenuX = -0.03f;
+    private const float HeadMenuY = -0.02f;
     private bool        menuSmoothingEnabled = true;
     private float       menuSmoothingStrength = 30f;
 
@@ -135,6 +138,50 @@ public partial class Main : BaseUnityPlugin
     private CheckerTileGroup cheatsTileGroup;
     private RectTransform volumeInnerRect;
     private Coroutine volumeInnerRoutine;
+    private float lastVolumeDisplayWidth = float.NaN;
+    private Image checkerMonkeColorImage;
+    private SpriteRenderer checkerMonkeColorSprite;
+    private string lastCheckerName;
+    private string lastCheckerFpsPing;
+    private string lastCheckerPlatform;
+    private string lastCheckerDate;
+    private Color lastCheckerColor;
+    private bool hasLastCheckerColor;
+    private string lastCheckerLegalMods;
+    private string lastCheckerIllegalMods;
+    private string lastCheckerColorStr = "--";
+    private Transform cheatsTitleTransform;
+    private Transform modsTitleTransform;
+    private bool moreInfoVisible;
+    private bool moreInfoModsExpanded;
+    private TMP_Text moreInfoBodyText;
+    private MoreInfoModEntry[] moreInfoModList = Array.Empty<MoreInfoModEntry>();
+    private int moreInfoModsPage;
+    private const int MoreInfoModsPerPage = 6;
+    private Transform moreInfoNextArrow;
+    private Transform moreInfoBackArrow;
+    private TMP_Text moreInfoPageText;
+    private ButtonTrigger moreInfoOpenTrigger;
+
+    private enum MoreInfoModKind
+    {
+        Legal,
+        Illegal,
+        Unknown
+    }
+
+    private struct MoreInfoModEntry
+    {
+        public string Name;
+        public MoreInfoModKind Kind;
+
+        public MoreInfoModEntry(string name, MoreInfoModKind kind)
+        {
+            Name = name;
+            Kind = kind;
+        }
+    }
+
     private const float VolumeDisplayMaxWidth = 406.54f;
     private const float VolumeDisplayTweenDuration = 0.5f;
 
@@ -151,15 +198,25 @@ public partial class Main : BaseUnityPlugin
         public GameObject NoneTitle;
         public RectTransform NoneRect;
         public TMP_Text NoneText;
+        public TMP_Text PageText;
         public string[] Values = Array.Empty<string>();
         public Coroutine Routine;
         public int FocusedIndex = -1;
+        public int FocusedValueIndex = -1;
+        public int PageIndex;
+        public Transform NextArrow;
+        public Transform BackArrow;
+        public bool OwnsPageArrows;
     }
     
     public static TMP_Text queueText;
     public static TMP_Text modeText;
     public static TMP_Text regionText;
     public static TMP_Text clickSoundText;
+    public static TMP_Text startupSoundText;
+    public static TMP_Text menuOpenSoundText;
+    public static TMP_Text buttonPopSoundText;
+    public static TMP_Text notifSoundText;
     public static TMP_Text smoothingText;
     public static TMP_Text smoothingStrengthText;
     public static TMP_Text menuScaleText;
@@ -177,8 +234,7 @@ public partial class Main : BaseUnityPlugin
     public static Camera ThirdPersonCamera { get; private set; }
     
     public static Dictionary<string, float> VolumeByPlayerID = new Dictionary<string, float>();
-    
-    
+
     private void Awake()
     {
         Instance = this;
@@ -191,6 +247,8 @@ public partial class Main : BaseUnityPlugin
 
     private void OnDestroy()
     {
+        DestroySpotifyHudResources();
+        Mods.Shutdown();
         Mods.ShutdownSpotifyMedia();
         if (ReferenceEquals(Instance, this))
             Instance = null;
@@ -210,22 +268,24 @@ public partial class Main : BaseUnityPlugin
         WakeUpMod();
     }
 
-
     private void WakeUpMod()
     {
         if (modAwakeAlready) return;
         modAwakeAlready = true;
-        PlayStartSound();
         CheckAdminStatus();
         Mods.Init();
+        PlayStartSound();
         LoadBundles();
         FontCache.LoadFonts();
         ShaderCache.Init();
         new GameObject("TUP_CoroutineHandler").AddComponent<CoroutineHandler>();
+        Mods.StartEnabledLoops();
         btnPrefab = buttonBundle.LoadAsset<GameObject>("assets/prefabs/buttonmodelui2.prefab");
         InitMenu();
         InitSettings();
         Mods.ApplySavedSettings();
+        Mods.StartRegionStatsRefresh();
+        InitStumpCreditText();
     }
     
     private void InitCycleBtns()
@@ -254,7 +314,6 @@ public partial class Main : BaseUnityPlugin
             queueSliderTransform.transform.gameObject.SetActive(false);
             queueArrowTransform.transform.gameObject.SetActive(true);
         }
-        
 
         Transform modeButton = FindChildByName(menuObj.transform, "Mode");
         TMP_Text mText = modeButton != null ? GetButtonTitle(modeButton) : null;
@@ -273,24 +332,11 @@ public partial class Main : BaseUnityPlugin
         }
 
         InitCycleButtonText("Region", ref regionText, "Region  :  " + Mods.GetRegionLabel());
-        
-        
-        Transform clickSoundTransform = menuObj.transform.Find("Click Sound/ButtonText");
-        if (clickSoundTransform != null && clickSoundTransform.TryGetComponent(out TMP_Text csText))
-        {
-            clickSoundText = csText;
-            string rawName   = Mods.clickSounds.Count > 0 ? Mods.clickSounds[Mods.currentClickIndex].Name : "-";
-            string soundName = rawName.Length > 0 ? char.ToUpper(rawName[0]) + rawName.Substring(1).ToLower() : "-";
-            clickSoundText.text = "Click Sound  :  " + soundName;
-        }
-        Transform clickSoundSliderTransform = FindButtonChild(menuObj.transform.Find("Click Sound"), "Slider");
-        Transform clickSoundArrowTransform = FindButtonChild(menuObj.transform.Find("Click Sound"), "NextArrow");
-
-        if (clickSoundSliderTransform != null && clickSoundArrowTransform != null)
-        {
-            clickSoundSliderTransform.transform.gameObject.SetActive(false);
-            clickSoundArrowTransform.transform.gameObject.SetActive(true);
-        }
+        InitCycleButtonText("Click Sound", ref clickSoundText, "Click Sound  :  " + Mods.GetClickSoundLabel());
+        InitCycleButtonText("Startup Sound", ref startupSoundText, "Startup Sound  :  " + Mods.GetStartupSoundLabel());
+        InitCycleButtonText("Menu Open Sound", ref menuOpenSoundText, "Menu Open Sound  :  " + Mods.GetMenuOpenSoundLabel());
+        InitCycleButtonText("Button Pop Sound", ref buttonPopSoundText, "Button Pop Sound  :  " + Mods.GetButtonPopSoundLabel());
+        InitCycleButtonText("Notif Sound", ref notifSoundText, "Notif Sound  :  " + Mods.GetNotifSoundLabel());
 
         InitCycleButtonText("Menu Smoothing", ref smoothingText, "Menu Smoothing  :  On");
         InitCycleButtonText("Smooth Strength", ref smoothingStrengthText, "Smooth Strength  :  " + Mods.GetSmoothingStrengthLabel());
@@ -348,7 +394,9 @@ public partial class Main : BaseUnityPlugin
     {
         Mods.NameTagsLoop();
         Mods.AutoScanLoop();
+        Mods.PadNetworkingLoop();
         UpdateSpotifyHudLoop();
+        UpdatePlayerModelPreviewLive();
         
         bool currentControllerState     = IsMenuOpenBindPressed();
         bool controllerPressedThisFrame = currentControllerState && !previousControllerState;
@@ -384,6 +432,8 @@ public partial class Main : BaseUnityPlugin
                     {
                         currentOpenType = currentControllerState ? MenuOpenType.Hand : MenuOpenType.Head;
                         isMenuOpened = OpenMenu();
+                        if (isMenuOpened)
+                            Mods.BroadcastPadNetworkState(force: true);
                     }
                 }
             }
@@ -396,6 +446,8 @@ public partial class Main : BaseUnityPlugin
                 {
                     currentOpenType = controllerHeld ? MenuOpenType.Hand : MenuOpenType.Head;
                     isMenuOpened = OpenMenu();
+                    if (isMenuOpened)
+                        Mods.BroadcastPadNetworkState(force: true);
                 }
                 else if (isMenuOpened && !controllerHeld && !keyboardIsHeld && !AlwaysShowMenu)
                 {

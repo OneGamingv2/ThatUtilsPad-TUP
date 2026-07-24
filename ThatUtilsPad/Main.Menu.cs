@@ -23,7 +23,6 @@ using Debug = UnityEngine.Debug;
 
 namespace ThatUtilsPad;
 
-
 public partial class Main
 {
     private void InitMenu()
@@ -37,8 +36,7 @@ public partial class Main
 
         AssetBundle bundle = UseSakuraTheme ? menuReduxBundle : menuBundle;
         GameObject  prefab = bundle.LoadAsset<GameObject>(prefabPath);
-        
-        
+
         menuObj = Instantiate(prefab);
         menuObj.transform.localScale = Vector3.one * menuScale;
         
@@ -82,7 +80,10 @@ public partial class Main
 
     Transform parent = currentOpenType == MenuOpenType.Head  
         ? GetActiveCamera().transform
-        : GTPlayer.Instance.LeftHand.controllerTransform;
+        : GetHandMenuTarget();
+
+    if (parent == null)
+        return false;
 
     menuObj.transform.SetParent(null);
 
@@ -93,13 +94,16 @@ public partial class Main
 
     if (currentOpenType == MenuOpenType.Head)
     {
-        smooth.LocalPosition = new Vector3(-0.03f, -0.02f, headMenuDistance);
-        smooth.LocalRotation = Quaternion.Euler(0f, 270f, 0f);
+        smooth.LocalPosition = new Vector3(HeadMenuX, HeadMenuY, headMenuDistance);
+        smooth.LocalRotation = GetHeadMenuLocalRotation();
+        smooth.Snap();
     }
     else
     {
-        smooth.LocalPosition = menuHandOffset + menuGripPosition;
-        smooth.LocalRotation = Quaternion.Euler(270f, 180f, 0f);
+
+        smooth.LocalPosition = GetHandMenuLocalPosition();
+        smooth.LocalRotation = GetHandMenuLocalRotation();
+        smooth.Snap();
     }
     
     Tools.RememberPanelSizes(menuObj.transform);
@@ -123,8 +127,6 @@ public partial class Main
             "VolumePercent",
             "MuteElse",
             "Mute",
-            "ModsTitle",
-            "CheatsTitle",
             "AddToSaved",
             "SavedPlayers",
             "Saved Players"
@@ -148,11 +150,8 @@ public partial class Main
 
     menuObj.SetActive(true);
 
-    AudioSource audioSource =
-        gameObject.GetComponent<AudioSource>() ??
-        gameObject.AddComponent<AudioSource>();
-
-    audioSource.PlayOneShot(menuOpenSound);
+    if (Mods.IsMenuOpenSoundEnabled())
+        PlayUiClip(menuOpenSound);
 
     StartCoroutine(
             MenuEffects.PopMenu(
@@ -168,9 +167,9 @@ public partial class Main
     DestroyButtons();
     InitSelectorObj();
     buttonRoutine = StartCoroutine(CreateButtons());
+    Mods.BroadcastPadNetworkState(force: true);
     return true;
 }
-    
 
     private void InitSelectorObj()
     {
@@ -257,6 +256,24 @@ public partial class Main
             return "Mode  :  " + FormatLabelValue(mode);
         }
 
+        if (string.Equals(btnName, "Region", StringComparison.OrdinalIgnoreCase))
+            return "Region  :  " + Mods.GetRegionLabel();
+
+        if (string.Equals(btnName, "Click Sound", StringComparison.OrdinalIgnoreCase))
+            return "Click Sound  :  " + Mods.GetClickSoundLabel();
+
+        if (string.Equals(btnName, "Startup Sound", StringComparison.OrdinalIgnoreCase))
+            return "Startup Sound  :  " + Mods.GetStartupSoundLabel();
+
+        if (string.Equals(btnName, "Menu Open Sound", StringComparison.OrdinalIgnoreCase))
+            return "Menu Open Sound  :  " + Mods.GetMenuOpenSoundLabel();
+
+        if (string.Equals(btnName, "Button Pop Sound", StringComparison.OrdinalIgnoreCase))
+            return "Button Pop Sound  :  " + Mods.GetButtonPopSoundLabel();
+
+        if (string.Equals(btnName, "Notif Sound", StringComparison.OrdinalIgnoreCase))
+            return "Notif Sound  :  " + Mods.GetNotifSoundLabel();
+
         return btnName;
     }
 
@@ -322,7 +339,6 @@ public partial class Main
         col.isTrigger = true;
         ShapeClickBox(buttonRoot, buttonRoot, col);
 
-
         Rigidbody rb = buttonRoot.GetComponent<Rigidbody>();
         if (rb == null)
             rb = buttonRoot.gameObject.AddComponent<Rigidbody>();
@@ -339,6 +355,8 @@ public partial class Main
         if (target == null || box == null)
             return;
 
+        EnsurePositiveColliderLossyScale(target);
+
         MeshFilter meshFilter = target.GetComponent<MeshFilter>();
         if (meshFilter != null && meshFilter.sharedMesh != null)
         {
@@ -346,7 +364,7 @@ public partial class Main
             if (bounds.size.sqrMagnitude > 0.000001f)
             {
                 box.center = bounds.center;
-                box.size = new Vector3(Mathf.Max(0.002f, bounds.size.x), Mathf.Max(0.002f, bounds.size.y), Mathf.Max(0.002f, bounds.size.z));
+                box.size = AbsSize(bounds.size, 0.002f);
                 return;
             }
         }
@@ -362,7 +380,36 @@ public partial class Main
             size = new Vector2(0.08f, 0.08f);
 
         box.center = Vector3.zero;
-        box.size = new Vector3(Mathf.Max(0.002f, size.x), Mathf.Max(0.002f, size.y), 0.01f);
+        box.size = AbsSize(new Vector3(size.x, size.y, 0.01f), 0.002f);
+    }
+
+    private static Vector3 AbsSize(Vector3 size, float min)
+    {
+        return new Vector3(
+            Mathf.Max(min, Mathf.Abs(size.x)),
+            Mathf.Max(min, Mathf.Abs(size.y)),
+            Mathf.Max(min, Mathf.Abs(size.z)));
+    }
+
+    private static void EnsurePositiveColliderLossyScale(Transform target)
+    {
+        if (target == null)
+            return;
+
+        Vector3 lossy = target.lossyScale;
+        if (lossy.x >= 0f && lossy.y >= 0f && lossy.z >= 0f)
+        {
+            Vector3 local = target.localScale;
+            if (local.x < 0f || local.y < 0f || local.z < 0f)
+                target.localScale = new Vector3(Mathf.Abs(local.x), Mathf.Abs(local.y), Mathf.Abs(local.z));
+            return;
+        }
+
+        Vector3 ls = target.localScale;
+        target.localScale = new Vector3(
+            lossy.x < 0f ? -Mathf.Abs(ls.x <= 0.0001f ? 1f : ls.x) : Mathf.Abs(ls.x <= 0.0001f ? 1f : ls.x),
+            lossy.y < 0f ? -Mathf.Abs(ls.y <= 0.0001f ? 1f : ls.y) : Mathf.Abs(ls.y <= 0.0001f ? 1f : ls.y),
+            lossy.z < 0f ? -Mathf.Abs(ls.z <= 0.0001f ? 1f : ls.z) : Mathf.Abs(ls.z <= 0.0001f ? 1f : ls.z));
     }
 
     private static bool IsInputColliderObject(Component component)
@@ -450,7 +497,8 @@ public partial class Main
         {
             if (btnObj == null) continue;
             ButtonTrigger trigger = btnObj.GetComponent<ButtonTrigger>() ?? btnObj.GetComponentInChildren<ButtonTrigger>(true);
-            if (trigger != null && trigger.IsToggle)
+
+            if (trigger != null && trigger.IsToggle && !trigger.SkipSwitchAnimation)
                 Mods.SaveToggleState(trigger.BtnIdentifier, trigger.IsOn);
         }
     }
@@ -463,6 +511,7 @@ public partial class Main
             Mods.CancelRename();
 
         isMenuClosing = true;
+        Mods.ClearPadNetworkState();
         Tools.StopCoroutine(ref buttonRoutine);
 
         if (menuObj != null && menuObj.activeSelf)
@@ -493,7 +542,33 @@ public partial class Main
             if (navBtn != null)
                 navBtn.SetActive(false);
 
+        Mods.ClearSelectionOnMenuClose();
+        Mods.ClearPadNetworkState();
         isMenuClosing = false;
+    }
+
+    public void RefreshSelectUserButtonStates()
+    {
+        if (currentCategory != "SelectUser")
+            return;
+
+        foreach (GameObject btnObj in buttons)
+        {
+            if (btnObj == null)
+                continue;
+
+            ButtonTrigger trigger = btnObj.GetComponent<ButtonTrigger>() ?? btnObj.GetComponentInChildren<ButtonTrigger>(true);
+
+            if (trigger == null || !trigger.IsToggle || !trigger.SkipSwitchAnimation || trigger.CustomAction == null)
+                continue;
+
+            bool selected = Mods.IsSelectedPlayerButton(trigger.BtnIdentifier);
+            trigger.IsOn = selected;
+            if (selected)
+                MenuEffects.SnapActivated(trigger.Knob, trigger.Slider, trigger.BodyRenderer, trigger.OutlineRenderer);
+            else
+                MenuEffects.SnapDeactivated(trigger.Knob, trigger.Slider, trigger.BodyRenderer, trigger.OutlineRenderer);
+        }
     }
     
     private IEnumerator CreateButtons(string categoryName = "Networking")
@@ -520,6 +595,8 @@ public partial class Main
             index++;
             yield return new WaitForSeconds(0.08f);
         }
+
+        InitCycleBtns();
     }
     
     private readonly struct PageButtonItem
@@ -553,7 +630,15 @@ public partial class Main
                 continue;
 
             VRRig capturedRig = rig;
-            items.Add(new PageButtonItem(Mods.GetRigDisplayName(rig), false, 0f, () => Mods.SelectRigFromMenu(capturedRig)));
+            items.Add(new PageButtonItem(
+                Mods.GetRigDisplayName(rig),
+                true,
+                0f,
+                () =>
+                {
+                    Mods.SelectRigFromMenu(capturedRig);
+                    RefreshSelectUserButtonStates();
+                }));
         }
 
         return items;
@@ -647,18 +732,11 @@ public partial class Main
 
     private void InitNavButtons(GameObject menuObj)
     {
+        pageButtonObjs.Clear();
         string[] navNames = { "PageBack", "PageNext" };
         foreach (string navName in navNames)
         {
-            Transform navTransform = null;
-            foreach (Transform child in menuObj.GetComponentsInChildren<Transform>(true))
-            {
-                if (child.name.Equals(navName, StringComparison.OrdinalIgnoreCase))
-                {
-                    navTransform = child;
-                    break;
-                }
-            }
+            Transform navTransform = FindMainMenuNavButton(menuObj.transform, navName);
             if (navTransform == null)
             {
                 Debug.LogWarning($"[TUP] Nav button '{navName}' not found in menu prefab");
@@ -668,9 +746,41 @@ public partial class Main
             int delta = navName == "PageNext" ? 1 : -1;
             ButtonTrigger trigger = WireInteractive(navTransform, navName, () => ChangePage(delta), GetInteractiveCollider(navTransform, "Collider"));
             MenuTheme.ApplyNavButton(navTransform);
+            navTransform.gameObject.SetActive(true);
 
             pageButtonObjs.Add(navTransform.gameObject);
         }
+    }
+
+    private static Transform FindMainMenuNavButton(Transform menuRoot, string navName)
+    {
+        if (menuRoot == null)
+            return null;
+
+        Transform best = null;
+        foreach (Transform child in menuRoot.GetComponentsInChildren<Transform>(true))
+        {
+            if (!child.name.Equals(navName, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (child.name.StartsWith("TUP_", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string path = GetTransformPath(child);
+            if (path.IndexOf("SideHolder", StringComparison.OrdinalIgnoreCase) >= 0)
+                continue;
+            if (path.IndexOf("ModsTitle", StringComparison.OrdinalIgnoreCase) >= 0)
+                continue;
+            if (path.IndexOf("CheatsTitle", StringComparison.OrdinalIgnoreCase) >= 0)
+                continue;
+            if (path.IndexOf("TUP_ModPage", StringComparison.OrdinalIgnoreCase) >= 0)
+                continue;
+
+            best = child;
+            if (path.IndexOf("MainMenu", StringComparison.OrdinalIgnoreCase) >= 0)
+                return child;
+        }
+
+        return best;
     }
 
     private void ChangePage(int delta)
@@ -712,9 +822,9 @@ public partial class Main
         float height       = -(visualIndex * gap);
 
         CreateButton(height, "Saved Outfit #" + n, false, 0f);
+        InitCycleBtns();
     }
 
-    
     private void CreateButton(float yOffset, string btnName, bool isToggle = false, float cooldown = 0f, Action customAction = null)
     {
         GameObject btn;
@@ -781,16 +891,15 @@ public partial class Main
         if (clickCollider == null)
             AttachRootPress(btn.transform, trigger);
 
-
+        trigger.SkipSwitchAnimation = false;
+        trigger.IsKeyboardKey = false;
+        trigger.CustomAction = customAction;
 
         trigger.Slider = slider;
 
-
         trigger.Knob = knob;
 
-
         trigger.IsToggle = isToggle;
-
 
         trigger.Cooldown = cooldown;
 
@@ -805,6 +914,18 @@ public partial class Main
                 queueText = text;
             else if (string.Equals(btnName, "Mode", StringComparison.OrdinalIgnoreCase))
                 modeText = text;
+            else if (string.Equals(btnName, "Region", StringComparison.OrdinalIgnoreCase))
+                regionText = text;
+            else if (string.Equals(btnName, "Click Sound", StringComparison.OrdinalIgnoreCase))
+                clickSoundText = text;
+            else if (string.Equals(btnName, "Startup Sound", StringComparison.OrdinalIgnoreCase))
+                startupSoundText = text;
+            else if (string.Equals(btnName, "Menu Open Sound", StringComparison.OrdinalIgnoreCase))
+                menuOpenSoundText = text;
+            else if (string.Equals(btnName, "Button Pop Sound", StringComparison.OrdinalIgnoreCase))
+                buttonPopSoundText = text;
+            else if (string.Equals(btnName, "Notif Sound", StringComparison.OrdinalIgnoreCase))
+                notifSoundText = text;
         }
         else
             Debug.LogError("[TUP] Text not found: " + btnName);
@@ -849,10 +970,30 @@ public partial class Main
             else if (btnName == "Nametag Fade Distance") { nameTagFadeDistanceText = text; text.text = "Nametag Fade Distance  :  " + Mods.GetNameTagFadeDistanceLabel(); }
         }
 
-        if (isToggle && Mods.SavedToggleStates.TryGetValue(btnName, out bool savedOn) && savedOn)
+        if (isToggle)
         {
-            trigger.IsOn = true;
-            MenuEffects.SnapActivated(knob, slider, trigger.BodyRenderer, trigger.OutlineRenderer);
+
+            bool isStickyPlayerSelect = currentCategory == "SelectUser" && customAction != null;
+            bool savedOn = isStickyPlayerSelect
+                ? Mods.IsSelectedPlayerButton(btnName)
+                : Mods.GetSavedToggle(btnName, false);
+            trigger.IsOn = savedOn;
+
+            if (isStickyPlayerSelect)
+            {
+                trigger.SkipSwitchAnimation = true;
+                Action selectAction = customAction;
+                trigger.CustomAction = () =>
+                {
+                    selectAction?.Invoke();
+                    RefreshSelectUserButtonStates();
+                };
+            }
+
+            if (savedOn)
+                MenuEffects.SnapActivated(knob, slider, trigger.BodyRenderer, trigger.OutlineRenderer);
+            else
+                MenuEffects.SnapDeactivated(knob, slider, trigger.BodyRenderer, trigger.OutlineRenderer);
         }
 
         if (btnName.StartsWith("Saved Outfit #") && int.TryParse(btnName.Substring("Saved Outfit #".Length), out int outfitN))
@@ -877,12 +1018,10 @@ public partial class Main
         btn.transform.localScale = Vector3.zero;
         StartCoroutine(MenuEffects.PopButton(btn, targetScale, Vector3.zero, true));
 
-        AudioSource audioSource = gameObject.GetComponent<AudioSource>() ?? gameObject.AddComponent<AudioSource>();
-        audioSource.volume = 0.1f;
-        audioSource.PlayOneShot(btnEnterSound);
+        if (Mods.IsButtonPopSoundEnabled())
+            PlayUiClip(btnEnterSound, 0.1f);
 
         buttons.Add(btn);
-        InitCycleBtns();
     }
     public void PutMenuInTypingSpot()
     {
@@ -899,7 +1038,7 @@ public partial class Main
         smooth.UseYawDeadzone = true;
         smooth.YawActivationDegrees = 30f;
         smooth.Smoothing = 12f;
-        smooth.LocalPosition = new Vector3(0f, -0.05f, 0.6f);
+        smooth.LocalPosition = new Vector3(0f, -0.05f, 0.8f);
         smooth.LocalRotation = Quaternion.Euler(0f, 270f, 0f);
         smooth.Frozen = false;
         smooth.ResetDeadzoneAnchor();
@@ -915,24 +1054,27 @@ public partial class Main
 
         Transform parent = currentOpenType == MenuOpenType.Head
             ? GetActiveCamera().transform
-            : GTPlayer.Instance.LeftHand.controllerTransform;
+            : GetHandMenuTarget();
+
+        if (parent == null)
+            return;
 
         SmoothFollowMenu smooth = menuObj.GetComponent<SmoothFollowMenu>() ?? menuObj.AddComponent<SmoothFollowMenu>();
         smooth.YawOnly = false;
         smooth.UseYawDeadzone = false;
         smooth.Target = parent;
-        smooth.Smoothing = 12f;
+        smooth.Smoothing = menuSmoothingEnabled ? menuSmoothingStrength : 1000f;
         smooth.Frozen = false;
 
         if (currentOpenType == MenuOpenType.Head)
         {
-            smooth.LocalPosition = new Vector3(-0.03f, -0.02f, headMenuDistance);
-            smooth.LocalRotation = Quaternion.Euler(0f, 270f, 0f);
+            smooth.LocalPosition = new Vector3(HeadMenuX, HeadMenuY, headMenuDistance);
+            smooth.LocalRotation = GetHeadMenuLocalRotation();
         }
         else
         {
-            smooth.LocalPosition = menuHandOffset + menuGripPosition;
-            smooth.LocalRotation = Quaternion.Euler(270f - menuGripRotaton, 180f, 0f);
+            smooth.LocalPosition = GetHandMenuLocalPosition();
+            smooth.LocalRotation = GetHandMenuLocalRotation();
         }
 
         smooth.ResetDeadzoneAnchor();
@@ -952,13 +1094,158 @@ public partial class Main
     {
         menuScale = Mathf.Clamp(scale, 0.2f, 0.6f);
 
-        if (menuObj != null && menuObj.activeSelf)
+        if (menuObj == null)
+            return;
+
+        if (menuObj.activeSelf)
         {
             if (menuScaleRoutine != null)
                 StopCoroutine(menuScaleRoutine);
 
             menuScaleRoutine = StartCoroutine(SmoothMenuScale(menuScale));
+            return;
         }
+
+        menuObj.transform.localScale = Vector3.one * menuScale;
+    }
+
+    private Vector3 GetHandMenuLocalPosition()
+    {
+        return menuHandOffset + new Vector3(menuOffsetOut, menuOffsetUp, menuOffsetRight);
+    }
+
+    private Quaternion GetHandMenuLocalRotation()
+    {
+
+        return Quaternion.Euler(345f - menuGripTilt, 195f, 0f);
+    }
+
+    public static Vector3 GetNetworkedPadLocalPosition()
+    {
+        if (Instance == null)
+            return new Vector3(0.024f, -0.13f, 0.03f);
+        return Instance.GetHandMenuLocalPosition();
+    }
+
+    public static Quaternion GetNetworkedPadLocalRotation()
+    {
+        if (Instance == null)
+            return Quaternion.Euler(300f, 195f, 0f);
+        return Instance.GetHandMenuLocalRotation();
+    }
+
+    public static float GetNetworkedPadScale()
+    {
+        return Instance != null ? Instance.menuScale : 0.375f;
+    }
+
+    public bool IsHandPadNetworkVisible(out bool leftHand)
+    {
+        leftHand = true;
+        return isMenuOpened && !isMenuClosing && currentOpenType == MenuOpenType.Hand;
+    }
+
+    public GameObject CreateNetworkPadVisual()
+    {
+        if (!menuMadeAlready)
+            InitMenu();
+
+        AssetBundle bundle = UseSakuraTheme ? menuReduxBundle : menuBundle;
+        if (bundle == null)
+            return null;
+
+        string prefabPath = UseSakuraTheme
+            ? "assets/prefabs/TUP-overv18.prefab"
+            : "assets/prefabs/tup-modelsmooth.prefab";
+
+        GameObject prefab = bundle.LoadAsset<GameObject>(prefabPath);
+        if (prefab == null)
+            return null;
+
+        GameObject visual = Instantiate(prefab);
+        visual.transform.localScale = Vector3.one * menuScale;
+        StripNetworkPadInteractives(visual);
+        MenuTheme.Assign(visual, Theme);
+        return visual;
+    }
+
+    private static void StripNetworkPadInteractives(GameObject visual)
+    {
+        if (visual == null)
+            return;
+
+        Rigidbody[] bodies = visual.GetComponentsInChildren<Rigidbody>(true);
+        for (int i = 0; i < bodies.Length; i++)
+        {
+            if (bodies[i] != null)
+                Destroy(bodies[i]);
+        }
+
+        Collider[] colliders = visual.GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            if (colliders[i] != null)
+                Destroy(colliders[i]);
+        }
+
+        ButtonTrigger[] triggers = visual.GetComponentsInChildren<ButtonTrigger>(true);
+        for (int i = 0; i < triggers.Length; i++)
+        {
+            if (triggers[i] != null)
+                Destroy(triggers[i]);
+        }
+
+        MonoBehaviour[] behaviours = visual.GetComponentsInChildren<MonoBehaviour>(true);
+        for (int i = 0; i < behaviours.Length; i++)
+        {
+            MonoBehaviour behaviour = behaviours[i];
+            if (behaviour == null)
+                continue;
+
+            string typeName = behaviour.GetType().Name;
+            if (typeName.IndexOf("Button", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                typeName.IndexOf("Hover", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                typeName.IndexOf("Slider", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                typeName.IndexOf("Follow", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                Destroy(behaviour);
+            }
+        }
+
+        Transform side = visual.transform.Find("SideHolder");
+        if (side != null)
+            side.gameObject.SetActive(false);
+
+        Transform keyboard = visual.transform.Find("Keyboard");
+        if (keyboard != null)
+            keyboard.gameObject.SetActive(false);
+    }
+
+    private Quaternion GetHeadMenuLocalRotation()
+    {
+        return Quaternion.Euler(0f, 270f, 0f);
+    }
+
+    private static Transform GetHandMenuTarget()
+    {
+        if (GTPlayer.Instance == null)
+            return null;
+
+        Transform controller = GTPlayer.Instance.LeftHand.controllerTransform;
+        return controller != null ? controller : null;
+    }
+
+    private void RefreshHandMenuFollowPose()
+    {
+        if (!isMenuOpened || currentOpenType == MenuOpenType.Head || menuObj == null)
+            return;
+
+        SmoothFollowMenu sf = menuObj.GetComponent<SmoothFollowMenu>();
+        if (sf == null)
+            return;
+
+        sf.LocalPosition = GetHandMenuLocalPosition();
+        sf.LocalRotation = GetHandMenuLocalRotation();
     }
 
     private IEnumerator SmoothMenuScale(float targetScale)
@@ -979,11 +1266,15 @@ public partial class Main
             elapsed += Time.deltaTime;
             float t = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(elapsed / duration));
             menuObj.transform.localScale = Vector3.LerpUnclamped(startScale, endScale, t);
+            RefreshHandMenuFollowPose();
             yield return null;
         }
 
         if (menuObj != null && menuObj.activeSelf)
+        {
             menuObj.transform.localScale = endScale;
+            RefreshHandMenuFollowPose();
+        }
 
         menuScaleRoutine = null;
     }
@@ -994,16 +1285,12 @@ public partial class Main
 
         SmoothFollowMenu sf = menuObj?.GetComponent<SmoothFollowMenu>();
         if (sf != null && currentOpenType == MenuOpenType.Head)
-            sf.LocalPosition = new Vector3(-0.03f, -0.02f, headMenuDistance);
+            sf.LocalPosition = new Vector3(HeadMenuX, HeadMenuY, headMenuDistance);
     }
 
     public void PlayBtnCickSound()
     {
-        AudioSource audioSource = gameObject.GetComponent<AudioSource>();
-        if (audioSource == null)
-            audioSource = gameObject.AddComponent<AudioSource>();
-
-        audioSource.PlayOneShot(currentClickSound);
+        PlayUiClip(currentClickSound);
     }
 
     private void DestroyButtons()

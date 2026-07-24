@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -52,7 +51,6 @@ namespace ThatUtilsPad.Spotify
 
     internal static class SpotifyMediaService
     {
-        private const string NativeLibrary = "ThatUtilsPad.MediaBridge.dll";
         private const long PollIntervalMilliseconds = 1000;
         private static readonly Stopwatch Clock = Stopwatch.StartNew();
         private static SpotifyMediaSnapshot latest = SpotifyMediaSnapshot.Offline;
@@ -81,7 +79,7 @@ namespace ThatUtilsPad.Spotify
                 return;
 
             Interlocked.Exchange(ref nextPollAt, now + PollIntervalMilliseconds);
-            Task.Run(PollNative);
+            Task.Run(PollMedia);
         }
 
         internal static void Shutdown()
@@ -91,22 +89,16 @@ namespace ThatUtilsPad.Spotify
 
             Task.Run(() =>
             {
-                try
-                {
-                    NativeMethods.TUP_Shutdown();
-                }
-                catch (DllNotFoundException) { }
-                catch (EntryPointNotFoundException) { }
-                catch (BadImageFormatException) { }
+                try { WindowsMediaSessionProvider.Shutdown(); }
                 catch { }
             });
         }
 
-        private static void PollNative()
+        private static void PollMedia()
         {
             try
             {
-                SpotifyMediaSnapshot snapshot = ReadNativeSnapshot();
+                SpotifyMediaSnapshot snapshot = ReadManagedSnapshot();
                 if (!snapshot.HasTrack && !snapshot.Status.Equals("Paused", StringComparison.OrdinalIgnoreCase))
                 {
                     SpotifyMediaSnapshot fallback = ReadSpotifyWindowTitle();
@@ -114,18 +106,6 @@ namespace ThatUtilsPad.Spotify
                         snapshot = fallback;
                 }
                 Volatile.Write(ref latest, snapshot);
-            }
-            catch (DllNotFoundException)
-            {
-                Volatile.Write(ref latest, ReadSpotifyWindowTitle());
-            }
-            catch (EntryPointNotFoundException)
-            {
-                Volatile.Write(ref latest, ReadSpotifyWindowTitle());
-            }
-            catch (BadImageFormatException)
-            {
-                Volatile.Write(ref latest, ReadSpotifyWindowTitle());
             }
             catch (Exception error)
             {
@@ -140,67 +120,65 @@ namespace ThatUtilsPad.Spotify
             }
         }
 
-        private static SpotifyMediaSnapshot ReadNativeSnapshot()
+        private static SpotifyMediaSnapshot ReadManagedSnapshot()
         {
-            IntPtr resultPointer = IntPtr.Zero;
-            int callResult = NativeMethods.TUP_GetMediaSnapshot(out resultPointer);
-            if (callResult < 0)
-                Marshal.ThrowExceptionForHR(callResult);
-            if (resultPointer == IntPtr.Zero)
-                throw new InvalidOperationException("Media bridge returned no result.");
-
-            try
+            WindowsMediaSessionProvider.MediaSnapshot result = WindowsMediaSessionProvider.GetSnapshot();
+            if (result.ErrorCode < 0)
             {
-                NativeResult result = Marshal.PtrToStructure<NativeResult>(resultPointer);
-                if (result.AbiVersion != 1 || result.StructSize < Marshal.SizeOf<NativeResult>())
-                    throw new InvalidOperationException("Unsupported media bridge ABI.");
-                if (result.ErrorCode < 0)
-                {
-                    string nativeError = ReadString(result.ErrorMessage);
-                    if (string.IsNullOrEmpty(nativeError))
-                        nativeError = "Native media query failed (0x" + result.ErrorCode.ToString("X8") + ").";
-                    throw new InvalidOperationException(nativeError);
-                }
-
-                string title = Clean(ReadString(result.Title));
-                string artist = Clean(ReadString(result.Artist));
-                string source = Clean(ReadString(result.Source));
-                bool hasTrack = IsUsefulTitle(title);
-                if (!hasTrack)
-                    title = "No song";
-                if (string.IsNullOrEmpty(artist))
-                    artist = "Unknown Artist";
-
-                byte[] thumbnail = null;
-                if (result.ThumbnailBytes != IntPtr.Zero && result.ThumbnailLength > 0 &&
-                    result.ThumbnailLength <= int.MaxValue)
-                {
-                    thumbnail = new byte[(int)result.ThumbnailLength];
-                    Marshal.Copy(result.ThumbnailBytes, thumbnail, 0, thumbnail.Length);
-                }
-
-                string status = result.PlaybackStatus == 5 ? "Playing" :
-                    result.PlaybackStatus == 6 ? "Paused" : (hasTrack ? "Stopped" : "Offline");
-                string duration = result.EndSeconds > 0
-                    ? FormatTime(result.ElapsedSeconds) + " / " + FormatTime(result.EndSeconds)
-                    : "--:--";
-                return new SpotifyMediaSnapshot(title, artist, source, duration, status, hasTrack,
-                    result.StartSeconds, result.EndSeconds, result.ElapsedSeconds, thumbnail);
+                string message = string.IsNullOrEmpty(result.ErrorMessage)
+                    ? "Native media query failed (0x" + result.ErrorCode.ToString("X8") + ")."
+                    : result.ErrorMessage;
+                throw new InvalidOperationException(message);
             }
-            finally
-            {
-                NativeMethods.TUP_FreeMediaResult(resultPointer);
-            }
+
+            string title = Clean(result.Title);
+            string artist = Clean(result.Artist);
+            string source = Clean(result.Source);
+            bool hasTrack = IsUsefulTitle(title);
+            if (!hasTrack)
+                title = "No song";
+            if (string.IsNullOrEmpty(artist))
+                artist = "Unknown Artist";
+
+            string status = result.PlaybackStatus == 4 ? "Playing" :
+                result.PlaybackStatus == 5 ? "Paused" :
+                (hasTrack ? "Stopped" : "Offline");
+            string duration = result.EndSeconds > 0
+                ? FormatTime(result.ElapsedSeconds) + " / " + FormatTime(result.EndSeconds)
+                : "--:--";
+
+            return new SpotifyMediaSnapshot(
+                title,
+                artist,
+                source,
+                duration,
+                status,
+                hasTrack,
+                result.StartSeconds,
+                result.EndSeconds,
+                result.ElapsedSeconds,
+                result.ThumbnailBytes);
         }
 
         private static SpotifyMediaSnapshot ReadSpotifyWindowTitle()
         {
+            Process[] processes = null;
             try
             {
-                Process[] processes = Process.GetProcessesByName("Spotify");
-                List<string> titles = GetWindowTitles(processes);
-                string title = titles.FirstOrDefault(IsUsefulTitle) ??
-                    processes.Select(process => process.MainWindowTitle).FirstOrDefault(IsUsefulTitle);
+                processes = Process.GetProcessesByName("Spotify");
+                string title = GetFirstUsefulWindowTitle(processes);
+                if (string.IsNullOrWhiteSpace(title))
+                {
+                    foreach (Process process in processes)
+                    {
+                        string mainWindowTitle = process.MainWindowTitle;
+                        if (IsUsefulTitle(mainWindowTitle))
+                        {
+                            title = mainWindowTitle;
+                            break;
+                        }
+                    }
+                }
                 if (string.IsNullOrWhiteSpace(title))
                     return SpotifyMediaSnapshot.Offline;
 
@@ -222,12 +200,26 @@ namespace ThatUtilsPad.Spotify
             {
                 return SpotifyMediaSnapshot.Offline;
             }
+            finally
+            {
+                if (processes != null)
+                {
+                    foreach (Process process in processes)
+                    {
+                        try { process?.Dispose(); }
+                        catch { }
+                    }
+                }
+            }
         }
 
-        private static List<string> GetWindowTitles(Process[] processes)
+        private static string GetFirstUsefulWindowTitle(Process[] processes)
         {
-            HashSet<uint> processIds = new HashSet<uint>(processes.Select(process => (uint)process.Id));
-            List<string> titles = new List<string>();
+            HashSet<uint> processIds = new HashSet<uint>();
+            foreach (Process process in processes)
+                processIds.Add((uint)process.Id);
+
+            string usefulTitle = null;
             NativeMethods.EnumWindows((window, parameter) =>
             {
                 NativeMethods.GetWindowThreadProcessId(window, out uint processId);
@@ -237,14 +229,18 @@ namespace ThatUtilsPad.Spotify
                 int length = NativeMethods.GetWindowTextLength(window);
                 if (length <= 0)
                     return true;
+
                 StringBuilder builder = new StringBuilder(length + 1);
                 NativeMethods.GetWindowText(window, builder, builder.Capacity);
                 string title = builder.ToString().Trim();
-                if (!string.IsNullOrWhiteSpace(title) && !titles.Contains(title))
-                    titles.Add(title);
+                if (IsUsefulTitle(title))
+                {
+                    usefulTitle = title;
+                    return false;
+                }
                 return true;
             }, IntPtr.Zero);
-            return titles;
+            return usefulTitle;
         }
 
         private static bool IsUsefulTitle(string value)
@@ -266,9 +262,6 @@ namespace ThatUtilsPad.Spotify
                    title.IndexOf("Default IME", StringComparison.OrdinalIgnoreCase) < 0;
         }
 
-        private static string ReadString(IntPtr value) =>
-            value == IntPtr.Zero ? "" : Marshal.PtrToStringUni(value) ?? "";
-
         private static string Clean(string value) =>
             string.IsNullOrWhiteSpace(value) ? "" : value.Trim().Replace("\r", " ").Replace("\n", " ");
 
@@ -278,36 +271,9 @@ namespace ThatUtilsPad.Spotify
             return ((int)(seconds / 60)) + ":" + ((int)(seconds % 60)).ToString("00");
         }
 
-        [StructLayout(LayoutKind.Sequential)]
-        private struct NativeResult
-        {
-            internal uint AbiVersion;
-            internal uint StructSize;
-            internal int ErrorCode;
-            internal int PlaybackStatus;
-            internal IntPtr Title;
-            internal IntPtr Artist;
-            internal IntPtr Source;
-            internal IntPtr ErrorMessage;
-            internal double StartSeconds;
-            internal double EndSeconds;
-            internal double ElapsedSeconds;
-            internal IntPtr ThumbnailBytes;
-            internal uint ThumbnailLength;
-        }
-
         private static class NativeMethods
         {
             internal delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
-
-            [DllImport(NativeLibrary, CallingConvention = CallingConvention.Cdecl)]
-            internal static extern int TUP_GetMediaSnapshot(out IntPtr result);
-
-            [DllImport(NativeLibrary, CallingConvention = CallingConvention.Cdecl)]
-            internal static extern void TUP_FreeMediaResult(IntPtr result);
-
-            [DllImport(NativeLibrary, CallingConvention = CallingConvention.Cdecl)]
-            internal static extern void TUP_Shutdown();
 
             [DllImport("user32.dll")]
             internal static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);

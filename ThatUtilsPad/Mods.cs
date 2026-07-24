@@ -102,12 +102,28 @@ public static partial class Mods
         public readonly string Name;
         public readonly bool IsLegal;
         public readonly string Section;
+        public readonly string Normalized;
+        public readonly string Compact;
+        public readonly bool RequiresWholeToken;
 
-        public PropertySignature(string name, bool isLegal, string section)
+        public PropertySignature(string name, bool isLegal, string section, string normalized, string compact)
         {
             Name = name;
             IsLegal = isLegal;
             Section = section;
+            Normalized = normalized;
+            Compact = compact;
+            RequiresWholeToken = normalized.Length <= 3 && !IsAllDigits(normalized);
+        }
+
+        private static bool IsAllDigits(string value)
+        {
+            if (value.Length == 0)
+                return false;
+            for (int i = 0; i < value.Length; i++)
+                if (!char.IsDigit(value[i]))
+                    return false;
+            return true;
         }
     }
 
@@ -137,6 +153,7 @@ public static void Init()
                     { "Join Random", new ModAction(JoinRandom, false, true, 5f) },
                     { "Lobby Hop", new ModAction(LobbyHop, false, true, 5f) },
                     { "Region", new ModAction(CycleRegion, false, true, 5f) },
+                    { "Region Players", new ModAction(ShowRegionPlayers, false, true, 2f) },
                     { "Copy Room Code", new ModAction(CopyRoomCode, false) },
                     { "Queue", new ModAction(ToggleQueue, false) },
                     { "Mode", new ModAction(ToggleMode, false) },
@@ -183,7 +200,11 @@ public static void Init()
                 Actions =
                 {
                     { "Click Sound", new ModAction(ToggleClickSound, false) },
-                    { "Test Sound", new ModAction(Nothing, false) },
+                    { "Startup Sound", new ModAction(ToggleStartupSound, true) },
+                    { "Menu Open Sound", new ModAction(ToggleMenuOpenSound, true) },
+                    { "Button Pop Sound", new ModAction(ToggleButtonPopSound, true) },
+                    { "Notif Sound", new ModAction(ToggleNotifSound, true) },
+                    { "Credits", new ModAction(ShowCredits, false) },
                     { "Menu Smoothing", new ModAction(SmoothMenu, true) },
                     { "Smooth Strength", new ModAction(CycleMenuSmoothingStrength, false) },
                     { "Menu Scale", new ModAction(CycleMenuScale, false) },
@@ -232,9 +253,6 @@ public static void Init()
 
 private static void ApplyLoadedToggleStates()
 {
-    if (checkerEnabled && checkerCoroutine == null && CoroutineHandler.Instance != null)
-        checkerCoroutine = CoroutineHandler.Instance.StartCoroutine(CheckerLoop());
-
     if (!nameTagsEnabled)
         DisableNameTags();
 
@@ -244,8 +262,14 @@ private static void ApplyLoadedToggleStates()
         autoScannedActorNumbers.Clear();
     }
 }
-private static void Nothing()
+
+public static void StartEnabledLoops()
 {
-    ShowNotification("testing yipee", NotificationDefaultDuration);
+    if (checkerEnabled && checkerCoroutine == null && CoroutineHandler.Instance != null)
+        checkerCoroutine = CoroutineHandler.Instance.StartCoroutine(CheckerLoop());
+}
+private static void ShowCredits()
+{
+    ShowNotification("Made by Onegamingv2 - Version 1.0.0", NotificationDefaultDuration);
 }
 }

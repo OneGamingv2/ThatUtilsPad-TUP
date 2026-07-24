@@ -259,8 +259,17 @@ rpc_reportslingshothit
 masserialize
 sendserialize
 27263
+thatutilspad
+ThatUtilsPad
+ThatUtilsPad Hand
+TUP PAD
+TUP HAND
 seralyth menu
 seralyth software
+org.seralyth.gorillatag.seralythmenu
+com.goldentrophy.gorillatag.console
+org.legoandmars.gorillatag.utilla
+menu.seralyth.software
 menuversion
 menuname
 menuuser
@@ -283,6 +292,83 @@ menuusertracers
 dynamicanimations
 particlespawneffect
 promptvideoplayer
+violetpaiduser
+violetfree
+violet on top
+obsidianmc
+oblivionuser
+eyerock reborn
+asteroidlite
+elux
+cokecosmetics
+hidden menu
+mediapad
+gorillashop
+fusioned
+atlas
+emotewheel
+untitled
+boydoiloveinformation public
+dtaoi
+body tracking
+body estimation
+gorilla track
+custommaterial
+i like cheese
+chainedtogetheractive
+csversion
+shirtproperties
+gorillashirts
+6xpyykmrcthkhfeufkygxv7xnxpoe2
+github.com/maroon-shadow/simpleboards
+github.com/zlothy29iq/gorillamediadisplay
+github.com/zlothy29iq/toomuchinfo
+github.com/zlothy29iq/roomutils-iw
+github.com/zlothy29iq/monkeclick
+github.com/zlothy29iq/monkeclick-ci
+github.com/zlothy29iq/monkerealism
+github.com/zlothy29iq/zloth-recroomrig
+made by biotest05 :3
+øƦɓƖƬ
+orbit
+hp_left
+grateversion
+void_menu_open
+bananaphone
+gorillawatch
+infowatch
+monkephone
+pmversion
+gtrials
+msp
+gorillastats
+using gorilladrift
+monkehavocversion
+tictactoe
+ccolor
+imposter
+spectapeversion
+cats
+fys cool magic mod
+colour
+chainedtogether
+goofywalkversion
+cheese is gouda
+shirtversion
+gpronouns
+gfaces
+fps-nametags for zlothy
+6p72ly3j85pau2g9mda6ib8px
+carname
+cronos
+mp25
+rgba
+vivid
+gc
+bananaos
+genesis
+void
+y u lookin in here weirdo
 
 High-risk property keys
 
@@ -823,4 +909,48 @@ VOID
 WALKSIM ZLOTHY
 WHOISTHATMONKE
 ZelixModChecker (M)
-ZLOTHYBodyEst
+ZLOTHYBodyEstBlossomChecker
+Blossom Mod Checker
+Monkster Mod Checker
+Monksters Mod Checker
+MonkEye Mod Checker
+Open Body Tracking By Ivy ~ (2.1.0)
+GorillaBody 4.0.0
+MonkePhone
+Bark
+Grate
+InfoWatch
+bigusnametags++
+GorillaShirts
+GorillaShirtsFeb26
+Za5fih
+LBjubZwL9
+JSqLs2JEvXZJ6ei
+VJx0HKTY
+lfae3j
+va7bLsuhWVsqNkH
+WuC97WZ67
+Gw0ybcNDar
+KameColor
+BarkEnabledModules
+KameState
+BarkVersion
+BarkPlayerSize
+Juul
+ThatUtilsPad
+
+Illegal mod hints (mods tab red flag)
+
+BananaOS
+PolkaDottedPlayer
+RecRoomRig
+HanSolo1000Falcon
+1y u lookin in here weirdo
+WalkSimulator
+genesis
+DTASLOI
+Elixir
+fps-nametags for zlothy
+FPS-Nametages for Zlothy
+ki.gui
+Zlothy

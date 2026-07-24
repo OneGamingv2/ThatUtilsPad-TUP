@@ -1,36 +1,78 @@
 using System;
-using System.Collections;
-using GorillaLocomotion;
 using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using GorillaGameModes;
+using GorillaLocomotion;
 using GorillaNetworking;
-using Photon.Pun;
 using Photon.Realtime;
-using UnityEngine.XR;
-using UnityEngine;
-using UnityEngine.InputSystem;
-using Object = UnityEngine.Object;
-using PlayFab;
-using PlayFab.ClientModels;
-using Photon.Voice.Unity;
 using TMPro;
-using ThatUtilsPad.MenuComponents;
+using UnityEngine;
 using UnityEngine.UI;
-using Newtonsoft.Json.Linq;
+using Object = UnityEngine.Object;
 using Debug = UnityEngine.Debug;
 
 namespace ThatUtilsPad;
 
-
 public static partial class Mods
 {
-    
-    private static bool nameTagsEnabled = false;
-    private static readonly Dictionary<VRRig, GameObject> nametags = new();
-    public static AssetBundle nameBundle;
-    private static GameObject nameTagPrefab;
+    private sealed class NameTagLabelBinding
+    {
+        public TMP_Text? Tmp;
+        public Text? UiText;
+
+        public void Set(string value)
+        {
+            if (Tmp != null)
+                Tmp.text = value;
+            else if (UiText != null)
+                UiText.text = value;
+        }
+    }
+
+    private sealed class NameTagColorBinding
+    {
+        public readonly List<Graphic> Graphics = new List<Graphic>();
+        public readonly List<SpriteRenderer> Sprites = new List<SpriteRenderer>();
+        public readonly List<Renderer> Renderers = new List<Renderer>();
+    }
+
+    private sealed class NameTagView
+    {
+        public GameObject Root = null!;
+        public Transform RootTransform = null!;
+        public Transform Anchor = null!;
+        public NameTagLabelBinding Name = null!;
+        public NameTagLabelBinding Fps = null!;
+        public NameTagLabelBinding Ping = null!;
+        public NameTagLabelBinding Mods = null!;
+        public NameTagColorBinding FpsColors = null!;
+        public NameTagColorBinding PingColors = null!;
+        public NameTagColorBinding ModsColors = null!;
+        public GameObject? IconMeta;
+        public GameObject? IconPc;
+        public GameObject? IconUnknown;
+        public GameObject? IconSteam;
+        public string? LastName;
+        public int LastFps = int.MinValue;
+        public int LastPing = int.MinValue;
+        public NameTagModStatus LastModStatus;
+        public bool HasModStatus;
+        public string? LastPlatform;
+        public Color LastFpsColor;
+        public Color LastPingColor;
+        public Color LastModsColor;
+        public bool HasFpsColor;
+        public bool HasPingColor;
+        public bool HasModsColor;
+    }
+
+    private static bool nameTagsEnabled;
+    private static readonly Dictionary<VRRig, NameTagView> nametags = new Dictionary<VRRig, NameTagView>();
+    private static readonly List<VRRig> nameTagRigScratch = new List<VRRig>();
+    private static readonly HashSet<VRRig> activeNameTagRigs = new HashSet<VRRig>();
+    private static readonly MaterialPropertyBlock nameTagPropertyBlock = new MaterialPropertyBlock();
+    private static readonly int NameTagColorProperty = Shader.PropertyToID("_Color");
+    public static AssetBundle? nameBundle;
+    private static GameObject? nameTagPrefab;
+    private static bool nameTagPrefabLookupAttempted;
     private static bool loggedMissingNameTagPrefab;
     private static readonly Dictionary<VRRig, NameTagModStatus> tagScanPocket = new Dictionary<VRRig, NameTagModStatus>();
     private static readonly Dictionary<VRRig, float> nextNameTagModScanTimes = new Dictionary<VRRig, float>();
@@ -49,153 +91,362 @@ public static partial class Mods
 
     public static void UpdateNameTags()
     {
-        var copy = nametags.ToList();
-        foreach (var pair in copy)
+        Camera? camera = Main.GetActiveCamera();
+        Transform? cameraTransform = camera != null ? camera.transform : null;
+
+        activeNameTagRigs.Clear();
+        foreach (VRRig rig in VRRigCache.ActiveRigs)
         {
-            if (pair.Key == null || !VRRigCache.ActiveRigs.Contains(pair.Key))
-            {
-                Object.Destroy(pair.Value);
-                nametags.Remove(pair.Key);
-                nextNameTagInfoUpdateTimes.Remove(pair.Key);
-                tagScanPocket.Remove(pair.Key);
-                nextNameTagModScanTimes.Remove(pair.Key);
-            }
+            if (rig != null && !rig.isLocal)
+                activeNameTagRigs.Add(rig);
         }
-        
-        foreach (var rig in VRRigCache.ActiveRigs)
-        {
-            if (rig == null) continue;
-            if (rig.isLocal) continue;
-            
-            if (!nametags.ContainsKey(rig))
-            {
-                GameObject prefab = GetNameTagPrefab();
-                if (prefab == null) return;
 
-                GameObject tag = Object.Instantiate(prefab, rig.transform, true);
-                tag.transform.localScale = Vector3.one * targetNameTagScale;
-                tag.SetActive(true);
-                nametags.Add(rig, tag);
+        nameTagRigScratch.Clear();
+        foreach (KeyValuePair<VRRig, NameTagView> pair in nametags)
+        {
+            if (pair.Key == null || !activeNameTagRigs.Contains(pair.Key))
+                nameTagRigScratch.Add(pair.Key!);
+        }
+
+        for (int i = 0; i < nameTagRigScratch.Count; i++)
+            RemoveNameTag(nameTagRigScratch[i]);
+        nameTagRigScratch.Clear();
+
+        foreach (VRRig rig in activeNameTagRigs)
+        {
+            if (!nametags.TryGetValue(rig, out NameTagView view))
+            {
+                GameObject? prefab = GetNameTagPrefab();
+                if (prefab == null)
+                    return;
+
+                view = CreateNameTagView(rig, prefab);
+                nametags.Add(rig, view);
             }
 
-            GameObject nametag = nametags[rig];
-            
-            if (nametag == null)
+            if (view.Root == null)
             {
-                nametags.Remove(rig);
-                nextNameTagInfoUpdateTimes.Remove(rig);
-                tagScanPocket.Remove(rig);
-                nextNameTagModScanTimes.Remove(rig);
+                RemoveNameTag(rig);
                 continue;
             }
-            
-            Transform anchor = rig.headMesh != null ? rig.headMesh.transform : rig.transform;
-            nametag.transform.position = anchor.position + Vector3.up * 0.87f;
-            
-            Camera camera = Main.GetActiveCamera();
-            if (camera != null)
+
+            Transform anchor = view.Anchor != null ? view.Anchor : rig.transform;
+            Vector3 anchorPosition = anchor.position;
+            view.RootTransform.position = anchorPosition + Vector3.up * 0.45f;
+
+            if (cameraTransform != null)
             {
-                nametag.transform.LookAt(camera.transform.position);
-                nametag.transform.Rotate(0f, 450f, 0f);
+                view.RootTransform.LookAt(cameraTransform.position);
+                view.RootTransform.Rotate(0f, 450f, 0f);
             }
+
             float visibleScale = targetNameTagScale;
-            if (nameTagDistanceFadeEnabled && camera != null)
+            if (nameTagDistanceFadeEnabled && cameraTransform != null)
             {
-                float distance = Vector3.Distance(camera.transform.position, anchor.position);
-                visibleScale = distance <= nameTagFadeDistanceValues[nameTagFadeDistanceIndex] ? targetNameTagScale : 0f;
+                float fadeDistance = nameTagFadeDistanceValues[nameTagFadeDistanceIndex];
+                float distanceSquared = (cameraTransform.position - anchorPosition).sqrMagnitude;
+                visibleScale = distanceSquared <= fadeDistance * fadeDistance ? targetNameTagScale : 0f;
             }
-            nametag.transform.localScale = Vector3.Lerp(nametag.transform.localScale, Vector3.one * visibleScale, Time.deltaTime * 10f);
-            if (!nametag.activeSelf)
-                nametag.SetActive(true);
+
+            view.RootTransform.localScale = Vector3.Lerp(
+                view.RootTransform.localScale,
+                Vector3.one * visibleScale,
+                Time.deltaTime * 10f);
+
+            if (!view.Root.activeSelf)
+                view.Root.SetActive(true);
 
             if (visibleScale <= 0.0001f)
                 continue;
 
-            float nextInfoUpdate;
-            if (nextNameTagInfoUpdateTimes.TryGetValue(rig, out nextInfoUpdate) && Time.time < nextInfoUpdate)
+            if (nextNameTagInfoUpdateTimes.TryGetValue(rig, out float nextInfoUpdate) && Time.time < nextInfoUpdate)
                 continue;
-            nextNameTagInfoUpdateTimes[rig] = Time.time + NameTagInfoRefreshSeconds + (Mathf.Abs(rig.GetInstanceID() % 8) * 0.02f);
 
-            NetPlayer netPlayer = GetPlayerFromVRRig(rig);
-            SetTagText(nametag.transform.Find("Name"), netPlayer != null ? netPlayer.NickName : rig.playerNameVisible);
-
-            int fps = RigBits.GetFPS(rig);
-            int ping = GetPingThrottled(rig);
-            NameTagModStatus modStatus = GetDetectedModStatus(rig);
-
-            SetTagText(nametag.transform.Find("FPS"), fps + "Hz");
-            SetTagMetricColor(nametag.transform, "FPS", GetFpsStatusColor(fps));
-
-            SetTagText(nametag.transform.Find("Ping"), ping + "Ms");
-            SetTagMetricColor(nametag.transform, "Ping", GetPingStatusColor(ping));
-
-            SetTagText(nametag.transform.Find("Mods"), FormatNameTagModStatus(modStatus));
-            SetTagMetricColor(nametag.transform, "Mods", GetModStatusColor(modStatus));
-
-            var iconsLeft = nametag.transform.Find("IconsLeft");
-
-            string platform;
-            try { platform = GetPlatform(rig); }
-            catch { platform = "Unknown"; }
-
-            void SetPlatformIcons(Transform parent, string plat)
-            {
-                if (parent == null) return;
-                
-                var meta = parent.Find("IconMeta");
-                var pc = parent.Find("IconPC");
-                var unknown = parent.Find("IconUnknown");
-                var steam = parent.Find("IconSteam");
-
-                if (meta != null) meta.gameObject.SetActive(false);
-                if (pc != null) pc.gameObject.SetActive(false);
-                if (unknown != null) unknown.gameObject.SetActive(false);
-                if (steam != null) steam.gameObject.SetActive(false);
-                
-                switch (plat)
-                {
-                    case "Standalone":
-                        if (meta != null) meta.gameObject.SetActive(true);
-                        break;
-
-                    case "PC":
-                        if (pc != null) pc.gameObject.SetActive(true);
-                        break;
-
-                    case "Steam":
-                        if (steam != null) steam.gameObject.SetActive(true);
-                        break;
-
-                    default:
-                        if (unknown != null) unknown.gameObject.SetActive(true);
-                        break;
-                }
-            }
-            
-            SetPlatformIcons(iconsLeft, platform);
+            nextNameTagInfoUpdateTimes[rig] =
+                Time.time + NameTagInfoRefreshSeconds + (Mathf.Abs(rig.GetInstanceID() % 8) * 0.02f);
+            RefreshNameTag(rig, view);
         }
     }
-    
 
-    private static GameObject GetNameTagPrefab()
+    private static NameTagView CreateNameTagView(VRRig rig, GameObject prefab)
+    {
+        GameObject root = Object.Instantiate(prefab, rig.transform, true);
+        root.transform.localScale = Vector3.one * targetNameTagScale;
+        root.SetActive(true);
+
+        Transform[] transforms = root.GetComponentsInChildren<Transform>(true);
+        Graphic[] graphics = root.GetComponentsInChildren<Graphic>(true);
+        SpriteRenderer[] sprites = root.GetComponentsInChildren<SpriteRenderer>(true);
+        Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
+
+        Transform? name = FindCachedTransform(transforms, "Name");
+        Transform? fps = FindCachedTransform(transforms, "FPS");
+        Transform? ping = FindCachedTransform(transforms, "Ping");
+        Transform? mods = FindCachedTransform(transforms, "Mods");
+
+        return new NameTagView
+        {
+            Root = root,
+            RootTransform = root.transform,
+            Anchor = rig.headMesh != null ? rig.headMesh.transform : rig.transform,
+            Name = CreateLabelBinding(name),
+            Fps = CreateLabelBinding(fps),
+            Ping = CreateLabelBinding(ping),
+            Mods = CreateLabelBinding(mods),
+            FpsColors = CreateColorBinding(transforms, graphics, sprites, renderers, fps, "FPS"),
+            PingColors = CreateColorBinding(transforms, graphics, sprites, renderers, ping, "Ping"),
+            ModsColors = CreateColorBinding(transforms, graphics, sprites, renderers, mods, "Mods"),
+            IconMeta = GetCachedGameObject(transforms, "IconMeta"),
+            IconPc = GetCachedGameObject(transforms, "IconPC"),
+            IconUnknown = GetCachedGameObject(transforms, "IconUnknown"),
+            IconSteam = GetCachedGameObject(transforms, "IconSteam")
+        };
+    }
+
+    private static Transform? FindCachedTransform(Transform[] transforms, string name)
+    {
+        for (int i = 0; i < transforms.Length; i++)
+        {
+            if (string.Equals(transforms[i].name, name, StringComparison.Ordinal))
+                return transforms[i];
+        }
+        return null;
+    }
+
+    private static GameObject? GetCachedGameObject(Transform[] transforms, string name)
+    {
+        Transform? transform = FindCachedTransform(transforms, name);
+        return transform != null ? transform.gameObject : null;
+    }
+
+    private static NameTagLabelBinding CreateLabelBinding(Transform? target)
+    {
+        NameTagLabelBinding binding = new NameTagLabelBinding();
+        if (target != null)
+        {
+            target.TryGetComponent(out binding.Tmp);
+            if (binding.Tmp == null)
+                target.TryGetComponent(out binding.UiText);
+        }
+        return binding;
+    }
+
+    private static NameTagColorBinding CreateColorBinding(
+        Transform[] transforms,
+        Graphic[] graphics,
+        SpriteRenderer[] sprites,
+        Renderer[] renderers,
+        Transform? metricRoot,
+        string metricName)
+    {
+        NameTagColorBinding binding = new NameTagColorBinding();
+
+        for (int i = 0; i < graphics.Length; i++)
+        {
+            if (IsMetricColorTarget(graphics[i].transform, transforms, metricRoot, metricName))
+                binding.Graphics.Add(graphics[i]);
+        }
+
+        for (int i = 0; i < sprites.Length; i++)
+        {
+            if (IsMetricColorTarget(sprites[i].transform, transforms, metricRoot, metricName))
+                binding.Sprites.Add(sprites[i]);
+        }
+
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            if (IsMetricColorTarget(renderers[i].transform, transforms, metricRoot, metricName))
+                binding.Renderers.Add(renderers[i]);
+        }
+
+        return binding;
+    }
+
+    private static bool IsMetricColorTarget(
+        Transform target,
+        Transform[] transforms,
+        Transform? metricRoot,
+        string metricName)
+    {
+        if (metricRoot != null && (target == metricRoot || target.IsChildOf(metricRoot)))
+            return true;
+
+        for (int i = 0; i < transforms.Length; i++)
+        {
+            Transform candidate = transforms[i];
+            string name = candidate.name ?? string.Empty;
+            bool metricMatch = name.IndexOf(metricName, StringComparison.OrdinalIgnoreCase) >= 0;
+            bool iconMatch = name.IndexOf("icon", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                             name.IndexOf("image", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                             name.IndexOf("sprite", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (metricMatch && iconMatch && (target == candidate || target.IsChildOf(candidate)))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static void RefreshNameTag(VRRig rig, NameTagView view)
+    {
+        NetPlayer netPlayer = GetPlayerFromVRRig(rig);
+        string displayName = netPlayer != null ? netPlayer.NickName : rig.playerNameVisible;
+        if (!string.Equals(view.LastName, displayName, StringComparison.Ordinal))
+        {
+            view.LastName = displayName;
+            view.Name.Set(displayName);
+        }
+
+        int fps = RigBits.GetFPS(rig);
+        if (view.LastFps != fps)
+        {
+            view.LastFps = fps;
+            view.Fps.Set(fps + "Hz");
+        }
+        SetMetricColorIfChanged(view.FpsColors, GetFpsStatusColor(fps), ref view.LastFpsColor, ref view.HasFpsColor);
+
+        int ping = GetPingThrottled(rig);
+        if (view.LastPing != ping)
+        {
+            view.LastPing = ping;
+            view.Ping.Set(ping + "Ms");
+        }
+        SetMetricColorIfChanged(view.PingColors, GetPingStatusColor(ping), ref view.LastPingColor, ref view.HasPingColor);
+
+        NameTagModStatus modStatus = GetDetectedModStatus(rig);
+        if (!view.HasModStatus ||
+            view.LastModStatus.LegalCount != modStatus.LegalCount ||
+            view.LastModStatus.IllegalCount != modStatus.IllegalCount ||
+            !string.Equals(view.LastModStatus.PrimaryLabel, modStatus.PrimaryLabel, StringComparison.Ordinal))
+        {
+            view.HasModStatus = true;
+            view.LastModStatus = modStatus;
+            view.Mods.Set(FormatNameTagModStatus(modStatus));
+        }
+        SetMetricColorIfChanged(view.ModsColors, GetModStatusColor(modStatus), ref view.LastModsColor, ref view.HasModsColor);
+
+        string platform;
+        try { platform = GetPlatform(rig); }
+        catch { platform = "Unknown"; }
+
+        if (!string.Equals(view.LastPlatform, platform, StringComparison.Ordinal))
+        {
+            view.LastPlatform = platform;
+            SetPlatformIcons(view, platform);
+        }
+    }
+
+    private static void SetMetricColorIfChanged(
+        NameTagColorBinding binding,
+        Color color,
+        ref Color lastColor,
+        ref bool hasColor)
+    {
+        if (hasColor && lastColor == color)
+            return;
+
+        hasColor = true;
+        lastColor = color;
+
+        for (int i = 0; i < binding.Graphics.Count; i++)
+        {
+            Graphic graphic = binding.Graphics[i];
+            if (graphic != null)
+                graphic.color = color;
+        }
+
+        for (int i = 0; i < binding.Sprites.Count; i++)
+        {
+            SpriteRenderer sprite = binding.Sprites[i];
+            if (sprite != null)
+                sprite.color = color;
+        }
+
+        for (int i = 0; i < binding.Renderers.Count; i++)
+        {
+            Renderer renderer = binding.Renderers[i];
+            if (renderer == null)
+                continue;
+
+            renderer.GetPropertyBlock(nameTagPropertyBlock);
+            nameTagPropertyBlock.SetColor(NameTagColorProperty, color);
+            renderer.SetPropertyBlock(nameTagPropertyBlock);
+            nameTagPropertyBlock.Clear();
+        }
+    }
+
+    private static void SetPlatformIcons(NameTagView view, string platform)
+    {
+
+        if (string.Equals(platform, "Loading...", StringComparison.Ordinal))
+        {
+            SetActiveIfChanged(view.IconUnknown, false);
+            return;
+        }
+
+        SetActiveIfChanged(view.IconMeta, false);
+        SetActiveIfChanged(view.IconPc, false);
+        SetActiveIfChanged(view.IconUnknown, false);
+        SetActiveIfChanged(view.IconSteam, false);
+
+        switch (platform)
+        {
+            case "Steam":
+                SetActiveIfChanged(view.IconSteam, true);
+                break;
+            case "PC":
+            case "Oculus PC":
+            case "Oculus":
+
+                if (view.IconPc != null)
+                    SetActiveIfChanged(view.IconPc, true);
+                else
+                    SetActiveIfChanged(view.IconMeta, true);
+                break;
+            case "Standalone":
+            case "StandaloneVR":
+            case "Meta":
+            case "Quest":
+            case "PSVR":
+            case "Pico":
+                SetActiveIfChanged(view.IconMeta, true);
+                break;
+            default:
+                SetActiveIfChanged(view.IconUnknown, true);
+                break;
+        }
+    }
+
+    private static void SetActiveIfChanged(GameObject? target, bool active)
+    {
+        if (target != null && target.activeSelf != active)
+            target.SetActive(active);
+    }
+
+    private static GameObject? GetNameTagPrefab()
     {
         if (nameTagPrefab != null)
             return nameTagPrefab;
-
-        if (nameBundle == null)
+        if (nameBundle == null || nameTagPrefabLookupAttempted)
             return null;
 
+        nameTagPrefabLookupAttempted = true;
         string[] assetNames = nameBundle.GetAllAssetNames();
-        string prefabPath = assetNames.FirstOrDefault(name =>
-            name.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) &&
-            name.IndexOf("nametag", StringComparison.OrdinalIgnoreCase) >= 0);
+        string? prefabPath = null;
+        for (int i = 0; i < assetNames.Length; i++)
+        {
+            string assetName = assetNames[i];
+            if (assetName.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) &&
+                assetName.IndexOf("nametag", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                prefabPath = assetName;
+                break;
+            }
+        }
 
         if (!string.IsNullOrEmpty(prefabPath))
             nameTagPrefab = nameBundle.LoadAsset<GameObject>(prefabPath);
-
         if (nameTagPrefab == null)
             nameTagPrefab = nameBundle.LoadAsset<GameObject>("assets/prefabs/tup-nametagui.prefab");
-
         if (nameTagPrefab == null)
             nameTagPrefab = nameBundle.LoadAsset<GameObject>("assets/prefabs/nametag.prefab");
 
@@ -208,36 +459,20 @@ public static partial class Mods
         return nameTagPrefab;
     }
 
-    private static void SetTagText(Transform textTransform, string value)
-    {
-        if (textTransform == null) return;
-
-        TMP_Text tmp = textTransform.GetComponent<TMP_Text>();
-        if (tmp != null)
-        {
-            tmp.text = value;
-            return;
-        }
-
-        UnityEngine.UI.Text uiText = textTransform.GetComponent<UnityEngine.UI.Text>();
-        if (uiText != null)
-            uiText.text = value;
-    }
-
     private static NameTagModStatus GetDetectedModStatus(VRRig rig)
     {
-        if (rig == null) return default;
+        if (rig == null)
+            return default;
 
-        if (tagScanPocket.TryGetValue(rig, out NameTagModStatus cached) &&
-            nextNameTagModScanTimes.TryGetValue(rig, out float nextScan) &&
-            Time.time < nextScan)
-            return cached;
-
-        if (!tagScanPocket.ContainsKey(rig) && !nextNameTagModScanTimes.ContainsKey(rig))
+        bool hasCached = tagScanPocket.TryGetValue(rig, out NameTagModStatus cached);
+        if (!nextNameTagModScanTimes.TryGetValue(rig, out float nextScan))
         {
-            nextNameTagModScanTimes[rig] = Time.time + (Mathf.Abs(rig.GetInstanceID() % 100) * 0.03f);
+            nextNameTagModScanTimes[rig] =
+                Time.time + (Mathf.Abs(rig.GetInstanceID() % 100) * 0.03f);
             return default;
         }
+        if (Time.time < nextScan)
+            return hasCached ? cached : default;
 
         NameTagModStatus status = default;
         try
@@ -246,16 +481,36 @@ public static partial class Mods
             if (player != null)
             {
                 Dictionary<string, List<string>> hits = FindPropertySignatureHits(player);
+                List<string> illegalNames = new List<string>();
+                List<string> legalNames = new List<string>();
+
                 foreach (string key in hits.Keys)
                 {
                     if (!propertySignatures.TryGetValue(key, out PropertySignature signature))
                         continue;
 
+                    string display = FormatDetectedModName(signature.Name);
+                    if (string.IsNullOrWhiteSpace(display) || display == "Unknown")
+                        display = signature.Name;
+
                     if (signature.IsLegal)
+                    {
                         status.LegalCount++;
+                        if (!legalNames.Contains(display))
+                            legalNames.Add(display);
+                    }
                     else
+                    {
                         status.IllegalCount++;
+                        if (!illegalNames.Contains(display))
+                            illegalNames.Add(display);
+                    }
                 }
+
+                if (illegalNames.Count > 0)
+                    status.PrimaryLabel = PreferCustomMenuLabel(illegalNames);
+                else if (legalNames.Count > 0)
+                    status.PrimaryLabel = PreferCustomMenuLabel(legalNames);
             }
         }
         catch
@@ -264,18 +519,53 @@ public static partial class Mods
         }
 
         tagScanPocket[rig] = status;
-        nextNameTagModScanTimes[rig] = Time.time + NameTagModScanSeconds + (Mathf.Abs(rig.GetInstanceID() % 10) * 0.1f);
+        nextNameTagModScanTimes[rig] =
+            Time.time + NameTagModScanSeconds + (Mathf.Abs(rig.GetInstanceID() % 10) * 0.1f);
         return status;
+    }
+
+    private static string PreferCustomMenuLabel(List<string> names)
+    {
+        if (names == null || names.Count == 0)
+            return null;
+
+        string[] priority =
+        {
+            "SERALYTH MOD MENU", "Seralyth Console", "II's Stupid Menu", "II Menu", "Void",
+            "Haunted Mod Menu", "Monke Mod Menu", "Destiny Menu", "Crystal Menu", "Shiba GT Dark",
+            "Mango", "Nebula", "Pulsar", "Cosmos", "Hydra", "Spectre", "Viper", "Eclipse",
+            "Phantom", "Violet Paid", "Violet", "Obsidian", "Oblivion", "Asteroid Lite", "Elux",
+            "Atlas", "Fusioned", "Genesis", "Grate", "Orbit", "Untitled", "Bark", "BlossomChecker",
+            "Sakuraa", "WalkSimulator", "Banana OS", "Media Pad", "Utilla"
+        };
+
+        for (int i = 0; i < priority.Length; i++)
+        {
+            for (int j = 0; j < names.Count; j++)
+            {
+                if (string.Equals(names[j], priority[i], StringComparison.OrdinalIgnoreCase) ||
+                    names[j].IndexOf(priority[i], StringComparison.OrdinalIgnoreCase) >= 0)
+                    return priority[i];
+            }
+        }
+
+        return names[0];
     }
 
     private static string FormatNameTagModStatus(NameTagModStatus status)
     {
+        if (!string.IsNullOrWhiteSpace(status.PrimaryLabel))
+        {
+            int total = status.LegalCount + status.IllegalCount;
+            if (total > 1)
+                return status.PrimaryLabel + " +" + (total - 1);
+            return status.PrimaryLabel;
+        }
+
         if (status.IllegalCount > 0)
             return status.IllegalCount == 1 ? "1 Illegal Mod" : status.IllegalCount + " Illegal Mods";
-
         if (status.LegalCount > 0)
             return status.LegalCount == 1 ? "1 Mod" : status.LegalCount + " Mods";
-
         return "0 Mods";
     }
 
@@ -300,57 +590,44 @@ public static partial class Mods
         return NameTagNeutralColor;
     }
 
-    private static void SetTagMetricColor(Transform root, string metricName, Color color)
+    private static void RemoveNameTag(VRRig rig)
     {
-        if (root == null) return;
-
-        SetTagColor(root.Find(metricName), color);
-
-        foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
+        if (nametags.TryGetValue(rig, out NameTagView view))
         {
-            string name = child.name ?? "";
-            bool metricMatch = name.IndexOf(metricName, StringComparison.OrdinalIgnoreCase) >= 0;
-            bool iconMatch = name.IndexOf("icon", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                             name.IndexOf("image", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                             name.IndexOf("sprite", StringComparison.OrdinalIgnoreCase) >= 0;
-
-            if (metricMatch && iconMatch)
-                SetTagColor(child, color);
+            if (view.Root != null)
+                Object.Destroy(view.Root);
+            nametags.Remove(rig);
         }
+
+        nextNameTagInfoUpdateTimes.Remove(rig);
+        tagScanPocket.Remove(rig);
+        nextNameTagModScanTimes.Remove(rig);
+        RemovePingCache(rig);
     }
 
-    private static void SetTagColor(Transform target, Color color)
+    private static void DestroyAllNameTags()
     {
-        if (target == null) return;
-
-        TMP_Text tmp = target.GetComponent<TMP_Text>();
-        if (tmp != null) tmp.color = color;
-
-        UnityEngine.UI.Text uiText = target.GetComponent<UnityEngine.UI.Text>();
-        if (uiText != null) uiText.color = color;
-
-        foreach (Image image in target.GetComponentsInChildren<Image>(true))
-            image.color = color;
-
-        foreach (RawImage rawImage in target.GetComponentsInChildren<RawImage>(true))
-            rawImage.color = color;
-
-        SpriteRenderer spriteRenderer = target.GetComponent<SpriteRenderer>();
-        if (spriteRenderer != null) spriteRenderer.color = color;
-
-        Renderer renderer = target.GetComponent<Renderer>();
-        if (renderer != null)
+        foreach (NameTagView view in nametags.Values)
         {
-            foreach (Material material in renderer.materials)
-                material.color = color;
+            if (view.Root != null)
+                Object.Destroy(view.Root);
         }
+
+        nametags.Clear();
+        nameTagRigScratch.Clear();
+        activeNameTagRigs.Clear();
+        nextNameTagInfoUpdateTimes.Clear();
+        tagScanPocket.Clear();
+        nextNameTagModScanTimes.Clear();
     }
 
     private struct NameTagModStatus
     {
         public int LegalCount;
         public int IllegalCount;
+        public string PrimaryLabel;
     }
+
     private static readonly float[] nameTagScaleSteps = { 0.0475f, 0.06f, 0.0725f, 0.085f, 0.0975f, 0.11f };
     private static readonly string[] nameTagScaleNames = { "Tiny", "Small", "Normal", "Large", "XL", "XXL" };
     private static int nameTagScaleIndex = 2;
@@ -369,7 +646,8 @@ public static partial class Mods
 
     private static void ToggleNameTagDistanceFade()
     {
-        nameTagDistanceFadeEnabled = !nameTagDistanceFadeEnabled;
+        nameTagDistanceFadeEnabled = GetSavedToggle("Distance Fade", GetSavedToggle("Nametag Distance Fade", nameTagDistanceFadeEnabled));
+        SavedToggleStates["Distance Fade"] = nameTagDistanceFadeEnabled;
         SavedToggleStates["Nametag Distance Fade"] = nameTagDistanceFadeEnabled;
         SaveButtonStates();
     }
@@ -384,33 +662,49 @@ public static partial class Mods
 
     public static void ToggleNameTags()
     {
-        nameTagsEnabled = !nameTagsEnabled;
-        
+        nameTagsEnabled = GetSavedToggle("Nametags", nameTagsEnabled);
+        SavedToggleStates["Nametags"] = nameTagsEnabled;
         if (!nameTagsEnabled)
-        {
             DisableNameTags();
-        }
+        SaveButtonStates();
     }
-    
+
     public static void DisableNameTags()
     {
-        foreach (var tag in nametags.Values)
-        {
-            if (tag != null)
-                tag.SetActive(false);
-        }
-        nextNameTagInfoUpdateTimes.Clear();
-        tagScanPocket.Clear();
-        nextNameTagModScanTimes.Clear();
+        DestroyAllNameTags();
+        ClearPingCaches();
     }
-    
+
     public static void NameTagsLoop()
     {
-        if (!nameTagsEnabled)
-            return;
-
-        UpdateNameTags();
+        if (nameTagsEnabled)
+            UpdateNameTags();
     }
 
-    
+    public static void Shutdown()
+    {
+        nameTagsEnabled = false;
+        DestroyAllNameTags();
+        ClearPingCaches();
+        ClearPropertyScanCaches();
+        voiceComponentsByRig.Clear();
+        ClearAllBoneHighlights();
+        nameTagPrefab = null;
+        nameTagPrefabLookupAttempted = false;
+        loggedMissingNameTagPrefab = false;
+
+        if (regionStatsCoroutine != null && CoroutineHandler.Instance != null)
+        {
+            CoroutineHandler.Instance.StopCoroutine(regionStatsCoroutine);
+            regionStatsCoroutine = null;
+        }
+
+        if (checkerCoroutine != null && CoroutineHandler.Instance != null)
+        {
+            CoroutineHandler.Instance.StopCoroutine(checkerCoroutine);
+            checkerCoroutine = null;
+        }
+
+        CleanupCheckerVisuals(true);
+    }
 }

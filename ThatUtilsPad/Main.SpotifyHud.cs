@@ -23,10 +23,9 @@ using Debug = UnityEngine.Debug;
 
 namespace ThatUtilsPad;
 
-
 public partial class Main
 {
-    // spotify pile goes here now; top file was soup lol
+
     private readonly List<GameObject> spotifyClickBits = new List<GameObject>();
     private GameObject spotifyPage;
     private TMP_Text songLabel;
@@ -61,10 +60,26 @@ public partial class Main
     private Texture2D coverShowingTexture;
     private Coroutine coverSwap;
     private string coverSwapTarget = "";
+    private Texture2D coverSwapTexture;
+    private readonly List<Texture2D> retiredCoverTextures = new List<Texture2D>();
     private const float CoverFadeTime = 0.5f;
     private const float CoverBlackTime = 0.5f;
     private Image progressFill;
     private float nextSpotifyPaint;
+    private Mods.SpotifyTrackInfo latestSpotifyInfo;
+    private bool hasLatestSpotifyInfo;
+    private float latestSpotifyObservedAt;
+    private string lastSpotifyTimeText = "";
+    private string lastSpotifyStatusText = "";
+    private string lastSpotifyHintText = "";
+    private string lastSpotifySong = "";
+    private string lastSpotifyArtist = "";
+    private int lastSpotifyElapsedSecond = -1;
+    private int lastSpotifyEndSecond = -1;
+    private string lastSpotifyArtworkIdentity = "";
+    private byte[] lastSpotifyArtworkBytes;
+    private int lastSpotifyArtworkBytesLength;
+    private int lastSpotifyArtworkHash;
     private Vector3 songHomePos;
     private Color songHomeColor = Color.white;
     private Mods.SpotifyTrackInfo lastGoodSpotify;
@@ -80,13 +95,11 @@ public partial class Main
     private float songBlinkClock;
     private const float SongCrawlSpeed = 4.8f;
     private const string SongCrawlGap = "   ";
-    private const int SongCrawlCopies = 99;
     private const float SongY = -10.3f;
     private const float SongZ = -0.1f;
     private const float SongOnTime = 5f;
     private const float SongFadeTime = 0.5f;
     private const float SongOffTime = 0.5f;
-
 
     private void InitSpotifyHudPage(GameObject menuObj)
     {
@@ -100,7 +113,6 @@ public partial class Main
             return;
         }
 
-        // these labels like to hide in the prefab, little nerds
         songLabel = FindTmpTextAtPath(spotifyPage.transform, "SongNameCont/SongName")
                           ?? FindTmpText(spotifyPage.transform, "SongName", "Song", "Title", "TrackTitle", "TrackName");
         artistLabel = FindTmpText(spotifyPage.transform, "ArtistName", "AuthorName", "Artist", "Author", "Subtitle", "TrackArtist");
@@ -454,21 +466,20 @@ private static Transform FindAlbumHome(Transform root)
 
     private void PlayButtonEnterSound()
     {
-        AudioSource audioSource = gameObject.GetComponent<AudioSource>();
-        if (audioSource == null)
-            audioSource = gameObject.AddComponent<AudioSource>();
+        if (!Mods.IsButtonPopSoundEnabled())
+            return;
 
-        audioSource.volume = 0.1f;
-        audioSource.PlayOneShot(btnEnterSound);
+        PlayUiClip(btnEnterSound, 0.1f);
     }
 
     private void UpdateSpotifyHudLoop()
     {
         if (!isMenuOpened || spotifyPage == null || !spotifyPage.activeSelf) return;
         UpdateSpotifySongMarquee();
+        UpdateSpotifyProgressAndTime();
         if (Time.time < nextSpotifyPaint) return;
         nextSpotifyPaint = Time.time + 0.5f;
-        PaintSpotifyHud();
+        RefreshSpotifyHudSnapshot();
     }
 
     public void NudgeSpotifyHudSoon(float delay = 1.1f)
@@ -485,17 +496,79 @@ private static Transform FindAlbumHome(Transform root)
 
     public void PaintSpotifyHud()
     {
+        RefreshSpotifyHudSnapshot();
+        UpdateSpotifyProgressAndTime();
+    }
+
+    private void RefreshSpotifyHudSnapshot()
+    {
         Mods.SpotifyTrackInfo rawInfo = Mods.GetSpotifyTrackInfo();
         Mods.SpotifyTrackInfo info = GetStableSpotifyInfo(rawInfo);
-        QueueSpotifySongText(info.Song, info.Artist);
-        if (timeLabel != null) timeLabel.text = info.Duration;
-        if (statusLabel != null) statusLabel.text = info.Status;
-        if (hintLabel != null) hintLabel.text = info.HasTrack ? "Spotify desktop" : info.Artist;
+        latestSpotifyInfo = info;
+        hasLatestSpotifyInfo = true;
+        latestSpotifyObservedAt = Time.time;
+
+        if (info.Song != lastSpotifySong || info.Artist != lastSpotifyArtist)
+        {
+            lastSpotifySong = info.Song;
+            lastSpotifyArtist = info.Artist;
+            QueueSpotifySongText(info.Song, info.Artist);
+        }
+        SetSpotifyLabelIfChanged(statusLabel, info.Status, ref lastSpotifyStatusText);
+        SetSpotifyLabelIfChanged(hintLabel, info.HasTrack ? "Spotify desktop" : info.Artist, ref lastSpotifyHintText);
         UpdateSpotifyPlaybackIcons(rawInfo, info);
-        Texture2D albumTexture = GetNativeSpotifyCover(info) ?? GetWebCover(info);
-        if (albumTexture == null) StartSpotifyAlbumArtworkDownload(info);
-        UpdateSpotifyAlbumTransition(info, albumTexture);
-        if (progressFill != null) progressFill.fillAmount = info.EndTime > 0f ? Mathf.Clamp01(info.ElapsedTime / info.EndTime) : 0f;
+        UpdateSpotifyArtwork(info);
+    }
+
+    private static void SetSpotifyLabelIfChanged(TMP_Text label, string value, ref string shownValue)
+    {
+        value ??= "";
+        if (label == null || shownValue == value)
+            return;
+
+        shownValue = value;
+        label.text = value;
+    }
+
+    private void UpdateSpotifyProgressAndTime()
+    {
+        if (!hasLatestSpotifyInfo)
+            return;
+
+        Mods.SpotifyTrackInfo info = latestSpotifyInfo;
+        float elapsed = info.ElapsedTime;
+        if (info.Status.Equals("Playing", StringComparison.OrdinalIgnoreCase))
+            elapsed += Mathf.Max(0f, Time.time - latestSpotifyObservedAt);
+        if (info.EndTime > 0f)
+            elapsed = Mathf.Clamp(elapsed, 0f, info.EndTime);
+
+        if (progressFill != null)
+            progressFill.fillAmount = info.EndTime > 0f ? Mathf.Clamp01(elapsed / info.EndTime) : 0f;
+
+        if (info.EndTime > 0f)
+        {
+            int elapsedSecond = (int)elapsed;
+            int endSecond = (int)info.EndTime;
+            if (elapsedSecond != lastSpotifyElapsedSecond || endSecond != lastSpotifyEndSecond)
+            {
+                lastSpotifyElapsedSecond = elapsedSecond;
+                lastSpotifyEndSecond = endSecond;
+                string timeText = FormatSpotifyTime(elapsed) + " / " + FormatSpotifyTime(info.EndTime);
+                SetSpotifyLabelIfChanged(timeLabel, timeText, ref lastSpotifyTimeText);
+            }
+        }
+        else
+        {
+            lastSpotifyElapsedSecond = -1;
+            lastSpotifyEndSecond = -1;
+            SetSpotifyLabelIfChanged(timeLabel, info.Duration, ref lastSpotifyTimeText);
+        }
+    }
+
+    private static string FormatSpotifyTime(float seconds)
+    {
+        seconds = Mathf.Max(0f, seconds);
+        return ((int)(seconds / 60f)) + ":" + ((int)(seconds % 60f)).ToString("00");
     }
 
     private void InitSpotifySongMarquee()
@@ -525,9 +598,37 @@ private static Transform FindAlbumHome(Transform root)
             SetSpotifySongText(nextSongText);
         if (artistLabel != null && !string.IsNullOrEmpty(nextArtistText) && nextArtistText != shownArtist)
         {
-            shownArtist = nextArtistText;
+            shownArtist = SanitizeSpotifyDisplayText(nextArtistText);
             artistLabel.text = shownArtist;
         }
+    }
+
+    private static string SanitizeSpotifyDisplayText(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return value;
+
+        StringBuilder builder = new StringBuilder(value.Length);
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            if (char.IsSurrogate(c))
+            {
+                if (char.IsHighSurrogate(c) && i + 1 < value.Length && char.IsLowSurrogate(value[i + 1]))
+                    i++;
+                continue;
+            }
+
+            if (c == '\uFE0F' || c == '\u200D')
+                continue;
+
+            builder.Append(c);
+        }
+
+        string cleaned = builder.ToString().Trim();
+        while (cleaned.Contains("  "))
+            cleaned = cleaned.Replace("  ", " ");
+        return string.IsNullOrWhiteSpace(cleaned) ? "No song" : cleaned;
     }
     private void SetSpotifySongText(string song)
     {
@@ -536,14 +637,25 @@ private static Transform FindAlbumHome(Transform root)
 
         song = string.IsNullOrWhiteSpace(song) ? "No song" : song.Trim();
         song = song.Replace('\r', ' ').Replace('\n', ' ');
+        song = SanitizeSpotifyDisplayText(song);
         if (song == shownSong)
             return;
 
         shownSong = song;
-        longSongLine = string.Join(SongCrawlGap, Enumerable.Repeat(song, SongCrawlCopies));
+        string segment = song + SongCrawlGap;
+        songLabel.text = segment;
+        songLabel.ForceMeshUpdate();
+        float segmentWidth = Mathf.Max(0.01f, songLabel.textBounds.size.x);
+        RectTransform viewport = songLabel.transform.parent as RectTransform;
+        float viewportWidth = viewport != null ? Mathf.Abs(viewport.rect.width) : segmentWidth;
+        int copies = Mathf.Max(3, Mathf.CeilToInt(viewportWidth / segmentWidth) + 2);
+        StringBuilder marquee = new StringBuilder(segment.Length * copies);
+        for (int index = 0; index < copies; index++)
+            marquee.Append(segment);
+        longSongLine = marquee.ToString();
         songLabel.text = longSongLine;
         songLabel.ForceMeshUpdate();
-        songCrawlReset = Mathf.Max(0.01f, songLabel.textBounds.size.x / SongCrawlCopies);
+        songCrawlReset = segmentWidth;
         songCrawlX = 0f;
         ApplySpotifySongMarqueeVisuals(1f);
     }
@@ -624,6 +736,47 @@ private static Transform FindAlbumHome(Transform root)
         return info;
     }
 
+    private void UpdateSpotifyArtwork(Mods.SpotifyTrackInfo info)
+    {
+        string webKey = GetSpotifyAlbumWebKey(info);
+        byte[] thumbnailBytes = info.ThumbnailBytes;
+        int thumbnailHash = 0;
+        if (thumbnailBytes != null && thumbnailBytes.Length > 0)
+        {
+            if (!ReferenceEquals(thumbnailBytes, lastSpotifyArtworkBytes) ||
+                thumbnailBytes.Length != lastSpotifyArtworkBytesLength)
+            {
+                lastSpotifyArtworkBytes = thumbnailBytes;
+                lastSpotifyArtworkBytesLength = thumbnailBytes.Length;
+                lastSpotifyArtworkHash = HashSpotifyArtwork(thumbnailBytes);
+            }
+            thumbnailHash = lastSpotifyArtworkHash;
+        }
+        string artworkIdentity = webKey + "|" +
+                                 (thumbnailBytes != null ? thumbnailBytes.Length : 0) + "|" +
+                                 thumbnailHash;
+
+        bool identityChanged = artworkIdentity != lastSpotifyArtworkIdentity;
+        bool downloadedWebCoverReady;
+        lock (coverWebLock)
+            downloadedWebCoverReady = (thumbnailBytes == null || thumbnailBytes.Length == 0) &&
+                                      coverBytesKey == webKey &&
+                                      (coverTexture == null || coverTextureKey != webKey);
+
+        if (!identityChanged && !downloadedWebCoverReady &&
+            (coverShowingKey == webKey || string.IsNullOrEmpty(webKey)))
+            return;
+
+        lastSpotifyArtworkIdentity = artworkIdentity;
+        Texture2D albumTexture = thumbnailBytes != null && thumbnailBytes.Length > 0
+            ? GetNativeSpotifyCover(info, thumbnailHash)
+            : GetWebCover(info);
+        if (albumTexture == null)
+            StartSpotifyAlbumArtworkDownload(info);
+        UpdateSpotifyAlbumTransition(info, albumTexture);
+        ReleaseRetiredSpotifyTextures();
+    }
+
     private void UpdateSpotifyAlbumTransition(Mods.SpotifyTrackInfo info, Texture2D albumTexture)
     {
         string key = GetSpotifyAlbumWebKey(info);
@@ -639,18 +792,25 @@ private static Transform FindAlbumHome(Transform root)
                 ApplySpotifyPendingText();
             SetSpotifyTransitionColor(Color.white);
             }
-            return;
+            if (albumTexture == null || albumTexture == coverShowingTexture)
+                return;
         }
 
         if (albumTexture == null)
             return;
 
-        if (coverSwap != null && coverSwapTarget == key)
+        if (coverSwap != null && coverSwapTarget == key && coverSwapTexture == albumTexture)
             return;
 
         if (coverSwap != null)
+        {
             StopCoroutine(coverSwap);
+            coverSwap = null;
+            coverSwapTarget = "";
+            coverSwapTexture = null;
+        }
         coverSwapTarget = key;
+        coverSwapTexture = albumTexture;
         coverSwap = StartCoroutine(SpotifyAlbumTransition(key, albumTexture));
     }
 
@@ -664,7 +824,9 @@ private static Transform FindAlbumHome(Transform root)
             ApplySpotifyPendingText();
             SetSpotifyTransitionColor(Color.white);
             coverSwapTarget = "";
+            coverSwapTexture = null;
             coverSwap = null;
+            ReleaseRetiredSpotifyTextures();
             yield break;
         }
 
@@ -680,8 +842,10 @@ private static Transform FindAlbumHome(Transform root)
         yield return new WaitForSeconds(CoverBlackTime);
 
         coverShowingKey = newKey;
+        Texture2D previousTexture = coverShowingTexture;
         coverShowingTexture = newTexture;
         ApplySpotifyAlbumTexture(newTexture);
+        RetireSpotifyCoverTexture(previousTexture);
 
         t = 0f;
         while (t < CoverFadeTime)
@@ -693,7 +857,9 @@ private static Transform FindAlbumHome(Transform root)
 
         SetSpotifyTransitionColor(Color.white);
         coverSwapTarget = "";
+        coverSwapTexture = null;
         coverSwap = null;
+        ReleaseRetiredSpotifyTextures();
     }
 
     private void ApplySpotifyAlbumTexture(Texture2D albumTexture)
@@ -709,6 +875,8 @@ private static Transform FindAlbumHome(Transform root)
 
         if (coverImage != null && coverRaw == null)
         {
+            if (coverSprite != null)
+                Destroy(coverSprite);
             coverSprite = Sprite.Create(albumTexture, new Rect(0f, 0f, albumTexture.width, albumTexture.height), new Vector2(0.5f, 0.5f), 100f);
             coverImage.sprite = coverSprite;
             coverImage.overrideSprite = coverSprite;
@@ -748,8 +916,12 @@ private static Transform FindAlbumHome(Transform root)
 
             Texture2D texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
             if (!texture.LoadImage(coverBytes, false))
+            {
+                Destroy(texture);
                 return null;
+            }
 
+            RetireSpotifyCoverTexture(coverTexture);
             coverTexture = texture;
             coverTextureKey = key;
             return coverTexture;
@@ -793,13 +965,10 @@ private static Transform FindAlbumHome(Transform root)
             if (bytes == null || bytes.Length == 0)
                 return;
 
-
             lock (coverWebLock)
             {
                 coverBytes = bytes;
                 coverBytesKey = key;
-                coverTexture = null;
-                coverTextureKey = "";
             }
         }
         catch (Exception e)
@@ -842,13 +1011,12 @@ private static Transform FindAlbumHome(Transform root)
         if (playGlyph != null) playGlyph.gameObject.SetActive(!playing);
         if (pauseGlyph != null) pauseGlyph.gameObject.SetActive(playing);
     }
-    private Texture2D GetNativeSpotifyCover(Mods.SpotifyTrackInfo info)
+    private Texture2D GetNativeSpotifyCover(Mods.SpotifyTrackInfo info, int hash)
     {
         byte[] bytes = info.ThumbnailBytes;
         if (bytes == null || bytes.Length == 0)
             return null;
 
-        int hash = HashSpotifyArtwork(bytes);
         if (coverHash == hash && coverByteLength == bytes.Length && nativeCoverTexture != null)
             return nativeCoverTexture;
 
@@ -863,8 +1031,7 @@ private static Transform FindAlbumHome(Transform root)
                 return null;
             }
 
-            if (nativeCoverTexture != null && nativeCoverTexture != coverShowingTexture)
-                Destroy(nativeCoverTexture);
+            RetireSpotifyCoverTexture(nativeCoverTexture);
             nativeCoverTexture = texture;
             coverHash = hash;
             coverByteLength = bytes.Length;
@@ -886,5 +1053,72 @@ private static Transform FindAlbumHome(Transform root)
                 hash = (hash ^ bytes[index]) * 16777619;
             return hash;
         }
+    }
+
+    private void RetireSpotifyCoverTexture(Texture2D texture)
+    {
+        if (texture != null && !retiredCoverTextures.Contains(texture))
+            retiredCoverTextures.Add(texture);
+    }
+
+    private void ReleaseRetiredSpotifyTextures()
+    {
+        for (int index = retiredCoverTextures.Count - 1; index >= 0; index--)
+        {
+            Texture2D texture = retiredCoverTextures[index];
+            if (texture == null)
+            {
+                retiredCoverTextures.RemoveAt(index);
+                continue;
+            }
+            if (texture == coverShowingTexture || texture == coverSwapTexture ||
+                texture == nativeCoverTexture || texture == coverTexture)
+                continue;
+
+            Destroy(texture);
+            retiredCoverTextures.RemoveAt(index);
+        }
+    }
+
+    private void DestroySpotifyHudResources()
+    {
+        if (coverSwap != null)
+        {
+            StopCoroutine(coverSwap);
+            coverSwap = null;
+        }
+
+        if (coverRaw != null)
+            coverRaw.texture = null;
+        if (coverImage != null && coverRaw == null)
+        {
+            coverImage.sprite = null;
+            coverImage.overrideSprite = null;
+        }
+        if (coverMaterial != null)
+            coverMaterial.mainTexture = null;
+
+        if (coverSprite != null)
+            Destroy(coverSprite);
+
+        HashSet<Texture2D> ownedTextures = new HashSet<Texture2D>(retiredCoverTextures);
+        if (nativeCoverTexture != null)
+            ownedTextures.Add(nativeCoverTexture);
+        if (coverTexture != null)
+            ownedTextures.Add(coverTexture);
+        foreach (Texture2D texture in ownedTextures)
+            if (texture != null)
+                Destroy(texture);
+
+        if (coverMaterial != null)
+            Destroy(coverMaterial);
+
+        coverSprite = null;
+        nativeCoverTexture = null;
+        coverTexture = null;
+        coverShowingTexture = null;
+        coverSwapTexture = null;
+        coverMaterial = null;
+        retiredCoverTextures.Clear();
     }
 }

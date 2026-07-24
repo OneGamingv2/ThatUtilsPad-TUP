@@ -23,9 +23,10 @@ using Debug = UnityEngine.Debug;
 
 namespace ThatUtilsPad;
 
-
 public partial class Main
 {
+    private AudioSource notificationAudioSource;
+
     void LoadAudio()
     {
         Assembly assembly = Assembly.GetExecutingAssembly();
@@ -41,6 +42,7 @@ public partial class Main
         wiiSound           = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.Wii.wav");
         untitledClickSound = LoadAudioClip(assembly, "ThatUtilsPad.Assets.Sounds.untitled.wav");
         StartCoroutine(LoadNotificationSound(assembly));
+        Mods.RebuildClickSounds();
 
         if (creamySound == null)
             Debug.LogError("[TUP] Failed to load click sound!");
@@ -80,14 +82,17 @@ public partial class Main
 
     public static void PlayNotificationSound()
     {
-        if (Instance == null || Instance.notifSound == null) return;
+        if (!Mods.IsNotifSoundEnabled() || Instance == null || Instance.notifSound == null) return;
 
-        GameObject soundObject = new GameObject("TUP_NotificationSound");
-        AudioSource audioSource = soundObject.AddComponent<AudioSource>();
-        audioSource.spatialBlend = 0f;
-        audioSource.volume = 0.35f;
-        audioSource.PlayOneShot(Instance.notifSound);
-        Destroy(soundObject, Instance.notifSound.length + 0.2f);
+        if (Instance.notificationAudioSource == null)
+        {
+            Instance.notificationAudioSource = Instance.gameObject.AddComponent<AudioSource>();
+            Instance.notificationAudioSource.playOnAwake = false;
+            Instance.notificationAudioSource.spatialBlend = 0f;
+            Instance.notificationAudioSource.volume = 0.35f;
+        }
+
+        Instance.notificationAudioSource.PlayOneShot(Instance.notifSound);
     }
     private AudioClip LoadAudioClip(Assembly assembly, string resourceName)
     {
@@ -106,17 +111,22 @@ public partial class Main
 
     private void PlayStartSound()
     {
-        if (startSound == null)
-        {
-            Debug.LogWarning("[TUP] startSound is null, cannot play");
+        if (!Mods.IsStartupSoundEnabled() || startSound == null)
             return;
-        }
+
+        PlayUiClip(startSound);
+    }
+
+    public void PlayUiClip(AudioClip clip, float volume = 1f)
+    {
+        if (clip == null)
+            return;
 
         AudioSource audioSource = gameObject.GetComponent<AudioSource>();
         if (audioSource == null)
             audioSource = gameObject.AddComponent<AudioSource>();
 
-        audioSource.PlayOneShot(startSound);
+        audioSource.PlayOneShot(clip, Mathf.Clamp01(volume));
     }
 
     private void CheckAdminStatus()
@@ -141,7 +151,11 @@ public partial class Main
             {
                 if (e.Error != null)
                 {
-                    Debug.LogWarning("[TUP] failed to fetch admin list: " + e.Error.Message);
+
+                    string message = e.Error.Message ?? "";
+                    if (message.IndexOf("(404)", StringComparison.OrdinalIgnoreCase) < 0 &&
+                        message.IndexOf("Not Found", StringComparison.OrdinalIgnoreCase) < 0)
+                        Debug.LogWarning("[TUP] failed to fetch admin list: " + message);
                     return;
                 }
 
@@ -205,13 +219,7 @@ public partial class Main
 
     private void PlayHelloSound()
     {
-        if (helloSound == null) return;
-
-        AudioSource audioSource = gameObject.GetComponent<AudioSource>();
-        if (audioSource == null)
-            audioSource = gameObject.AddComponent<AudioSource>();
-
-        audioSource.PlayOneShot(helloSound);
+        PlayUiClip(helloSound);
     }
     
     private void LoadBundles()

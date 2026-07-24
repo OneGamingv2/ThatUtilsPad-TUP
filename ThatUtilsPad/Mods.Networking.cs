@@ -76,6 +76,7 @@ public static partial class Mods
     private static readonly string[] regionNames = { "EU", "NA East", "NA West" };
     private static int regionIndex = -1;
     private static Coroutine? regionCoroutine;
+    private static Coroutine? regionStatsCoroutine;
 
     private static void PatchRegionIndex()
     {
@@ -95,7 +96,75 @@ public static partial class Mods
     public static string GetRegionLabel()
     {
         PatchRegionIndex();
-        return regionNames[regionIndex];
+        string name = regionNames[regionIndex];
+        if (!TryGetConnectedRegionPlayerCount(out int players, out int inRooms, out _))
+            return name;
+
+        if (players <= 0)
+            return name + " · …";
+
+        return name + " · " + players.ToString("N0") + " online";
+    }
+
+    private static bool TryGetConnectedRegionPlayerCount(out int players, out int inRooms, out int rooms)
+    {
+        players = 0;
+        inRooms = 0;
+        rooms = 0;
+
+        if (!PhotonNetwork.IsConnected)
+            return false;
+
+        string connected = PhotonNetwork.CloudRegion?.Split('/')[0].Trim().ToLowerInvariant();
+        PatchRegionIndex();
+        if (!string.IsNullOrEmpty(connected) && connected != regionCodes[regionIndex])
+            return false;
+
+        players = PhotonNetwork.CountOfPlayers;
+        inRooms = PhotonNetwork.CountOfPlayersInRooms;
+        rooms = PhotonNetwork.CountOfRooms;
+        return true;
+    }
+
+    public static void UpdateRegionLabel()
+    {
+        if (Main.regionText != null)
+            Main.regionText.text = "Region  :  " + GetRegionLabel();
+    }
+
+    public static void StartRegionStatsRefresh()
+    {
+        if (regionStatsCoroutine != null || CoroutineHandler.Instance == null)
+            return;
+
+        regionStatsCoroutine = CoroutineHandler.Instance.StartCoroutine(RefreshRegionStatsLoop());
+    }
+
+    private static IEnumerator RefreshRegionStatsLoop()
+    {
+        while (true)
+        {
+            UpdateRegionLabel();
+            yield return new WaitForSeconds(2.5f);
+        }
+    }
+
+    private static void ShowRegionPlayers()
+    {
+        PatchRegionIndex();
+        string name = regionNames[regionIndex];
+
+        if (!TryGetConnectedRegionPlayerCount(out int players, out int inRooms, out int rooms))
+        {
+            ShowNotification(name + " - connect to see region players", NotificationDefaultDuration);
+            return;
+        }
+
+        int onMaster = Mathf.Max(0, players - inRooms);
+        ShowNotification(
+            name + " - " + players.ToString("N0") + " online · " + inRooms.ToString("N0") + " in rooms · " +
+            onMaster.ToString("N0") + " in lobby · " + rooms.ToString("N0") + " rooms",
+            NotificationDefaultDuration);
     }
 
     private static void CycleRegion()
@@ -105,10 +174,7 @@ public static partial class Mods
 
         PatchRegionIndex();
         regionIndex = (regionIndex + 1) % regionCodes.Length;
-
-        if (Main.regionText != null)
-            Main.regionText.text = "Region  :  " + regionNames[regionIndex];
-
+        UpdateRegionLabel();
         regionCoroutine = CoroutineHandler.Instance.StartCoroutine(ChangeRegion(regionCodes[regionIndex]));
     }
 
@@ -136,6 +202,12 @@ public static partial class Mods
         if (!PhotonNetwork.IsConnected)
             PhotonNetwork.ConnectUsingSettings();
 
+        float connectTimeout = Time.time + 15f;
+        while (!PhotonNetwork.IsConnected && Time.time < connectTimeout)
+            yield return null;
+
+        UpdateRegionLabel();
+        ShowRegionPlayers();
         regionCoroutine = null;
     }
     

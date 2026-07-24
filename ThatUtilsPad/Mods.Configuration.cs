@@ -32,6 +32,11 @@ public static partial class Mods
         SaveButtonStates();
     }
 
+    public static bool GetSavedToggle(string identifier, bool fallback = false)
+    {
+        return SavedToggleStates.TryGetValue(identifier, out bool value) ? value : fallback;
+    }
+
     private static void SaveButtonStates()
     {
         try
@@ -41,6 +46,10 @@ public static partial class Mods
             foreach (var kvp in SavedToggleStates)
                 lines.Add("toggle:" + kvp.Key + "=" + kvp.Value);
             lines.Add("clickSoundIndex=" + currentClickIndex);
+            lines.Add("startupSoundEnabled=" + startupSoundEnabled);
+            lines.Add("menuOpenSoundEnabled=" + menuOpenSoundEnabled);
+            lines.Add("buttonPopSoundEnabled=" + buttonPopSoundEnabled);
+            lines.Add("notifSoundEnabled=" + notifSoundEnabled);
             lines.Add("smoothMenuEnabled=" + smoothMenuEnabled);
             lines.Add("smoothingStrengthIndex=" + smoothingStrengthIndex);
             lines.Add("menuScaleIndex=" + menuScaleIndex);
@@ -70,7 +79,12 @@ public static partial class Mods
         {
             SavedToggleStates["Menu Smoothing"] = smoothMenuEnabled;
             SavedToggleStates["Double Open"] = doubleClickOpenEnabled;
+            SavedToggleStates["Startup Sound"] = startupSoundEnabled;
+            SavedToggleStates["Menu Open Sound"] = menuOpenSoundEnabled;
+            SavedToggleStates["Button Pop Sound"] = buttonPopSoundEnabled;
+            SavedToggleStates["Notif Sound"] = notifSoundEnabled;
             SavedToggleStates["Nametag Distance Fade"] = nameTagDistanceFadeEnabled;
+            SavedToggleStates["Distance Fade"] = nameTagDistanceFadeEnabled;
             SavedToggleStates["Auto Scan"] = autoScanEnabled;
             SavedToggleStates["Nametags"] = nameTagsEnabled;
             SavedToggleStates["Select User"] = checkerEnabled;
@@ -92,7 +106,39 @@ public static partial class Mods
                 else if (line.StartsWith("clickSoundIndex="))
                 {
                     if (int.TryParse(line.Substring(16), out int idx))
-                        currentClickIndex = Mathf.Clamp(idx, 0, clickSounds.Count - 1);
+                        currentClickIndex = idx;
+                }
+                else if (line.StartsWith("startupSoundEnabled="))
+                {
+                    if (bool.TryParse(line.Substring(20), out bool val))
+                    {
+                        startupSoundEnabled = val;
+                        SavedToggleStates["Startup Sound"] = val;
+                    }
+                }
+                else if (line.StartsWith("menuOpenSoundEnabled="))
+                {
+                    if (bool.TryParse(line.Substring(21), out bool val))
+                    {
+                        menuOpenSoundEnabled = val;
+                        SavedToggleStates["Menu Open Sound"] = val;
+                    }
+                }
+                else if (line.StartsWith("buttonPopSoundEnabled="))
+                {
+                    if (bool.TryParse(line.Substring(22), out bool val))
+                    {
+                        buttonPopSoundEnabled = val;
+                        SavedToggleStates["Button Pop Sound"] = val;
+                    }
+                }
+                else if (line.StartsWith("notifSoundEnabled="))
+                {
+                    if (bool.TryParse(line.Substring(18), out bool val))
+                    {
+                        notifSoundEnabled = val;
+                        SavedToggleStates["Notif Sound"] = val;
+                    }
                 }
                 else if (line.StartsWith("smoothMenuEnabled="))
                 {
@@ -171,15 +217,38 @@ public static partial class Mods
 
         SavedToggleStates["Menu Smoothing"] = smoothMenuEnabled;
         SavedToggleStates["Double Open"] = doubleClickOpenEnabled;
+        if (SavedToggleStates.TryGetValue("Startup Sound", out bool startupToggle))
+            startupSoundEnabled = startupToggle;
+        else
+            SavedToggleStates["Startup Sound"] = startupSoundEnabled;
+        if (SavedToggleStates.TryGetValue("Menu Open Sound", out bool menuOpenToggle))
+            menuOpenSoundEnabled = menuOpenToggle;
+        else
+            SavedToggleStates["Menu Open Sound"] = menuOpenSoundEnabled;
+        if (SavedToggleStates.TryGetValue("Button Pop Sound", out bool buttonPopToggle))
+            buttonPopSoundEnabled = buttonPopToggle;
+        else
+            SavedToggleStates["Button Pop Sound"] = buttonPopSoundEnabled;
+        if (SavedToggleStates.TryGetValue("Notif Sound", out bool notifToggle))
+            notifSoundEnabled = notifToggle;
+        else
+            SavedToggleStates["Notif Sound"] = notifSoundEnabled;
         if (!SavedToggleStates.ContainsKey("Nametag Distance Fade")) SavedToggleStates["Nametag Distance Fade"] = nameTagDistanceFadeEnabled;
+        if (!SavedToggleStates.ContainsKey("Distance Fade")) SavedToggleStates["Distance Fade"] = SavedToggleStates["Nametag Distance Fade"];
         if (!SavedToggleStates.ContainsKey("Auto Scan")) SavedToggleStates["Auto Scan"] = autoScanEnabled;
         if (!SavedToggleStates.ContainsKey("Nametags")) SavedToggleStates["Nametags"] = nameTagsEnabled;
         if (!SavedToggleStates.ContainsKey("Select User")) SavedToggleStates["Select User"] = checkerEnabled;
-        nameTagDistanceFadeEnabled = SavedToggleStates["Nametag Distance Fade"];
+        nameTagDistanceFadeEnabled = GetSavedToggle("Distance Fade", GetSavedToggle("Nametag Distance Fade", nameTagDistanceFadeEnabled));
+        SavedToggleStates["Distance Fade"] = nameTagDistanceFadeEnabled;
+        SavedToggleStates["Nametag Distance Fade"] = nameTagDistanceFadeEnabled;
         autoScanEnabled = SavedToggleStates["Auto Scan"];
         nameTagsEnabled = SavedToggleStates["Nametags"];
         checkerEnabled = SavedToggleStates["Select User"];
         targetNameTagScale = nameTagScaleSteps[Mathf.Clamp(nameTagScaleIndex, 0, nameTagScaleSteps.Length - 1)];
+        if (clickSounds.Count > 0)
+            currentClickIndex = Mathf.Clamp(currentClickIndex, 0, clickSounds.Count - 1);
+        else
+            currentClickIndex = 0;
     }
     
     
@@ -192,32 +261,103 @@ public static partial class Mods
     }
     
 
-    public static List<ClickSoundEntry> clickSounds = new List<ClickSoundEntry>
-    {
-        new ClickSoundEntry("watch", Main.Instance.watchSound),
-        new ClickSoundEntry("creamy", Main.Instance.creamySound),
-        new ClickSoundEntry("destiny", Main.Instance.destinySound),
-        new ClickSoundEntry("minecraft", Main.Instance.minecraftSound),
-        new ClickSoundEntry("Wii", Main.Instance.wiiSound),
-        new ClickSoundEntry("untitled", Main.Instance.untitledClickSound)
-    };
+    public static List<ClickSoundEntry> clickSounds = new List<ClickSoundEntry>();
     public static int currentClickIndex = 0;
-    
+
+    private static bool startupSoundEnabled = true;
+    private static bool menuOpenSoundEnabled = true;
+    private static bool buttonPopSoundEnabled = true;
+    private static bool notifSoundEnabled = true;
+
+    public static void RebuildClickSounds()
+    {
+        clickSounds.Clear();
+        if (Main.Instance == null)
+            return;
+
+        void Add(string name, AudioClip clip)
+        {
+            if (clip != null)
+                clickSounds.Add(new ClickSoundEntry(name, clip));
+        }
+
+        Add("watch", Main.Instance.watchSound);
+        Add("creamy", Main.Instance.creamySound);
+        Add("destiny", Main.Instance.destinySound);
+        Add("minecraft", Main.Instance.minecraftSound);
+        Add("Wii", Main.Instance.wiiSound);
+        Add("untitled", Main.Instance.untitledClickSound);
+
+        if (clickSounds.Count > 0)
+            currentClickIndex = Mathf.Clamp(currentClickIndex, 0, clickSounds.Count - 1);
+    }
+
+    public static bool IsStartupSoundEnabled() => startupSoundEnabled;
+    public static bool IsMenuOpenSoundEnabled() => menuOpenSoundEnabled;
+    public static bool IsButtonPopSoundEnabled() => buttonPopSoundEnabled;
+    public static bool IsNotifSoundEnabled() => notifSoundEnabled;
+
+    public static string GetClickSoundLabel()
+    {
+        if (clickSounds.Count == 0)
+            return "-";
+        currentClickIndex = Mathf.Clamp(currentClickIndex, 0, clickSounds.Count - 1);
+        return FormatDisplayName(clickSounds[currentClickIndex].Name);
+    }
+
+    public static string GetStartupSoundLabel() => startupSoundEnabled ? "On" : "Off";
+    public static string GetMenuOpenSoundLabel() => menuOpenSoundEnabled ? "On" : "Off";
+    public static string GetButtonPopSoundLabel() => buttonPopSoundEnabled ? "On" : "Off";
+    public static string GetNotifSoundLabel() => notifSoundEnabled ? "On" : "Off";
+
     private static void ToggleClickSound()
     {
-        if (clickSounds.Count == 0) return;
+        if (clickSounds.Count == 0)
+        {
+            RebuildClickSounds();
+            if (clickSounds.Count == 0) return;
+        }
 
         currentClickIndex = (currentClickIndex + 1) % clickSounds.Count;
         var entry = clickSounds[currentClickIndex];
         Main.Instance.currentClickSound = entry.Clip;
 
-        string displayName = FormatDisplayName(entry.Name);
-
-
         SaveButtonStates();
 
         if (Main.clickSoundText != null)
-            Main.clickSoundText.text = "Click Sound  :  " + displayName;
+            Main.clickSoundText.text = "Click Sound  :  " + FormatDisplayName(entry.Name);
+    }
+
+    private static void ToggleStartupSound()
+    {
+        startupSoundEnabled = GetSavedToggle("Startup Sound", startupSoundEnabled);
+        SavedToggleStates["Startup Sound"] = startupSoundEnabled;
+        SaveButtonStates();
+        UpdateSettingsLabels();
+    }
+
+    private static void ToggleMenuOpenSound()
+    {
+        menuOpenSoundEnabled = GetSavedToggle("Menu Open Sound", menuOpenSoundEnabled);
+        SavedToggleStates["Menu Open Sound"] = menuOpenSoundEnabled;
+        SaveButtonStates();
+        UpdateSettingsLabels();
+    }
+
+    private static void ToggleButtonPopSound()
+    {
+        buttonPopSoundEnabled = GetSavedToggle("Button Pop Sound", buttonPopSoundEnabled);
+        SavedToggleStates["Button Pop Sound"] = buttonPopSoundEnabled;
+        SaveButtonStates();
+        UpdateSettingsLabels();
+    }
+
+    private static void ToggleNotifSound()
+    {
+        notifSoundEnabled = GetSavedToggle("Notif Sound", notifSoundEnabled);
+        SavedToggleStates["Notif Sound"] = notifSoundEnabled;
+        SaveButtonStates();
+        UpdateSettingsLabels();
     }
 
 
@@ -232,25 +372,34 @@ public static partial class Mods
     private static int menuScaleIndex = 1;
 
     private static readonly string[] headDistanceNames = { "Close", "Normal", "Far" };
-    private static readonly float[] headDistanceValues = { 0.48f, 0.6f, 0.75f };
+    private static readonly float[] headDistanceValues = { 0.45f, 0.6f, 0.8f };
     private static int headDistanceIndex = 1;
 
     private static bool doubleClickOpenEnabled;
     private static string menuOpenBindCode = Main.DefaultMenuOpenBindCode;
     private static Coroutine openBindCaptureCoroutine;
 
-    private static readonly string[] themeNames = { "Default", "Sakura" };
+    private static readonly string[] themeNames =
+    {
+        "Default", "Sakura", "Ocean", "Ember", "Mint", "Midnight", "Amber", "Crimson"
+    };
     private static readonly MenuThemePalette[] themePalettes =
     {
         MenuTheme.Themes.Default,
-        MenuTheme.Themes.Sakura
+        MenuTheme.Themes.Sakura,
+        MenuTheme.Themes.Ocean,
+        MenuTheme.Themes.Ember,
+        MenuTheme.Themes.Mint,
+        MenuTheme.Themes.Midnight,
+        MenuTheme.Themes.Amber,
+        MenuTheme.Themes.Crimson
     };
     private static int themeIndex = 1;
 
 
     private static void ToggleDoubleOpen()
     {
-        doubleClickOpenEnabled = !doubleClickOpenEnabled;
+        doubleClickOpenEnabled = GetSavedToggle("Double Open", doubleClickOpenEnabled);
         ApplySavedSettings();
         SaveButtonStates();
     }
@@ -294,7 +443,7 @@ public static partial class Mods
 
     private static void SmoothMenu()
     {
-        smoothMenuEnabled = !smoothMenuEnabled;
+        smoothMenuEnabled = GetSavedToggle("Menu Smoothing", smoothMenuEnabled);
         ApplySavedSettings();
         SaveButtonStates();
     }
@@ -341,10 +490,15 @@ public static partial class Mods
     {
         if (Main.Instance == null) return;
 
+        RebuildClickSounds();
         if (clickSounds.Count > 0)
         {
             currentClickIndex = Mathf.Clamp(currentClickIndex, 0, clickSounds.Count - 1);
             Main.Instance.currentClickSound = clickSounds[currentClickIndex].Clip;
+        }
+        else
+        {
+            Main.Instance.currentClickSound = null;
         }
 
         Main.Instance.SetMenuSmoothing(smoothMenuEnabled, smoothingStrengthValues[smoothingStrengthIndex]);
@@ -352,6 +506,7 @@ public static partial class Mods
         Main.Instance.SetHeadDistance(headDistanceValues[headDistanceIndex]);
         Main.Instance.SetMenuOpenOptions(doubleClickOpenEnabled, menuOpenBindCode);
         ApplyTheme();
+        UpdateRegionLabel();
         UpdateSettingsLabels();
     }
 
@@ -390,6 +545,23 @@ public static partial class Mods
 
         if (Main.nameTagFadeDistanceText != null)
             Main.nameTagFadeDistanceText.text = "Nametag Fade Distance  :  " + GetNameTagFadeDistanceLabel();
+
+        if (Main.clickSoundText != null)
+            Main.clickSoundText.text = "Click Sound  :  " + GetClickSoundLabel();
+
+        if (Main.startupSoundText != null)
+            Main.startupSoundText.text = "Startup Sound  :  " + GetStartupSoundLabel();
+
+        if (Main.menuOpenSoundText != null)
+            Main.menuOpenSoundText.text = "Menu Open Sound  :  " + GetMenuOpenSoundLabel();
+
+        if (Main.buttonPopSoundText != null)
+            Main.buttonPopSoundText.text = "Button Pop Sound  :  " + GetButtonPopSoundLabel();
+
+        if (Main.notifSoundText != null)
+            Main.notifSoundText.text = "Notif Sound  :  " + GetNotifSoundLabel();
+
+        UpdateRegionLabel();
     }
     
 }
