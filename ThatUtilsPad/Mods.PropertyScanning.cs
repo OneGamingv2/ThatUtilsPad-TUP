@@ -778,8 +778,9 @@ private enum ScanLobbyMode
         }, delegate
         {
             creationDates[userId] = "Error";
-
             pendingSupportPlatformLookups.Remove(userId);
+            ApplyPlatformFallbackWhenPlayFabMissing(userId);
+            RequestPlayerProfilePlatform(userId);
             onTranslated?.Invoke("Error");
         });
     }

@@ -83,7 +83,46 @@ public partial class Main
             playerModelPreviewObj = null;
         }
 
-        SetCheckerMonkeSilhouetteVisible(true);
+        SetCheckerMonkeSilhouetteVisible(false);
+    }
+
+    private void HideCheckerMonkeBoxPermanently()
+    {
+        SetCheckerMonkeSilhouetteVisible(false);
+
+        Transform side = menuObj != null ? menuObj.transform.Find("SideHolder") : null;
+        if (side == null)
+            return;
+
+        Transform checkerMonke =
+            side.Find("CheckerMonke") ??
+            FindChildByName(side, "CheckerMonke");
+        if (checkerMonke == null)
+            return;
+
+        for (int i = 0; i < checkerMonke.childCount; i++)
+        {
+            Transform child = checkerMonke.GetChild(i);
+            if (child == null)
+                continue;
+
+            string name = child.name ?? "";
+            if (name.IndexOf("MonkeBase", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("Box", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("Frame", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("Border", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("Background", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("Silhouette", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                child.gameObject.SetActive(false);
+            }
+        }
+
+        Transform monkeBase =
+            checkerMonke.Find("MonkeBase") ??
+            FindChildByName(checkerMonke, "MonkeBase");
+        if (monkeBase != null)
+            monkeBase.gameObject.SetActive(false);
     }
 
     private void UpdatePlayerModelPreviewLive()
@@ -211,7 +250,7 @@ public partial class Main
         }
         else
         {
-            SetCheckerMonkeSilhouetteVisible(true);
+            SetCheckerMonkeSilhouetteVisible(false);
         }
 
         FinishPlayerModelPreviewBuild(version);

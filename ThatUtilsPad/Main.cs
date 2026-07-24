@@ -141,6 +141,13 @@ public partial class Main : BaseUnityPlugin
     private float lastVolumeDisplayWidth = float.NaN;
     private Image checkerMonkeColorImage;
     private SpriteRenderer checkerMonkeColorSprite;
+    private Image checkerPlatformIconImage;
+    private Image moreInfoPlatformIconImage;
+    private Sprite platformSpriteSteam;
+    private Sprite platformSpriteMeta;
+    private Sprite platformSpritePc;
+    private Sprite platformSpriteUnknown;
+    private bool platformSpritesLoaded;
     private string lastCheckerName;
     private string lastCheckerFpsPing;
     private string lastCheckerPlatform;

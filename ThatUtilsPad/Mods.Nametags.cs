@@ -196,11 +196,34 @@ public static partial class Mods
             FpsColors = CreateColorBinding(transforms, graphics, sprites, renderers, fps, "FPS"),
             PingColors = CreateColorBinding(transforms, graphics, sprites, renderers, ping, "Ping"),
             ModsColors = CreateColorBinding(transforms, graphics, sprites, renderers, mods, "Mods"),
-            IconMeta = GetCachedGameObject(transforms, "IconMeta"),
-            IconPc = GetCachedGameObject(transforms, "IconPC"),
-            IconUnknown = GetCachedGameObject(transforms, "IconUnknown"),
-            IconSteam = GetCachedGameObject(transforms, "IconSteam")
+            IconMeta = FindPlatformIcon(transforms, "IconMeta", "Meta", "Quest", "Standalone"),
+            IconPc = FindPlatformIcon(transforms, "IconPC", "IconPc", "PC", "Oculus"),
+            IconUnknown = FindPlatformIcon(transforms, "IconUnknown", "Unknown"),
+            IconSteam = FindPlatformIcon(transforms, "IconSteam", "Steam", "Icon_Steam", "SteamIcon")
         };
+    }
+
+    private static GameObject? FindPlatformIcon(Transform[] transforms, params string[] names)
+    {
+        for (int n = 0; n < names.Length; n++)
+        {
+            Transform? exact = FindCachedTransform(transforms, names[n]);
+            if (exact != null)
+                return exact.gameObject;
+        }
+
+        for (int n = 0; n < names.Length; n++)
+        {
+            string needle = names[n];
+            for (int i = 0; i < transforms.Length; i++)
+            {
+                string name = transforms[i].name ?? "";
+                if (name.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return transforms[i].gameObject;
+            }
+        }
+
+        return null;
     }
 
     private static Transform? FindCachedTransform(Transform[] transforms, string name)
@@ -380,27 +403,30 @@ public static partial class Mods
         if (string.Equals(platform, "Loading...", StringComparison.Ordinal))
         {
             SetActiveIfChanged(view.IconUnknown, false);
+            SetActiveIfChanged(view.IconMeta, false);
+            SetActiveIfChanged(view.IconPc, false);
+            SetActiveIfChanged(view.IconSteam, false);
             return;
         }
 
-        SetActiveIfChanged(view.IconMeta, false);
-        SetActiveIfChanged(view.IconPc, false);
-        SetActiveIfChanged(view.IconUnknown, false);
-        SetActiveIfChanged(view.IconSteam, false);
+        SetPlatformIconActive(view.IconMeta, false);
+        SetPlatformIconActive(view.IconPc, false);
+        SetPlatformIconActive(view.IconUnknown, false);
+        SetPlatformIconActive(view.IconSteam, false);
 
         switch (platform)
         {
             case "Steam":
-                SetActiveIfChanged(view.IconSteam, true);
+                if (!SetPlatformIconActive(view.IconSteam, true) && view.IconPc != null)
+                    SetPlatformIconActive(view.IconPc, true);
+                else if (view.IconSteam == null)
+                    SetPlatformIconActive(view.IconUnknown, true);
                 break;
             case "PC":
             case "Oculus PC":
             case "Oculus":
-
-                if (view.IconPc != null)
-                    SetActiveIfChanged(view.IconPc, true);
-                else
-                    SetActiveIfChanged(view.IconMeta, true);
+                if (!SetPlatformIconActive(view.IconPc, true))
+                    SetPlatformIconActive(view.IconMeta, true);
                 break;
             case "Standalone":
             case "StandaloneVR":
@@ -408,12 +434,53 @@ public static partial class Mods
             case "Quest":
             case "PSVR":
             case "Pico":
-                SetActiveIfChanged(view.IconMeta, true);
+                SetPlatformIconActive(view.IconMeta, true);
                 break;
             default:
-                SetActiveIfChanged(view.IconUnknown, true);
+                SetPlatformIconActive(view.IconUnknown, true);
                 break;
         }
+    }
+
+    private static bool SetPlatformIconActive(GameObject? target, bool active)
+    {
+        if (target == null)
+            return false;
+
+        if (active)
+        {
+            Transform walk = target.transform;
+            while (walk != null)
+            {
+                if (!walk.gameObject.activeSelf)
+                    walk.gameObject.SetActive(true);
+                if (walk.parent == null || walk.parent == walk)
+                    break;
+                walk = walk.parent;
+            }
+        }
+
+        if (target.activeSelf != active)
+            target.SetActive(active);
+
+        if (active)
+        {
+            Renderer[] renderers = target.GetComponentsInChildren<Renderer>(true);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i] != null)
+                    renderers[i].enabled = true;
+            }
+
+            Graphic[] graphics = target.GetComponentsInChildren<Graphic>(true);
+            for (int i = 0; i < graphics.Length; i++)
+            {
+                if (graphics[i] != null)
+                    graphics[i].enabled = true;
+            }
+        }
+
+        return active && target.activeInHierarchy;
     }
 
     private static void SetActiveIfChanged(GameObject? target, bool active)
@@ -421,6 +488,8 @@ public static partial class Mods
         if (target != null && target.activeSelf != active)
             target.SetActive(active);
     }
+
+    public static GameObject? PeekNameTagPrefab() => GetNameTagPrefab();
 
     private static GameObject? GetNameTagPrefab()
     {

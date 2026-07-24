@@ -59,26 +59,28 @@ public static partial class Mods
 
         string userId = player != null ? player.UserId : null;
 
+        string fast = ResolveFastPlatform(rig, player);
+        if (fast == "Steam")
+        {
+            if (!string.IsNullOrEmpty(userId))
+                supportPlatformByUserId[userId] = "Steam";
+            return "Steam";
+        }
+
         if (!string.IsNullOrEmpty(userId) &&
             supportPlatformByUserId.TryGetValue(userId, out string cached) &&
             IsSupportPlatform(cached))
         {
+            if (cached != "Steam")
+                RequestSupportPlatformFromPlayFab(userId);
             return cached;
         }
 
-        string fast = ResolveFastPlatform(rig, player);
         if (IsSupportPlatform(fast))
         {
             if (!string.IsNullOrEmpty(userId))
             {
-                if (!supportPlatformByUserId.TryGetValue(userId, out string existing) ||
-                    !IsSupportPlatform(existing) ||
-                    fast == "Steam" ||
-                    (existing == "Quest" && fast != "Quest"))
-                {
-                    supportPlatformByUserId[userId] = fast;
-                }
-
+                supportPlatformByUserId[userId] = fast;
                 RequestSupportPlatformFromPlayFab(userId);
             }
 
@@ -157,10 +159,6 @@ public static partial class Mods
 
     private static string ResolveFastPlatform(VRRig rig, Player player)
     {
-        string seralyth = ResolvePlatformSeralythStyle(rig, player);
-        if (IsSupportPlatform(seralyth))
-            return seralyth;
-
         if (player != null && LooksLikeSteam64(player.UserId))
             return "Steam";
 
@@ -168,6 +166,13 @@ public static partial class Mods
             return "Steam";
 
         string fromPhoton = ResolvePlatformFromPhotonProperties(player);
+        if (fromPhoton == "Steam")
+            return "Steam";
+
+        string scored = ResolvePlatformSeralythStyle(rig, player);
+        if (IsSupportPlatform(scored))
+            return scored;
+
         if (IsSupportPlatform(fromPhoton))
             return fromPhoton;
 
@@ -192,40 +197,56 @@ public static partial class Mods
         }
         catch { }
 
+        string cosmeticsCompact = cosmetics.Replace(" ", "").Replace(".", "").Replace("_", "").Replace("-", "");
+
         bool hasSteamFirstLogin =
             cosmetics.IndexOf("S. FIRST LOGIN", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            cosmetics.Replace(" ", "").Replace(".", "").IndexOf("SFIRSTLOGIN", StringComparison.OrdinalIgnoreCase) >= 0;
+            cosmeticsCompact.IndexOf("SFIRSTLOGIN", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            cosmeticsCompact.IndexOf("STEAMFIRSTLOGIN", StringComparison.OrdinalIgnoreCase) >= 0;
 
         bool hasOculusFirstLogin =
             !hasSteamFirstLogin &&
             (cosmetics.IndexOf("FIRST LOGIN", StringComparison.OrdinalIgnoreCase) >= 0 ||
              cosmetics.IndexOf("GAME-PURCHASE", StringComparison.OrdinalIgnoreCase) >= 0 ||
-             cosmetics.Replace(" ", "").IndexOf("FIRSTLOGIN", StringComparison.OrdinalIgnoreCase) >= 0);
+             cosmeticsCompact.IndexOf("FIRSTLOGIN", StringComparison.OrdinalIgnoreCase) >= 0 ||
+             cosmeticsCompact.IndexOf("GAMEPURCHASE", StringComparison.OrdinalIgnoreCase) >= 0);
 
         if (hasSteamFirstLogin)
-            suspiciouslySteam++;
+            suspiciouslySteam += 3;
 
-        if (hasOculusFirstLogin || (player?.CustomProperties != null && player.CustomProperties.Count >= 2))
-            suspiciouslyPC++;
+        if (hasOculusFirstLogin)
+            suspiciouslyPC += 2;
 
+        int pcTier = 0;
+        int questTier = 0;
         try
         {
             if (rig != null)
             {
-                if (RigBits.GetPCTier(rig) > 0)
-                    suspiciouslyPC++;
-                else if (RigBits.GetQuestTier(rig) > 0)
-                    suspiciouslyQuest++;
+                pcTier = RigBits.GetPCTier(rig);
+                questTier = RigBits.GetQuestTier(rig);
             }
         }
         catch { }
 
+        if (pcTier > 0)
+            suspiciouslySteam += 2;
+        else if (questTier > 0)
+            suspiciouslyQuest += 2;
+
         if (player != null && LooksLikeSteam64(player.UserId))
-            suspiciouslySteam += 2;
+            suspiciouslySteam += 3;
         if (player != null && TryFindSteam64InProperties(player))
-            suspiciouslySteam += 2;
+            suspiciouslySteam += 3;
+
         if (player != null && PlayerHasPcModSignature(player))
-            suspiciouslyPC++;
+            suspiciouslySteam += 2;
+
+        if (player?.CustomProperties != null && player.CustomProperties.Count >= 2 &&
+            suspiciouslySteam == 0 && suspiciouslyQuest == 0 && suspiciouslyPC == 0)
+        {
+            suspiciouslySteam += 1;
+        }
 
         if (suspiciouslySteam > suspiciouslyPC && suspiciouslySteam > suspiciouslyQuest)
             return "Steam";
@@ -234,14 +255,14 @@ public static partial class Mods
         if (suspiciouslyQuest > suspiciouslySteam && suspiciouslyQuest > suspiciouslyPC)
             return "Quest";
 
-        if (suspiciouslySteam > 0 && suspiciouslySteam >= suspiciouslyPC && suspiciouslySteam >= suspiciouslyQuest)
+        if (suspiciouslySteam > 0)
             return "Steam";
-        if (suspiciouslyPC > 0 && suspiciouslyPC >= suspiciouslyQuest)
+        if (suspiciouslyPC > 0)
             return "Oculus PC";
         if (suspiciouslyQuest > 0)
             return "Quest";
 
-        return "Quest";
+        return "Unknown";
     }
 
     private static string ResolvePlatformFromPhotonProperties(Player player)
@@ -408,11 +429,13 @@ public static partial class Mods
             error =>
             {
                 pendingPlayerProfileLookups.Remove(userId);
+                ApplyPlatformFallbackWhenPlayFabMissing(userId);
             });
         }
         catch (Exception ex)
         {
             pendingPlayerProfileLookups.Remove(userId);
+            ApplyPlatformFallbackWhenPlayFabMissing(userId);
             Debug.LogWarning("[TUP] GetPlayerProfile platform exception: " + ex.Message);
         }
     }
@@ -454,6 +477,28 @@ public static partial class Mods
             return "Oculus PC";
 
         return "Unknown";
+    }
+
+    private static void ApplyPlatformFallbackWhenPlayFabMissing(string userId)
+    {
+        if (string.IsNullOrEmpty(userId))
+            return;
+
+        if (LooksLikeSteam64(userId))
+        {
+            supportPlatformByUserId[userId] = "Steam";
+            return;
+        }
+
+        string fromDate = ResolvePlatformFromCachedCreationDate(userId);
+        if (fromDate == "Oculus PC")
+        {
+            supportPlatformByUserId[userId] = "Oculus PC";
+            return;
+        }
+
+        if (!supportPlatformByUserId.TryGetValue(userId, out string existing) || !IsSupportPlatform(existing))
+            supportPlatformByUserId[userId] = "Unknown";
     }
 
     private static string GetPlatformFromPlayerProfile(PlayerProfileModel profile)
@@ -515,6 +560,11 @@ public static partial class Mods
         }
 
         if (profile.Created.HasValue && profile.Created.Value.ToUniversalTime() < MetaRebrandCutoff)
+            return "Oculus PC";
+
+        if (profile.Created.HasValue &&
+            (profile.LinkedAccounts == null || profile.LinkedAccounts.Count == 0) &&
+            profile.Created.Value.ToUniversalTime() < MetaRebrandCutoff)
             return "Oculus PC";
 
         return "Unknown";
@@ -603,7 +653,7 @@ public static partial class Mods
             DateTime utc = created.Kind == DateTimeKind.Unspecified
                 ? DateTime.SpecifyKind(created, DateTimeKind.Utc)
                 : created.ToUniversalTime();
-            return utc < MetaRebrandCutoff ? "Oculus PC" : "Quest";
+            return utc < MetaRebrandCutoff ? "Oculus PC" : "Unknown";
         }
 
         return "Unknown";

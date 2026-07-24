@@ -828,6 +828,8 @@ public partial class Main
         if (nameTextComp != null) { nameTextComp.text = "-----"; nameTextComp.font = figtreeFont; }
         if (fpsPingTextComp != null) { fpsPingTextComp.text = "--Hz \u2022 --Ms"; fpsPingTextComp.font = figtreeFont; MakeCheckerTextShow(fpsPingTextComp); }
         if (platformTextComp != null) { platformTextComp.text = "Platform"; platformTextComp.font = figtreeFont; }
+        InitCheckerPlatformIcons(sideTransform);
+        HideCheckerMonkeBoxPermanently();
         if (dateTextComp != null) { dateTextComp.text = "Date: --/--/----"; dateTextComp.font = figtreeFont; }
         if (modsCountTextComp != null) { modsCountTextComp.text = "0"; modsCountTextComp.font = figtreeFont; }
         if (cheatsCountTextComp != null) { cheatsCountTextComp.text = "0"; cheatsCountTextComp.font = figtreeFont; }
@@ -909,7 +911,7 @@ public partial class Main
                 text.IndexOf("Player", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 text.IndexOf("Version", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                label.text = "Version Beta 10245B";
+                label.text = "Version Beta 2B";
                 if (font != null)
                     label.font = font;
             }
@@ -1336,8 +1338,9 @@ public partial class Main
             else
             {
                 int total = moreInfoModList != null ? moreInfoModList.Length : 0;
+                string platformColored = FormatMoreInfoPlatformLine(platformValue);
                 moreInfoBodyText.text =
-                    "Platform: " + platformValue + "\n" +
+                    platformColored + "\n" +
                     "Creation Date: " + dateValue + "\n" +
                     "Color: " + colorValue + "\n" +
                     fpsValue + "\n\n" +
@@ -1345,6 +1348,7 @@ public partial class Main
                         ? "No mods detected\n<color=#BDBDBD>Tap MORE INFO for mods</color>"
                         : total + " mod" + (total == 1 ? "" : "s") + " detected\n" +
                           "<color=#CBA6F7>Tap MORE INFO to open list</color>");
+                UpdateMoreInfoPlatformIcon(platformValue);
             }
         }
 
@@ -1457,6 +1461,16 @@ public partial class Main
             }
 
             WireMoreInfoOpenButton();
+            if (moreInfoPlatformIconImage == null && moreInfoBodyText != null)
+            {
+                moreInfoPlatformIconImage = CreateOrGetPlatformIconImage(
+                    moreInfoBodyText.transform.parent != null ? moreInfoBodyText.transform.parent : modsTitleTransform,
+                    "TUP_MoreInfoPlatformIcon",
+                    moreInfoBodyText.transform,
+                    new Vector3(-0.012f, 0.012f, 0f));
+            }
+
+            UpdateMoreInfoPlatformIcon(lastCheckerPlatform);
             RefreshCheckerModsInfo();
         }
         else
@@ -1496,6 +1510,7 @@ public partial class Main
         if (nameTextComp != null) nameTextComp.text = "-----";
         if (fpsPingTextComp != null) { MakeCheckerTextShow(fpsPingTextComp); fpsPingTextComp.text = lastCheckerFpsPing; }
         if (platformTextComp != null) platformTextComp.text = "Platform";
+        UpdateCheckerPlatformIcon("Unknown");
         if (dateTextComp != null) dateTextComp.text = lastCheckerDate;
 
         DestroyPlayerModelPreview();
@@ -1637,6 +1652,224 @@ public partial class Main
         volumeInnerRoutine = null;
     }
 
+    private void InitCheckerPlatformIcons(Transform sideTransform)
+    {
+        EnsurePlatformSpritesLoaded();
+
+        if (platformTextComp != null)
+            checkerPlatformIconImage = CreateOrGetPlatformIconImage(
+                platformTextComp.transform.parent != null ? platformTextComp.transform.parent : sideTransform,
+                "TUP_PlatformIcon",
+                platformTextComp.transform,
+                new Vector3(-0.018f, 0f, 0f));
+
+        if (moreInfoBodyText != null)
+        {
+            moreInfoPlatformIconImage = CreateOrGetPlatformIconImage(
+                moreInfoBodyText.transform.parent != null ? moreInfoBodyText.transform.parent : sideTransform,
+                "TUP_MoreInfoPlatformIcon",
+                moreInfoBodyText.transform,
+                new Vector3(-0.012f, 0.012f, 0f));
+        }
+
+        UpdateCheckerPlatformIcon("Unknown");
+    }
+
+    private Image CreateOrGetPlatformIconImage(Transform parent, string name, Transform alignTo, Vector3 localOffset)
+    {
+        if (parent == null)
+            return null;
+
+        Transform existing = parent.Find(name);
+        GameObject go;
+        if (existing != null)
+        {
+            go = existing.gameObject;
+        }
+        else
+        {
+            go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(parent, false);
+        }
+
+        RectTransform rect = go.GetComponent<RectTransform>();
+        if (rect != null)
+        {
+            rect.sizeDelta = new Vector2(24f, 24f);
+            rect.localScale = Vector3.one * 0.0012f;
+            if (alignTo != null)
+            {
+                rect.position = alignTo.position;
+                rect.rotation = alignTo.rotation;
+                rect.localPosition = alignTo.localPosition + localOffset;
+            }
+            else
+            {
+                rect.localPosition = localOffset;
+            }
+        }
+        else
+        {
+            go.transform.localScale = Vector3.one * 0.012f;
+            if (alignTo != null)
+            {
+                go.transform.position = alignTo.position;
+                go.transform.rotation = alignTo.rotation;
+                go.transform.localPosition = alignTo.localPosition + localOffset;
+            }
+        }
+
+        Image image = go.GetComponent<Image>();
+        if (image == null)
+            image = go.AddComponent<Image>();
+        image.preserveAspect = true;
+        image.raycastTarget = false;
+        image.enabled = false;
+        go.SetActive(false);
+        return image;
+    }
+
+    private void EnsurePlatformSpritesLoaded()
+    {
+        if (platformSpritesLoaded)
+            return;
+        platformSpritesLoaded = true;
+
+        try
+        {
+            GameObject prefab = Mods.PeekNameTagPrefab();
+            if (prefab == null)
+                return;
+
+            SpriteRenderer[] sprites = prefab.GetComponentsInChildren<SpriteRenderer>(true);
+            for (int i = 0; i < sprites.Length; i++)
+            {
+                SpriteRenderer sr = sprites[i];
+                if (sr == null || sr.sprite == null)
+                    continue;
+
+                string name = sr.gameObject.name ?? "";
+                if (platformSpriteSteam == null && name.IndexOf("Steam", StringComparison.OrdinalIgnoreCase) >= 0)
+                    platformSpriteSteam = sr.sprite;
+                else if (platformSpriteMeta == null &&
+                         (name.IndexOf("Meta", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          name.IndexOf("Quest", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          name.IndexOf("Standalone", StringComparison.OrdinalIgnoreCase) >= 0))
+                    platformSpriteMeta = sr.sprite;
+                else if (platformSpritePc == null &&
+                         (name.IndexOf("PC", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          name.IndexOf("Oculus", StringComparison.OrdinalIgnoreCase) >= 0))
+                    platformSpritePc = sr.sprite;
+                else if (platformSpriteUnknown == null && name.IndexOf("Unknown", StringComparison.OrdinalIgnoreCase) >= 0)
+                    platformSpriteUnknown = sr.sprite;
+            }
+
+            Image[] images = prefab.GetComponentsInChildren<Image>(true);
+            for (int i = 0; i < images.Length; i++)
+            {
+                Image img = images[i];
+                if (img == null || img.sprite == null)
+                    continue;
+
+                string name = img.gameObject.name ?? "";
+                if (platformSpriteSteam == null && name.IndexOf("Steam", StringComparison.OrdinalIgnoreCase) >= 0)
+                    platformSpriteSteam = img.sprite;
+                else if (platformSpriteMeta == null &&
+                         (name.IndexOf("Meta", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          name.IndexOf("Quest", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          name.IndexOf("Standalone", StringComparison.OrdinalIgnoreCase) >= 0))
+                    platformSpriteMeta = img.sprite;
+                else if (platformSpritePc == null &&
+                         (name.IndexOf("PC", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          name.IndexOf("Oculus", StringComparison.OrdinalIgnoreCase) >= 0))
+                    platformSpritePc = img.sprite;
+                else if (platformSpriteUnknown == null && name.IndexOf("Unknown", StringComparison.OrdinalIgnoreCase) >= 0)
+                    platformSpriteUnknown = img.sprite;
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning("[TUP] Platform sprite load failed: " + ex.Message);
+        }
+    }
+
+    private Sprite GetSpriteForPlatform(string platform)
+    {
+        EnsurePlatformSpritesLoaded();
+        switch (platform)
+        {
+            case "Steam":
+                return platformSpriteSteam != null ? platformSpriteSteam : platformSpritePc;
+            case "PC":
+            case "Oculus PC":
+            case "Oculus":
+                return platformSpritePc != null ? platformSpritePc : platformSpriteSteam;
+            case "Quest":
+            case "Meta":
+            case "Standalone":
+            case "StandaloneVR":
+            case "PSVR":
+            case "Pico":
+                return platformSpriteMeta != null ? platformSpriteMeta : platformSpriteUnknown;
+            default:
+                return platformSpriteUnknown;
+        }
+    }
+
+    private void UpdateCheckerPlatformIcon(string platform)
+    {
+        ApplyPlatformIcon(checkerPlatformIconImage, platform);
+        UpdateMoreInfoPlatformIcon(platform);
+    }
+
+    private void UpdateMoreInfoPlatformIcon(string platform)
+    {
+        ApplyPlatformIcon(moreInfoPlatformIconImage, platform);
+    }
+
+    private static void ApplyPlatformIcon(Image image, string platform)
+    {
+        if (image == null)
+            return;
+
+        Main self = Instance;
+        Sprite sprite = self != null ? self.GetSpriteForPlatform(platform) : null;
+        if (sprite == null ||
+            string.Equals(platform, "Unknown", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(platform, "Loading...", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(platform, "Platform", StringComparison.OrdinalIgnoreCase))
+        {
+            image.sprite = null;
+            image.enabled = false;
+            image.gameObject.SetActive(false);
+            return;
+        }
+
+        image.sprite = sprite;
+        image.enabled = true;
+        image.gameObject.SetActive(true);
+        image.color = Color.white;
+    }
+
+    private static string FormatMoreInfoPlatformLine(string platform)
+    {
+        string color = platform switch
+        {
+            "Steam" => "#66C0F4",
+            "Oculus PC" => "#1A9FFF",
+            "PC" => "#1A9FFF",
+            "Quest" => "#A855F7",
+            "Meta" => "#A855F7",
+            "Standalone" => "#A855F7",
+            "PSVR" => "#003087",
+            "Pico" => "#00B2A9",
+            "Loading..." => "#BDBDBD",
+            _ => "#BDBDBD"
+        };
+
+        return "<color=#BDBDBD>Platform:</color> <color=" + color + ">" + EscapeTmpText(platform) + "</color>";
+    }
+
     private static void FitColliderToRect(RectTransform rect, Collider collider)
     {
         BoxCollider box = collider as BoxCollider;
@@ -1673,6 +1906,7 @@ public partial class Main
         {
             lastCheckerPlatform = platform;
             if (platformTextComp != null) platformTextComp.text = platform;
+            UpdateCheckerPlatformIcon(platform);
         }
 
         string date = "Date: " + (string.IsNullOrWhiteSpace(plrCreationDate) ? "--/--/----" : plrCreationDate);

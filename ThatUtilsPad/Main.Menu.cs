@@ -655,6 +655,7 @@ public partial class Main
         DestroyButtons();
         SetSpotifyPageOnOff();
         buttonRoutine = StartCoroutine(CreateButtons());
+        Mods.BroadcastPadNetworkState(force: true);
     }
 
     private void InitPageButtons(GameObject menuObj)
@@ -795,6 +796,7 @@ public partial class Main
         DestroyButtons();
         SetSpotifyPageOnOff();
         buttonRoutine = StartCoroutine(CreateButtons());
+        Mods.BroadcastPadNetworkState(force: true);
     }
 
     public void RefreshCurrentPage()
@@ -803,6 +805,7 @@ public partial class Main
         Tools.StopCoroutine(ref buttonRoutine);
         DestroyButtons();
         buttonRoutine = StartCoroutine(CreateButtons());
+        Mods.BroadcastPadNetworkState(force: true);
     }
 
     public void AppendOutfitButton(int n)
@@ -1137,6 +1140,28 @@ public partial class Main
     public static float GetNetworkedPadScale()
     {
         return Instance != null ? Instance.menuScale : 0.375f;
+    }
+
+    public string GetPadNetworkGuiState()
+    {
+        if (!isMenuOpened || isMenuClosing || currentOpenType != MenuOpenType.Hand)
+            return "0";
+        return currentCategory + ":" + currentPage;
+    }
+
+    public static List<string> GetNetworkPadPageLabels(string category, int page)
+    {
+        List<string> labels = new List<string>();
+        if (string.IsNullOrWhiteSpace(category) || !Mods.Actions.TryGetValue(category, out ModCategory modCategory))
+            return labels;
+
+        const int pageSize = 7;
+        List<string> keys = new List<string>(modCategory.Actions.Keys);
+        int start = Mathf.Max(0, page) * pageSize;
+        int end = Mathf.Min(start + pageSize, keys.Count);
+        for (int i = start; i < end; i++)
+            labels.Add(keys[i]);
+        return labels;
     }
 
     public bool IsHandPadNetworkVisible(out bool leftHand)
