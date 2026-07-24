@@ -396,20 +396,29 @@ public partial class Main
         if (target == null)
             return;
 
+        Transform walk = target;
+        for (int depth = 0; depth < 8 && walk != null; depth++)
+        {
+            Vector3 local = walk.localScale;
+            if (local.x < 0f || local.y < 0f || local.z < 0f)
+            {
+                walk.localScale = new Vector3(
+                    Mathf.Abs(local.x) < 0.0001f ? 1f : Mathf.Abs(local.x),
+                    Mathf.Abs(local.y) < 0.0001f ? 1f : Mathf.Abs(local.y),
+                    Mathf.Abs(local.z) < 0.0001f ? 1f : Mathf.Abs(local.z));
+            }
+            walk = walk.parent;
+        }
+
         Vector3 lossy = target.lossyScale;
         if (lossy.x >= 0f && lossy.y >= 0f && lossy.z >= 0f)
-        {
-            Vector3 local = target.localScale;
-            if (local.x < 0f || local.y < 0f || local.z < 0f)
-                target.localScale = new Vector3(Mathf.Abs(local.x), Mathf.Abs(local.y), Mathf.Abs(local.z));
             return;
-        }
 
         Vector3 ls = target.localScale;
         target.localScale = new Vector3(
-            lossy.x < 0f ? -Mathf.Abs(ls.x <= 0.0001f ? 1f : ls.x) : Mathf.Abs(ls.x <= 0.0001f ? 1f : ls.x),
-            lossy.y < 0f ? -Mathf.Abs(ls.y <= 0.0001f ? 1f : ls.y) : Mathf.Abs(ls.y <= 0.0001f ? 1f : ls.y),
-            lossy.z < 0f ? -Mathf.Abs(ls.z <= 0.0001f ? 1f : ls.z) : Mathf.Abs(ls.z <= 0.0001f ? 1f : ls.z));
+            Mathf.Abs(ls.x) < 0.0001f ? 1f : Mathf.Abs(ls.x),
+            Mathf.Abs(ls.y) < 0.0001f ? 1f : Mathf.Abs(ls.y),
+            Mathf.Abs(ls.z) < 0.0001f ? 1f : Mathf.Abs(ls.z));
     }
 
     private static bool IsInputColliderObject(Component component)
@@ -668,6 +677,7 @@ public partial class Main
             "Cosmetics",
             "SelectUser",
             "Settings",
+            "Camera",
             "Anticheat",
             "Spotify"
         }.Where(category => Mods.Actions.ContainsKey(category) && Mods.Actions[category].ShowInMenu).ToList();
@@ -697,8 +707,85 @@ public partial class Main
             string capturedCategory = categoryName;
             trigger.SkipSwitchAnimation = true;
             trigger.CustomAction = () => SwitchCategory(capturedCategory);
+            ApplyCategoryTabIcon(child, categoryName);
             
             tabButtonObjs.Add(child.gameObject);
+        }
+    }
+
+    private static void ApplyCategoryTabIcon(Transform selectorButton, string categoryName)
+    {
+        if (selectorButton == null || string.IsNullOrWhiteSpace(categoryName))
+            return;
+        if (!string.Equals(categoryName, "Camera", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(categoryName, "Anticheat", StringComparison.OrdinalIgnoreCase))
+            return;
+        if (!Mods.Actions.TryGetValue(categoryName, out ModCategory category) || string.IsNullOrWhiteSpace(category.ImageName))
+            return;
+
+        Texture2D texture = Tools.LoadEmbeddedImage(category.ImageName);
+        if (texture == null)
+            return;
+
+        Sprite sprite = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, texture.width, texture.height),
+            new Vector2(0.5f, 0.5f),
+            100f);
+
+        bool applied = false;
+        foreach (Image image in selectorButton.GetComponentsInChildren<Image>(true))
+        {
+            if (image == null || image.gameObject == selectorButton.gameObject)
+                continue;
+            string name = image.gameObject.name;
+            if (name.IndexOf("outline", StringComparison.OrdinalIgnoreCase) >= 0)
+                continue;
+            if (name.IndexOf("bg", StringComparison.OrdinalIgnoreCase) >= 0)
+                continue;
+            if (name.IndexOf("background", StringComparison.OrdinalIgnoreCase) >= 0)
+                continue;
+
+            image.sprite = sprite;
+            image.enabled = true;
+            image.preserveAspect = true;
+            Color c = image.color;
+            c.a = 1f;
+            image.color = c;
+            applied = true;
+        }
+
+        if (!applied)
+        {
+            foreach (RawImage image in selectorButton.GetComponentsInChildren<RawImage>(true))
+            {
+                if (image == null)
+                    continue;
+                string name = image.gameObject.name;
+                if (name.IndexOf("outline", StringComparison.OrdinalIgnoreCase) >= 0)
+                    continue;
+
+                image.texture = texture;
+                image.enabled = true;
+                Color c = image.color;
+                c.a = 1f;
+                image.color = c;
+                applied = true;
+                break;
+            }
+        }
+
+        if (!applied &&
+            (string.Equals(categoryName, "Camera", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(categoryName, "Anticheat", StringComparison.OrdinalIgnoreCase)))
+        {
+            Image fallback = selectorButton.GetComponentInChildren<Image>(true);
+            if (fallback != null)
+            {
+                fallback.sprite = sprite;
+                fallback.enabled = true;
+                fallback.preserveAspect = true;
+            }
         }
     }
 
@@ -745,7 +832,15 @@ public partial class Main
             }
 
             int delta = navName == "PageNext" ? 1 : -1;
-            ButtonTrigger trigger = WireInteractive(navTransform, navName, () => ChangePage(delta), GetInteractiveCollider(navTransform, "Collider"));
+            Transform navCollider = GetInteractiveCollider(navTransform, "Collider");
+            if (navCollider != null)
+            {
+                Vector3 ls = navCollider.localScale;
+                navCollider.localScale = new Vector3(Mathf.Abs(ls.x), Mathf.Abs(ls.y), Mathf.Abs(ls.z));
+                EnsurePositiveColliderLossyScale(navCollider);
+            }
+
+            ButtonTrigger trigger = WireInteractive(navTransform, navName, () => ChangePage(delta), navCollider);
             MenuTheme.ApplyNavButton(navTransform);
             navTransform.gameObject.SetActive(true);
 

@@ -66,6 +66,19 @@ private enum ScanLobbyMode
         public float ExpiresAt;
         public int LegalCount;
         public int IllegalCount;
+        public int UnknownCount;
+    }
+
+    public struct PlayerPropScanResult
+    {
+        public List<string> LegalMods;
+        public List<string> IllegalMods;
+        public List<string> UnknownProps;
+
+        public int TotalCount =>
+            (LegalMods != null ? LegalMods.Count : 0) +
+            (IllegalMods != null ? IllegalMods.Count : 0) +
+            (UnknownProps != null ? UnknownProps.Count : 0);
     }
 
     private static readonly Dictionary<string, PropertyHitCacheEntry> propertyHitCache =
@@ -215,25 +228,16 @@ private enum ScanLobbyMode
             return false;
 
         LoadPropertyListIfNeeded();
-        Dictionary<string, List<string>> hits = FindPropertySignatureHits(player);
-        if (hits.Count == 0)
+        PlayerPropScanResult scan = ScanPlayerCustomProperties(player);
+        int modCount = scan.LegalMods != null ? scan.LegalMods.Count : 0;
+        int cheatCount = scan.IllegalMods != null ? scan.IllegalMods.Count : 0;
+        int unknownCount = scan.UnknownProps != null ? scan.UnknownProps.Count : 0;
+
+        if (modCount == 0 && cheatCount == 0 && unknownCount == 0)
             return false;
 
-        int modCount = 0;
-        int cheatCount = 0;
-        foreach (string key in hits.Keys)
-        {
-            if (!propertySignatures.TryGetValue(key, out PropertySignature signature))
-                continue;
-
-            if (signature.IsLegal)
-                modCount++;
-            else
-                cheatCount++;
-        }
-
         ScanLobbyMode mode = (ScanLobbyMode)Mathf.Clamp(scanModeIndex, 0, scanModeNames.Length - 1);
-        string message = BuildScanNotificationMessage(player, modCount, cheatCount, mode);
+        string message = BuildScanNotificationMessage(player, modCount, cheatCount, unknownCount, mode);
         if (string.IsNullOrEmpty(message))
             return false;
 
@@ -241,7 +245,12 @@ private enum ScanLobbyMode
         return true;
     }
 
-    private static string BuildScanNotificationMessage(Player player, int modCount, int cheatCount, ScanLobbyMode mode)
+    private static string BuildScanNotificationMessage(
+        Player player,
+        int modCount,
+        int cheatCount,
+        int unknownCount,
+        ScanLobbyMode mode)
     {
         string playerName = string.IsNullOrWhiteSpace(player.NickName) ? "Player " + player.ActorNumber : player.NickName;
 
@@ -250,15 +259,24 @@ private enum ScanLobbyMode
             case ScanLobbyMode.CheatsOnly:
                 return cheatCount > 0 ? $"{playerName} has {cheatCount} Cheats installed" : "";
             case ScanLobbyMode.ModsOnly:
-                return modCount > 0 ? $"{playerName} has {modCount} Mods installed" : "";
-            default:
-                if (modCount > 0 && cheatCount > 0)
-                    return $"{playerName} has {modCount} Mods and {cheatCount} Cheats installed";
+                if (modCount > 0 && unknownCount > 0)
+                    return $"{playerName} has {modCount} Mods and {unknownCount} unknown props";
                 if (modCount > 0)
                     return $"{playerName} has {modCount} Mods installed";
-                if (cheatCount > 0)
-                    return $"{playerName} has {cheatCount} Cheats installed";
+                if (unknownCount > 0)
+                    return $"{playerName} has {unknownCount} unknown props";
                 return "";
+            default:
+                List<string> parts = new List<string>(3);
+                if (modCount > 0)
+                    parts.Add(modCount + " Mods");
+                if (cheatCount > 0)
+                    parts.Add(cheatCount + " Cheats");
+                if (unknownCount > 0)
+                    parts.Add(unknownCount + " unknown props");
+                if (parts.Count == 0)
+                    return "";
+                return playerName + " has " + string.Join(" and ", parts);
         }
     }
     public static Dictionary<string, bool> GetPropertyLegalityDictionary()
@@ -337,8 +355,19 @@ private enum ScanLobbyMode
 
     public static void GetPropertySignatureCounts(VRRig rig, Player player, out int legalCount, out int illegalCount)
     {
+        GetPropertySignatureCounts(rig, player, out legalCount, out illegalCount, out _);
+    }
+
+    public static void GetPropertySignatureCounts(
+        VRRig rig,
+        Player player,
+        out int legalCount,
+        out int illegalCount,
+        out int unknownCount)
+    {
         legalCount = 0;
         illegalCount = 0;
+        unknownCount = 0;
         if (player == null)
             return;
 
@@ -349,35 +378,220 @@ private enum ScanLobbyMode
         {
             legalCount = cached.LegalCount;
             illegalCount = cached.IllegalCount;
+            unknownCount = cached.UnknownCount;
             return;
         }
 
-        NormalizedScanSource[] sources = BuildNormalizedPropertyScanSources(player, rig);
-        foreach (PropertySignature signature in propertySignatures.Values)
-        {
-            bool matched = false;
-            for (int i = 0; i < sources.Length; i++)
-            {
-                if (!NormalizedTextContainsSignature(sources[i], signature))
-                    continue;
-                matched = true;
-                break;
-            }
-
-            if (!matched)
-                continue;
-            if (signature.IsLegal)
-                legalCount++;
-            else
-                illegalCount++;
-        }
+        PlayerPropScanResult scan = ScanPlayerCustomProperties(player);
+        legalCount = scan.LegalMods.Count;
+        illegalCount = scan.IllegalMods.Count;
+        unknownCount = scan.UnknownProps.Count;
 
         propertyCountCache[cacheKey] = new PropertyCountCacheEntry
         {
             ExpiresAt = Time.time + PropertyScanCacheSeconds,
             LegalCount = legalCount,
-            IllegalCount = illegalCount
+            IllegalCount = illegalCount,
+            UnknownCount = unknownCount
         };
+    }
+
+    public static PlayerPropScanResult ScanPlayerCustomProperties(Player player)
+    {
+        PlayerPropScanResult result = new PlayerPropScanResult
+        {
+            LegalMods = new List<string>(),
+            IllegalMods = new List<string>(),
+            UnknownProps = new List<string>()
+        };
+
+        if (player == null)
+            return result;
+
+        try
+        {
+            LoadPropertyListIfNeeded();
+            Dictionary<string, List<string>> hits = FindPropertySignatureHits(player);
+            HashSet<string> explainedPropKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (KeyValuePair<string, List<string>> hit in hits)
+            {
+                if (!propertySignatures.TryGetValue(hit.Key, out PropertySignature signature))
+                    continue;
+
+                string display = FormatDetectedModName(signature.Name);
+                if (string.IsNullOrWhiteSpace(display) || display == "Unknown")
+                    display = signature.Name;
+
+                if (signature.IsLegal)
+                {
+                    if (!result.LegalMods.Contains(display))
+                        result.LegalMods.Add(display);
+                }
+                else if (!result.IllegalMods.Contains(display))
+                {
+                    result.IllegalMods.Add(display);
+                }
+
+                if (hit.Value == null)
+                    continue;
+
+                for (int i = 0; i < hit.Value.Count; i++)
+                    MarkExplainedPropertyKeys(explainedPropKeys, hit.Value[i]);
+            }
+
+            result.LegalMods.Sort(StringComparer.OrdinalIgnoreCase);
+            result.IllegalMods.Sort(StringComparer.OrdinalIgnoreCase);
+            CollectUnknownCustomProperties(player, explainedPropKeys, result.UnknownProps);
+            result.UnknownProps.Sort(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning("[TUP PROP SCAN] ScanPlayerCustomProperties failed: " + ex.Message);
+        }
+
+        return result;
+    }
+
+    private static void MarkExplainedPropertyKeys(HashSet<string> explained, string sourceKey)
+    {
+        if (explained == null || string.IsNullOrEmpty(sourceKey))
+            return;
+
+        const string PropPrefix = "Prop:";
+        const string PropKeyPrefix = "PropKey:";
+        const string PropValPrefix = "PropVal:";
+
+        string path = null;
+        if (sourceKey.StartsWith(PropPrefix, StringComparison.OrdinalIgnoreCase))
+            path = sourceKey.Substring(PropPrefix.Length);
+        else if (sourceKey.StartsWith(PropKeyPrefix, StringComparison.OrdinalIgnoreCase))
+            path = sourceKey.Substring(PropKeyPrefix.Length);
+        else if (sourceKey.StartsWith(PropValPrefix, StringComparison.OrdinalIgnoreCase))
+            path = sourceKey.Substring(PropValPrefix.Length);
+
+        if (string.IsNullOrEmpty(path))
+            return;
+
+        explained.Add(path);
+        int dot = path.IndexOf('.');
+        if (dot > 0)
+            explained.Add(path.Substring(0, dot));
+        int bracket = path.IndexOf('[');
+        if (bracket > 0)
+            explained.Add(path.Substring(0, bracket));
+    }
+
+    private static void CollectUnknownCustomProperties(
+        Player player,
+        HashSet<string> explainedPropKeys,
+        List<string> unknownOut)
+    {
+        if (player?.CustomProperties == null || unknownOut == null)
+            return;
+
+        explainedPropKeys ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        const int maxUnknown = 48;
+
+        foreach (DictionaryEntry entry in player.CustomProperties)
+        {
+            if (unknownOut.Count >= maxUnknown)
+                break;
+
+            string key = entry.Key != null ? entry.Key.ToString() : "";
+            if (string.IsNullOrWhiteSpace(key) || IsIgnoredVanillaPropertyKey(key))
+                continue;
+
+            AppendUnknownPropertyLabels(key, entry.Value, explainedPropKeys, unknownOut, 0, maxUnknown);
+        }
+    }
+
+    private static void AppendUnknownPropertyLabels(
+        string path,
+        object value,
+        HashSet<string> explainedPropKeys,
+        List<string> unknownOut,
+        int depth,
+        int maxUnknown)
+    {
+        if (unknownOut.Count >= maxUnknown || string.IsNullOrEmpty(path) || depth > 4)
+            return;
+
+        bool explained = explainedPropKeys.Contains(path);
+        if (!explained)
+        {
+            string label = FormatUnknownPropertyLabel(path, value);
+            if (!string.IsNullOrEmpty(label) && !unknownOut.Contains(label))
+                unknownOut.Add(label);
+            return;
+        }
+
+        if (value is ExitGames.Client.Photon.Hashtable table)
+        {
+            foreach (object nestedKeyObj in table.Keys)
+            {
+                if (unknownOut.Count >= maxUnknown)
+                    break;
+                string nestedKey = nestedKeyObj != null ? nestedKeyObj.ToString() : "item";
+                string nestedPath = path + "." + (string.IsNullOrEmpty(nestedKey) ? "item" : nestedKey);
+                AppendUnknownPropertyLabels(
+                    nestedPath,
+                    table[nestedKeyObj],
+                    explainedPropKeys,
+                    unknownOut,
+                    depth + 1,
+                    maxUnknown);
+            }
+            return;
+        }
+
+        if (value is IDictionary dictionary)
+        {
+            foreach (DictionaryEntry entry in dictionary)
+            {
+                if (unknownOut.Count >= maxUnknown)
+                    break;
+                string nestedKey = entry.Key != null ? entry.Key.ToString() : "item";
+                string nestedPath = path + "." + (string.IsNullOrEmpty(nestedKey) ? "item" : nestedKey);
+                AppendUnknownPropertyLabels(
+                    nestedPath,
+                    entry.Value,
+                    explainedPropKeys,
+                    unknownOut,
+                    depth + 1,
+                    maxUnknown);
+            }
+        }
+    }
+
+    private static string FormatUnknownPropertyLabel(string key, object value)
+    {
+        string valueText = FormatPhotonCustomPropertyValue(value);
+        if (string.IsNullOrEmpty(valueText) || valueText.Equals("null", StringComparison.OrdinalIgnoreCase))
+            return key;
+
+        if (valueText.Length > 42)
+            valueText = valueText.Substring(0, 39) + "...";
+
+        return key + " = " + valueText;
+    }
+
+    private static bool IsIgnoredVanillaPropertyKey(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return true;
+
+        switch (key.Trim().ToLowerInvariant())
+        {
+            case "actornumber":
+            case "userid":
+            case "nickname":
+            case "ismasterclient":
+            case "isinactive":
+                return true;
+            default:
+                return false;
+        }
     }
 
     private static NormalizedScanSource[] BuildNormalizedPropertyScanSources(Player player, VRRig rig)

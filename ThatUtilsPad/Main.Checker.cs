@@ -839,6 +839,7 @@ public partial class Main
         lastCheckerColorStr = "--";
         lastCheckerLegalMods = "None";
         lastCheckerIllegalMods = "None";
+        lastCheckerUnknownPropList = Array.Empty<string>();
         SetMoreInfoVisible(false);
         ReplaceAddToSavedWithVersion(sideTransform, figtreeFont);
         InitVolumeSlider(sideTransform);
@@ -1076,6 +1077,7 @@ public partial class Main
             return;
 
         Transform clickRoot = EnsureMoreInfoClickCollider(modsTitleTransform);
+        ForceMoreInfoColliderSize(clickRoot);
 
         moreInfoOpenTrigger = WireInteractive(
             modsTitleTransform,
@@ -1087,49 +1089,72 @@ public partial class Main
             moreInfoOpenTrigger.SkipSwitchAnimation = true;
             moreInfoOpenTrigger.IsToggle = false;
             moreInfoOpenTrigger.CustomAction = ToggleMoreInfoModsExpanded;
+            moreInfoOpenTrigger.ButtonRoot = modsTitleTransform;
         }
+
+        ForceMoreInfoColliderSize(clickRoot);
+        AttachRootPress(modsTitleTransform, moreInfoOpenTrigger);
+
+        Transform main = modsTitleTransform.Find("Main") ?? FindChildByName(modsTitleTransform, "Main");
+        if (main != null && moreInfoOpenTrigger != null)
+            AttachRootPress(main, moreInfoOpenTrigger);
     }
 
     private Transform EnsureMoreInfoClickCollider(Transform modsTitle)
     {
-        Transform main = modsTitle.Find("Main") ?? FindChildByName(modsTitle, "Main") ?? modsTitle;
-
         Transform existing =
             FindChildByName(modsTitle, "MoreInfoCollider") ??
-            FindChildByName(main, "MoreInfoCollider") ??
-            GetInteractiveCollider(modsTitle, "Collider") ??
-            GetInteractiveCollider(main, "Collider");
+            FindDirectNamedChild(modsTitle, "MoreInfoCollider");
 
         if (existing != null)
         {
             existing.gameObject.SetActive(true);
             existing.gameObject.layer = 2;
+            existing.SetParent(modsTitle, false);
+            existing.localPosition = new Vector3(0f, 0.02f, -0.01f);
+            existing.localRotation = Quaternion.identity;
+            existing.localScale = Vector3.one;
             Collider col = existing.GetComponent<Collider>();
             if (col != null)
                 col.enabled = true;
+            ForceMoreInfoColliderSize(existing);
             return existing;
         }
 
         GameObject colObj = new GameObject("MoreInfoCollider");
-        colObj.transform.SetParent(main, false);
-        colObj.transform.localPosition = new Vector3(0f, 0.01f, 0f);
+        colObj.transform.SetParent(modsTitle, false);
+        colObj.transform.localPosition = new Vector3(0f, 0.02f, -0.01f);
         colObj.transform.localRotation = Quaternion.identity;
         colObj.transform.localScale = Vector3.one;
         colObj.layer = 2;
 
         BoxCollider box = colObj.AddComponent<BoxCollider>();
         box.isTrigger = true;
-
-        box.center = Vector3.zero;
-        box.size = new Vector3(0.14f, 0.10f, 0.025f);
+        ForceMoreInfoColliderSize(colObj.transform);
         return colObj.transform;
+    }
+
+    private static void ForceMoreInfoColliderSize(Transform clickRoot)
+    {
+        if (clickRoot == null)
+            return;
+
+        BoxCollider box = clickRoot.GetComponent<BoxCollider>();
+        if (box == null)
+            box = clickRoot.gameObject.AddComponent<BoxCollider>();
+
+        box.isTrigger = true;
+        box.enabled = true;
+        box.center = new Vector3(0f, 0.015f, 0f);
+        box.size = new Vector3(0.42f, 0.32f, 0.10f);
     }
 
     private void ToggleMoreInfoModsExpanded()
     {
-        if (!moreInfoVisible)
+        if (modsTitleTransform == null || !modsTitleTransform.gameObject.activeInHierarchy)
             return;
 
+        moreInfoVisible = true;
         moreInfoModsExpanded = !moreInfoModsExpanded;
         moreInfoModsPage = 0;
         UpdateMoreInfoBodyAndChrome();
@@ -1345,8 +1370,8 @@ public partial class Main
                     "Color: " + colorValue + "\n" +
                     fpsValue + "\n\n" +
                     (total == 0
-                        ? "No mods detected\n<color=#BDBDBD>Tap MORE INFO for mods</color>"
-                        : total + " mod" + (total == 1 ? "" : "s") + " detected\n" +
+                        ? "No props / mods detected\n<color=#BDBDBD>Tap MORE INFO</color>"
+                        : total + " signal" + (total == 1 ? "" : "s") + " detected\n" +
                           "<color=#CBA6F7>Tap MORE INFO to open list</color>");
                 UpdateMoreInfoPlatformIcon(platformValue);
             }
@@ -1372,14 +1397,15 @@ public partial class Main
     private string BuildExpandedModsPageText(int pageCount)
     {
         if (moreInfoModList == null || moreInfoModList.Length == 0)
-            return "<color=#BDBDBD>No mods detected</color>\n\n<color=#CBA6F7>Tap to go back</color>";
+            return "<color=#BDBDBD>No props / mods detected</color>\n\n<color=#CBA6F7>Tap to go back</color>";
 
         int start = moreInfoModsPage * MoreInfoModsPerPage;
         int end = Mathf.Min(start + MoreInfoModsPerPage, moreInfoModList.Length);
         System.Text.StringBuilder sb = new System.Text.StringBuilder(256);
-        sb.Append("<color=#CBA6F7>MODS</color>  ")
+        sb.Append("<color=#CBA6F7>PROPS / MODS</color>  ")
             .Append(moreInfoModsPage + 1).Append(" / ").Append(pageCount)
-            .Append("\n<color=#BDBDBD>Tap header to go back</color>\n\n");
+            .Append("\n<color=#BDBDBD>Tap header to go back</color>\n")
+            .Append("<color=#55FF88>G</color> legal  <color=#FF5555>R</color> illegal  <color=#FFD166>Y</color> unknown\n\n");
 
         for (int i = start; i < end; i++)
         {
@@ -1479,6 +1505,7 @@ public partial class Main
             moreInfoModList = Array.Empty<MoreInfoModEntry>();
             moreInfoModsPage = 0;
             moreInfoModsExpanded = false;
+            lastCheckerUnknownPropList = Array.Empty<string>();
             if (modsCountTextComp != null)
                 modsCountTextComp.text = "0";
             if (moreInfoBodyText != null)
@@ -1502,6 +1529,7 @@ public partial class Main
         lastCheckerColorStr = "--";
         lastCheckerLegalMods = "None";
         lastCheckerIllegalMods = "None";
+        lastCheckerUnknownPropList = Array.Empty<string>();
         hasLastCheckerColor = false;
         moreInfoModList = Array.Empty<MoreInfoModEntry>();
         moreInfoModsPage = 0;
@@ -1528,12 +1556,20 @@ public partial class Main
 
         string[] legalList = SplitCheckerList(lastCheckerLegalMods);
         string[] illegalList = SplitCheckerList(lastCheckerIllegalMods);
-        List<MoreInfoModEntry> modEntries = new List<MoreInfoModEntry>(legalList.Length + illegalList.Length + 4);
+        string[] unknownList = lastCheckerUnknownPropList ?? Array.Empty<string>();
+        List<MoreInfoModEntry> modEntries = new List<MoreInfoModEntry>(
+            legalList.Length + illegalList.Length + unknownList.Length + 4);
 
         for (int i = 0; i < illegalList.Length; i++)
             modEntries.Add(new MoreInfoModEntry(illegalList[i], MoreInfoModKind.Illegal));
         for (int i = 0; i < legalList.Length; i++)
             modEntries.Add(new MoreInfoModEntry(legalList[i], MoreInfoModKind.Legal));
+        for (int i = 0; i < unknownList.Length; i++)
+        {
+            if (string.IsNullOrWhiteSpace(unknownList[i]))
+                continue;
+            modEntries.Add(new MoreInfoModEntry(unknownList[i].Trim(), MoreInfoModKind.Unknown));
+        }
 
         moreInfoModList = modEntries.ToArray();
         int pageCount = GetMoreInfoModsPageCount();
@@ -1934,16 +1970,37 @@ public partial class Main
             RefreshCheckerModsInfo();
     }
 
-    public void UpdateCheckerProperties(string legalMods, string illegalMods)
+    public void UpdateCheckerProperties(string legalMods, string illegalMods, IList<string> unknownProps = null)
     {
         legalMods ??= "None";
         illegalMods ??= "None";
+        string[] unknownArray = unknownProps != null && unknownProps.Count > 0
+            ? unknownProps.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim()).ToArray()
+            : Array.Empty<string>();
+
         if (string.Equals(lastCheckerLegalMods, legalMods, StringComparison.Ordinal) &&
-            string.Equals(lastCheckerIllegalMods, illegalMods, StringComparison.Ordinal))
+            string.Equals(lastCheckerIllegalMods, illegalMods, StringComparison.Ordinal) &&
+            UnknownPropListsEqual(lastCheckerUnknownPropList, unknownArray))
             return;
+
         lastCheckerLegalMods = legalMods;
         lastCheckerIllegalMods = illegalMods;
+        lastCheckerUnknownPropList = unknownArray;
         RefreshCheckerModsInfo();
+    }
+
+    private static bool UnknownPropListsEqual(string[] a, string[] b)
+    {
+        a ??= Array.Empty<string>();
+        b ??= Array.Empty<string>();
+        if (a.Length != b.Length)
+            return false;
+        for (int i = 0; i < a.Length; i++)
+        {
+            if (!string.Equals(a[i], b[i], StringComparison.Ordinal))
+                return false;
+        }
+        return true;
     }
 
     private static string[] SplitCheckerList(string value)

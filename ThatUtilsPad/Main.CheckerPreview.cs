@@ -28,10 +28,9 @@ public partial class Main
     private Vector3 playerModelPreviewMeshOriginOffset;
     private const int PlayerModelPreviewRendererLimit = 28;
 
-    private static readonly Vector3 PlayerModelPreviewLocalPosition = new Vector3(-0.05f, -0.16f, 0.12f);
-
-    private static readonly Vector3 PlayerModelPreviewLocalEuler = new Vector3(0f, 45f, 0f);
-    private static readonly Vector3 PlayerModelPreviewLocalScale = new Vector3(1.05f, 1.05f, 1.05f);
+    private static readonly Vector3 PlayerModelPreviewLocalPosition = new Vector3(0f, -0.01f, -0.03f);
+    private static readonly Vector3 PlayerModelPreviewLocalEuler = new Vector3(0f, 180f, 0f);
+    private static readonly Vector3 PlayerModelPreviewLocalScale = new Vector3(0.09f, 0.09f, 0.09f);
 
     private void CachePlayerModelPreviewRoot()
     {
@@ -41,7 +40,17 @@ public partial class Main
             return;
         }
 
-        playerModelPreviewRoot = menuObj.transform.Find("SideHolder");
+        Transform side = menuObj.transform.Find("SideHolder");
+        if (side == null)
+        {
+            playerModelPreviewRoot = menuObj.transform;
+            return;
+        }
+
+        Transform checkerMonke =
+            side.Find("CheckerMonke") ??
+            FindChildByName(side, "CheckerMonke");
+        playerModelPreviewRoot = checkerMonke != null ? checkerMonke : side;
     }
 
     public void StartPlayerModelPreview(VRRig rig)

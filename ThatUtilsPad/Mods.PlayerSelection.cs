@@ -1098,6 +1098,7 @@ private static void ClearAllBoneHighlights()
     {
         string legalText = "None";
         string illegalText = "None";
+        List<string> unknownProps = new List<string>();
 
         try
         {
@@ -1105,29 +1106,16 @@ private static void ClearAllBoneHighlights()
             if (player != null)
             {
                 InvalidatePropertyScanCache(player);
-                Dictionary<string, List<string>> hits = FindPropertySignatureHits(player);
+                PlayerPropScanResult scan = ScanPlayerCustomProperties(player);
 
-                List<string> legalMods = hits.Keys
-                    .Select(key => propertySignatures[key])
-                    .Where(signature => signature.IsLegal)
-                    .Select(signature => FormatDetectedModName(signature.Name))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+                if (scan.LegalMods != null && scan.LegalMods.Count > 0)
+                    legalText = string.Join(", ", scan.LegalMods);
 
-                List<string> illegalMods = hits.Keys
-                    .Select(key => propertySignatures[key])
-                    .Where(signature => !signature.IsLegal)
-                    .Select(signature => FormatDetectedModName(signature.Name))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+                if (scan.IllegalMods != null && scan.IllegalMods.Count > 0)
+                    illegalText = string.Join(", ", scan.IllegalMods);
 
-                if (legalMods.Count > 0)
-                    legalText = string.Join(", ", legalMods);
-
-                if (illegalMods.Count > 0)
-                    illegalText = string.Join(", ", illegalMods);
+                if (scan.UnknownProps != null && scan.UnknownProps.Count > 0)
+                    unknownProps.AddRange(scan.UnknownProps);
             }
         }
         catch (Exception e)
@@ -1135,6 +1123,6 @@ private static void ClearAllBoneHighlights()
             Debug.LogWarning("[TUP PROP SCAN] Failed to scan selected player: " + e.Message);
         }
 
-        Main.Instance?.UpdateCheckerProperties(legalText, illegalText);
+        Main.Instance?.UpdateCheckerProperties(legalText, illegalText, unknownProps);
     }
 }

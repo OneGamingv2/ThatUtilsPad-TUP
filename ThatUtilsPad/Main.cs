@@ -156,6 +156,7 @@ public partial class Main : BaseUnityPlugin
     private bool hasLastCheckerColor;
     private string lastCheckerLegalMods;
     private string lastCheckerIllegalMods;
+    private string[] lastCheckerUnknownPropList = Array.Empty<string>();
     private string lastCheckerColorStr = "--";
     private Transform cheatsTitleTransform;
     private Transform modsTitleTransform;
@@ -245,6 +246,7 @@ public partial class Main : BaseUnityPlugin
     private void Awake()
     {
         Instance = this;
+        CameraMod.Camera.Patches.HarmonyPatcher.ApplyHarmonyPatches();
     }
 
     private void Start()
@@ -255,6 +257,7 @@ public partial class Main : BaseUnityPlugin
     private void OnDestroy()
     {
         DestroySpotifyHudResources();
+        Mods.ShutdownAnticheatHud();
         Mods.Shutdown();
         Mods.ShutdownSpotifyMedia();
         if (ReferenceEquals(Instance, this))
@@ -286,6 +289,7 @@ public partial class Main : BaseUnityPlugin
         FontCache.LoadFonts();
         ShaderCache.Init();
         new GameObject("TUP_CoroutineHandler").AddComponent<CoroutineHandler>();
+        CameraMod.Camera.Patches.StartPatch.EnsureStarted();
         Mods.StartEnabledLoops();
         btnPrefab = buttonBundle.LoadAsset<GameObject>("assets/prefabs/buttonmodelui2.prefab");
         InitMenu();
@@ -402,6 +406,7 @@ public partial class Main : BaseUnityPlugin
         Mods.NameTagsLoop();
         Mods.AutoScanLoop();
         Mods.PadNetworkingLoop();
+        Mods.AnticheatHudLoop();
         UpdateSpotifyHudLoop();
         UpdatePlayerModelPreviewLive();
         

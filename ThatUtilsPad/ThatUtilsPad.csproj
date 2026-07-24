@@ -46,6 +46,10 @@
         <None Remove="Assets\Models\tup-checkerbetter" />
         <None Remove="Assets\Icons\selectuser.png" />
         <None Remove="Assets\Icons\settings.png" />
+        <None Remove="Assets\Icons\camera.png" />
+        <EmbeddedResource Include="Assets\Icons\camera.png" />
+        <None Remove="Assets\Icons\shield.png" />
+        <EmbeddedResource Include="Assets\Icons\shield.png" />
         <None Remove="Assets\Models\tup-redux" />
         <None Remove="Assets\Models\tup-reduxv2" />
         <None Remove="Assets\Models\tupbutton-prefab" />

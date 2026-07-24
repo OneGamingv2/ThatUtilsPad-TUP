@@ -189,7 +189,8 @@ public static void Init()
                     { "Select User", new ModAction(ToggleChecker, true) },
                     { "Auto Scan", new ModAction(ToggleAutoScan, true) },
                     { "Scan Lobby", new ModAction(PrintPhotonPlayerCustomProperties, false) },
-                    { "Scan Mode", new ModAction(CycleScanMode, false) }
+                    { "Scan Mode", new ModAction(CycleScanMode, false) },
+                    { "Anticheat HUD", new ModAction(ToggleAnticheatHud, true) },
                 }
             }
         },
@@ -216,11 +217,34 @@ public static void Init()
             }
         },
         {
-            "Anticheat",
-            new ModCategory("settings.png")
+            "Camera",
+            new ModCategory("camera.png")
             {
                 Actions =
-                { }
+                {
+                    { "Spawn Camera", new ModAction(ToggleCameraTablet, true) },
+                    { "First Person", new ModAction(CameraEnableFpv, false) },
+                    { "Third Person", new ModAction(CameraEnableTpv, false) },
+                    { "Follow Player", new ModAction(CameraToggleFollow, true) },
+                    { "Flip Camera", new ModAction(CameraFlip, false) },
+                    { "FOV +", new ModAction(() => CameraChangeFov(5f), false) },
+                    { "FOV -", new ModAction(() => CameraChangeFov(-5f), false) },
+                    { "Smooth +", new ModAction(() => CameraChangeSmoothing(0.01f), false) },
+                    { "Smooth -", new ModAction(() => CameraChangeSmoothing(-0.01f), false) },
+                }
+            }
+        },
+        {
+            "Anticheat",
+            new ModCategory("shield.png")
+            {
+                Actions =
+                {
+                    { "Open Panel", new ModAction(ToggleAnticheatHud, true) },
+                    { "Scan Lobby", new ModAction(PrintPhotonPlayerCustomProperties, false) },
+                    { "Scan Mode", new ModAction(CycleScanMode, false) },
+                    { "Auto Scan", new ModAction(ToggleAutoScan, true) },
+                }
             }
         },
         {
