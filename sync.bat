@@ -36,39 +36,42 @@ if errorlevel 1 (
 )
 
 set "STASHED=0"
-git diff --quiet --exit-code
-set "DIFF_WORK=%ERRORLEVEL%"
-git diff --cached --quiet --exit-code
-set "DIFF_INDEX=%ERRORLEVEL%"
 
-if not "%DIFF_WORK%"=="0" goto :need_stash
-if not "%DIFF_INDEX%"=="0" goto :need_stash
-goto :pull
+git status --porcelain > "%TEMP%\tup_sync_status.txt" 2>nul
+for /f %%A in ('type "%TEMP%\tup_sync_status.txt" ^| find /c /v ""') do set "STATUS_LINES=%%A"
 
-:need_stash
-echo [2/5] Local changes detected - stashing...
+if "%STATUS_LINES%"=="0" (
+    echo [2/5] Working tree clean - no stash needed.
+    goto :pull
+)
+
+echo [2/5] Local / untracked changes detected - stashing...
 git stash push -u -m "sync.bat auto-stash %DATE% %TIME%"
 if errorlevel 1 (
-    echo [ERROR] Could not stash local changes. Commit or discard them, then re-run.
-    exit /b 1
+    echo [WARN] stash failed - backing up sync.bat if present...
+    if exist "sync.bat" (
+        if exist "sync.bat.localbak" del /f /q "sync.bat.localbak"
+        ren "sync.bat" "sync.bat.localbak"
+        echo Backed up to sync.bat.localbak
+    )
+) else (
+    set "STASHED=1"
 )
-set "STASHED=1"
-goto :after_stash
 
 :pull
-echo [2/5] Working tree clean - no stash needed.
-
-:after_stash
 echo [3/5] Pulling latest %BRANCH%...
 git pull --ff-only origin "%BRANCH%"
 if errorlevel 1 (
     echo Fast-forward failed - trying merge pull...
     git pull origin "%BRANCH%"
     if errorlevel 1 (
-        echo [ERROR] git pull failed. Resolve conflicts, then re-run sync.bat.
-        if "%STASHED%"=="1" (
-            echo Your stashed changes are still in: git stash list
-        )
+        echo.
+        echo [ERROR] git pull failed.
+        echo If it says sync.bat would be overwritten, run:
+        echo   del sync.bat
+        echo   git pull
+        echo   .\sync.bat
+        if "%STASHED%"=="1" echo Your stashed changes are in: git stash list
         exit /b 1
     )
 )
@@ -78,9 +81,14 @@ if "%STASHED%"=="1" (
     git stash pop
     if errorlevel 1 (
         echo [WARN] stash pop had conflicts. Fix them, then: git stash drop
+        echo Keeping GitHub sync.bat if both exist.
     )
 ) else (
     echo [4/5] No stash to restore.
+    if exist "sync.bat.localbak" (
+        echo Note: old local sync.bat was saved as sync.bat.localbak
+        echo GitHub sync.bat is now active. Delete the .localbak when done.
+    )
 )
 
 echo [5/5] Restoring / updating project dependencies...
@@ -114,6 +122,8 @@ echo ----------------------------------------
 git status -sb
 echo ----------------------------------------
 echo Sync complete.
+echo.
+echo Tip: in PowerShell use:  .\sync.bat
 echo.
 pause
 endlocal
