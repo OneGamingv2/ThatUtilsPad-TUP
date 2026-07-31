@@ -62,7 +62,7 @@ namespace CameraMod.Camera.Comps
                 return;
 
             float dist = Vector3.Distance(rightHandT.position, transform.position);
-            if (InputManager.instance.RightGrip && dist < 0.18f)
+            if (InputManager.instance.RightGrip && dist < 0.24f)
             {
                 tabletT.parent = rightHandT;
                 if (controller.cameraMode == CameraMode.FollowPlayer)

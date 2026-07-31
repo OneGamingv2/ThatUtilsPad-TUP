@@ -4,6 +4,7 @@ using CameraMod.Camera.Comps;
 using CameraMod.Camera.Networking;
 using HarmonyLib;
 using UnityEngine;
+using TupMain = ThatUtilsPad.Main;
 
 namespace CameraMod.Camera.Patches
 {
@@ -16,19 +17,30 @@ namespace CameraMod.Camera.Patches
 
         public static void EnsureStarted()
         {
-            if (started || GorillaTagger.Instance == null)
+            if (started)
                 return;
-            GorillaTagger.Instance.StartCoroutine(Main());
+
+            if (GorillaTagger.Instance != null)
+            {
+                GorillaTagger.Instance.StartCoroutine(Boot());
+                return;
+            }
+
+            if (TupMain.Instance != null)
+                TupMain.Instance.StartCoroutine(Boot());
         }
 
-        private static IEnumerator Main()
+        private static IEnumerator Boot()
         {
             if (started)
                 yield break;
             started = true;
 
+            while (GorillaTagger.Instance == null)
+                yield return null;
+
             var mainGO = new GameObject("TUP_CameraMod");
-            Object.DontDestroyOnLoad(mainGO);
+            UnityEngine.Object.DontDestroyOnLoad(mainGO);
             mainGO.AddComponent<InputManager>();
 
             var ui = mainGO.AddComponent<UI>();

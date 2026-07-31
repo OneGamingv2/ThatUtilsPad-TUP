@@ -7,6 +7,7 @@ public static partial class Mods
 {
     private static bool EnsureCameraReady(out CameraController controller)
     {
+        CameraMod.Camera.Patches.StartPatch.EnsureStarted();
         controller = CameraController.Instance;
         if (controller == null)
         {
@@ -17,7 +18,7 @@ public static partial class Mods
         if (!controller.IsReady)
         {
             controller.Init();
-            ShowNotification("Camera still loading…", NotificationDefaultDuration);
+            ShowNotification("Camera still loading...", NotificationDefaultDuration);
             return false;
         }
 

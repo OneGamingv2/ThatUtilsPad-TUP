@@ -17,6 +17,9 @@ public static partial class Mods
     public const string PadNetworkPresenceKey = "thatutilspad";
     public const string PadNetworkHandKey = "ThatUtilsPad";
     public const string PadNetworkGuiKey = "ThatUtilsPadGui";
+    // Free aliases so free clients can see paid pads / older free builds stay visible.
+    public const string PadNetworkHandKeyFree = "ThatUtilsPadFree";
+    public const string PadNetworkGuiKeyFree = "ThatUtilsPadFreeGui";
     public const string PadNetworkVersion = "1.0.0";
 
     private sealed class RemotePadView
@@ -107,7 +110,9 @@ public static partial class Mods
             {
                 { PadNetworkPresenceKey, PadNetworkVersion },
                 { PadNetworkHandKey, handState },
-                { PadNetworkGuiKey, guiState }
+                { PadNetworkGuiKey, guiState },
+                { PadNetworkHandKeyFree, handState },
+                { PadNetworkGuiKeyFree, guiState }
             };
             PhotonNetwork.LocalPlayer.SetCustomProperties(props);
         }
@@ -129,7 +134,9 @@ public static partial class Mods
             Hashtable props = new Hashtable
             {
                 { PadNetworkHandKey, "0" },
-                { PadNetworkGuiKey, "0" }
+                { PadNetworkGuiKey, "0" },
+                { PadNetworkHandKeyFree, "0" },
+                { PadNetworkGuiKeyFree, "0" }
             };
             PhotonNetwork.LocalPlayer.SetCustomProperties(props);
         }
@@ -186,11 +193,15 @@ public static partial class Mods
         if (player?.CustomProperties == null)
             return "0";
 
-        if (!player.CustomProperties.TryGetValue(PadNetworkGuiKey, out object raw) || raw == null)
-            return "0";
-
-        string value = raw.ToString();
-        return string.IsNullOrWhiteSpace(value) ? "0" : value.Trim();
+        if (TryReadCustomProp(player, PadNetworkGuiKey, out string shared) && shared != "0")
+            return shared;
+        if (TryReadCustomProp(player, PadNetworkGuiKeyFree, out string free) && free != "0")
+            return free;
+        if (TryReadCustomProp(player, PadNetworkGuiKey, out shared))
+            return shared;
+        if (TryReadCustomProp(player, PadNetworkGuiKeyFree, out free))
+            return free;
+        return "0";
     }
 
     private static bool TryGetRemotePadHand(Player player, out bool leftHand)
@@ -199,10 +210,34 @@ public static partial class Mods
         if (player?.CustomProperties == null)
             return false;
 
-        if (!player.CustomProperties.TryGetValue(PadNetworkHandKey, out object raw) || raw == null)
+        if (TryParseHandState(player, PadNetworkHandKey, out leftHand))
+            return true;
+        if (TryParseHandState(player, PadNetworkHandKeyFree, out leftHand))
+            return true;
+        return false;
+    }
+
+    private static bool TryReadCustomProp(Player player, string key, out string value)
+    {
+        value = "0";
+        if (player?.CustomProperties == null || string.IsNullOrEmpty(key))
+            return false;
+        if (!player.CustomProperties.TryGetValue(key, out object raw) || raw == null)
+            return false;
+        string text = raw.ToString();
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+        value = text.Trim();
+        return true;
+    }
+
+    private static bool TryParseHandState(Player player, string key, out bool leftHand)
+    {
+        leftHand = true;
+        if (!TryReadCustomProp(player, key, out string value))
             return false;
 
-        string value = raw.ToString().Trim().ToUpperInvariant();
+        value = value.ToUpperInvariant();
         if (value == "L" || value == "LEFT" || value == "1")
         {
             leftHand = true;

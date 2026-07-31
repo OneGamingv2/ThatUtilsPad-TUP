@@ -261,6 +261,8 @@ namespace CameraMod.Camera
             colorScreenGo = ProceduralGui.BuildColorScreen();
             cameraTabletT = ProceduralGui.BuildCameraTablet().transform;
             cameraTabletT.localScale = Vector3.one;
+            UnityEngine.Object.DontDestroyOnLoad(cameraTabletT.gameObject);
+            UnityEngine.Object.DontDestroyOnLoad(colorScreenGo);
 
             SetSkin(PlayerPrefs.GetString(skinPrefKey, "Default"));
 
@@ -552,12 +554,7 @@ namespace CameraMod.Camera
             AddHoldableTabletButton("MainPage/NearClipUp", () => ChangeNearClip(0.01f));
             AddHoldableTabletButton("MainPage/NearClipDown", () => ChangeNearClip(-0.01f));
             AddTabletButton("MainPage/FlipCamButton", Flip);
-            AddTabletButton("MainPage/FPButton", () =>
-            {
-                cameraMode = cameraMode == CameraMode.FollowPlayer ? CameraMode.None : CameraMode.FollowPlayer;
-                if (cameraMode == CameraMode.None)
-                    BringTabletToPlayer();
-            });
+            AddTabletButton("MainPage/FPButton", EnableFollow);
 
             Transform roll = cameraTabletT.Find("MainPage/RollLock");
             if (roll != null)
@@ -680,14 +677,18 @@ namespace CameraMod.Camera
         }
 
         private float lastPokeInvoke;
+        private BaseButton lastPokedButton;
 
         private void PollTabletButtonPokes()
         {
-            if (cameraMode != CameraMode.None || cameraTabletT == null)
+            if (cameraMode != CameraMode.None || cameraTabletT == null || ButtonsTimeouted)
                 return;
-            if (mainPage?.GO == null || !mainPage.GO.activeInHierarchy)
+            if (Time.time - lastPokeInvoke < 0.18f)
                 return;
-            if (Time.time - lastPokeInvoke < 0.12f)
+
+            bool pageOpen = (mainPage?.GO != null && mainPage.GO.activeInHierarchy)
+                            || (miscPage?.GO != null && miscPage.GO.activeInHierarchy);
+            if (!pageOpen)
                 return;
 
             Transform left = GorillaTagger.Instance?.leftHandTransform;
@@ -695,27 +696,61 @@ namespace CameraMod.Camera
             if (left == null && right == null)
                 return;
 
+            const float pokeRadius = 0.095f;
+            BaseButton best = null;
+            float bestDist = pokeRadius;
+            bool bestLeft = false;
+
             for (int i = 0; i < buttons.Count; i++)
             {
                 BaseButton btn = buttons[i];
-                if (btn == null || !btn.isActiveAndEnabled)
+                if (btn == null || !btn.isActiveAndEnabled || !btn.gameObject.activeInHierarchy)
                     continue;
 
                 Collider col = btn.GetComponent<Collider>();
                 if (col == null || !col.enabled)
                     continue;
 
-                bool hitLeft = left != null && Vector3.Distance(left.position, col.bounds.center) < 0.07f;
-                bool hitRight = right != null && Vector3.Distance(right.position, col.bounds.center) < 0.07f;
-                if (!hitLeft && !hitRight)
-                    continue;
+                Vector3 center = col.bounds.center;
+                if (left != null)
+                {
+                    float d = Vector3.Distance(left.position, center);
+                    if (d < bestDist)
+                    {
+                        bestDist = d;
+                        best = btn;
+                        bestLeft = true;
+                    }
+                }
 
-                lastPokeInvoke = Time.time;
-                if (btn is ToggleButton toggle)
-                    toggle.IsDown = !toggle.IsDown;
-                btn.onClick?.Invoke();
-                break;
+                if (right != null)
+                {
+                    float d = Vector3.Distance(right.position, center);
+                    if (d < bestDist)
+                    {
+                        bestDist = d;
+                        best = btn;
+                        bestLeft = false;
+                    }
+                }
             }
+
+            if (best == null)
+            {
+                lastPokedButton = null;
+                return;
+            }
+
+            if (best == lastPokedButton)
+                return;
+
+            lastPokedButton = best;
+            lastPokeInvoke = Time.time;
+            best.Vibration(bestLeft);
+            if (best is ToggleButton toggle)
+                toggle.IsDown = !toggle.IsDown;
+            else
+                best.onClick?.Invoke();
         }
 
         public void AnUpdate()
