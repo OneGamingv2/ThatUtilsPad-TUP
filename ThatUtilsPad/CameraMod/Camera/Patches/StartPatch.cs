@@ -1,5 +1,4 @@
 ﻿using System.Collections;
-using System.Collections.Generic;
 using CameraMod.Camera.Comps;
 using CameraMod.Camera.Networking;
 using HarmonyLib;
@@ -11,7 +10,6 @@ namespace CameraMod.Camera.Patches
     [HarmonyPatch(typeof(GorillaTagger), "Start")]
     public class StartPatch
     {
-        public static HashSet<string> owners = new HashSet<string>();
         public static string UserID = "";
         private static bool started;
 

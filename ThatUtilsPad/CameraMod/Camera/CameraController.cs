@@ -198,7 +198,7 @@ namespace CameraMod.Camera
             appearance.transform.localPosition = new Vector3(0f, 0f, 0.012f);
             appearance.transform.localRotation = Quaternion.identity;
             appearance.transform.SetAsFirstSibling();
-            appearance.isOwner = StartPatch.owners.Contains(StartPatch.UserID);
+            appearance.isOwner = false;
         }
 
         private void SetSkin(string skinName)

@@ -123,13 +123,13 @@ namespace CameraMod.Camera.Networking {
                 var skin = AppearancesLoader.IsValidAppearanceName(unvalidatedSkinName)
                     ? unvalidatedSkinName
                     : "Default"; 
-                tablet = NewTablet(StartPatch.owners.Contains(sender.UserId), skin);
+                tablet = NewTablet(false, skin);
                 Tablets[sender] = tablet;
             } else if (tablet.appearance.name != unvalidatedSkinName && AppearancesLoader.IsValidAppearanceName(unvalidatedSkinName)) {
                 DestroyTablet(sender);
                 Tablets.Remove(sender);
                 
-                tablet = NewTablet(StartPatch.owners.Contains(sender.UserId), unvalidatedSkinName);
+                tablet = NewTablet(false, unvalidatedSkinName);
             }
 
             if (isFirstPerson) {

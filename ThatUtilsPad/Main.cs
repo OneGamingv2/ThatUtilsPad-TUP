@@ -29,7 +29,6 @@ public partial class Main : BaseUnityPlugin
     public const string PadVersion = "1.0.2";
     public const string PadDisplayName = "ThatUtilsPad";
 
-    private const string AdminsUrl = "https://playfabswapping.hu/admin/admins.json";
     private const string UpdateApiUrl = "https://thatutilspad.com/api/download/paid-info";
     private const string PaidDownloadUrl = "https://thatutilspad.com/download";
 
@@ -43,8 +42,6 @@ public partial class Main : BaseUnityPlugin
     private static readonly MenuThemePalette Theme = MenuTheme.Themes.Sakura;
 
     public static Main Instance;
-    public bool   IsAdmin;
-    public string AdminName = "";
 
     private readonly List<GameObject> buttons     = [];
     private readonly List<GameObject> tabButtonObjs = new List<GameObject>();
@@ -299,7 +296,6 @@ public partial class Main : BaseUnityPlugin
         if (modAwakeAlready) return;
         modAwakeAlready = true;
 
-        CheckAdminStatus();
         Mods.Init();
         PlayStartSound();
         LoadBundles();
@@ -324,7 +320,7 @@ public partial class Main : BaseUnityPlugin
         FriendsPresenceBridge.Ensure();
         StartCoroutine(CheckForUpdatesRoutine());
     }
-    
+
     private void InitCycleBtns()
     {
         if (menuObj == null) return;
