@@ -35,11 +35,11 @@ private enum ScanLobbyMode
 
     private static readonly string[] scanModeNames = { "Cheats", "Mods", "Mods + Cheats" };
     private static int scanModeIndex;
-    private const float AutoScanTraversalInterval = 0.5f;
+    private const float AutoScanTraversalInterval = 1.25f;
     private const float PropertyScanCacheSeconds = 2f;
     private static float nextAutoScanTraversalTime;
     private static float nextAutoScanFullRefreshTime;
-    private const float AutoScanFullRefreshInterval = 8f;
+    private const float AutoScanFullRefreshInterval = 20f;
 
     private readonly struct NormalizedScanSource
     {
@@ -73,11 +73,13 @@ private enum ScanLobbyMode
     {
         public List<string> LegalMods;
         public List<string> IllegalMods;
+        public List<string> UntrustedMods;
         public List<string> UnknownProps;
 
         public int TotalCount =>
             (LegalMods != null ? LegalMods.Count : 0) +
             (IllegalMods != null ? IllegalMods.Count : 0) +
+            (UntrustedMods != null ? UntrustedMods.Count : 0) +
             (UnknownProps != null ? UnknownProps.Count : 0);
     }
 
@@ -186,12 +188,10 @@ private enum ScanLobbyMode
 
             try
             {
-
-                FindPropertySignatureHits(player);
-
                 if (!autoScannedActorNumbers.Add(player.ActorNumber))
                     continue;
 
+                FindPropertySignatureHits(player);
                 ScanPhotonPlayerAndNotify(player, true);
             }
             catch (Exception ex)
@@ -230,7 +230,8 @@ private enum ScanLobbyMode
         LoadPropertyListIfNeeded();
         PlayerPropScanResult scan = ScanPlayerCustomProperties(player);
         int modCount = scan.LegalMods != null ? scan.LegalMods.Count : 0;
-        int cheatCount = scan.IllegalMods != null ? scan.IllegalMods.Count : 0;
+        int cheatCount = (scan.IllegalMods != null ? scan.IllegalMods.Count : 0) +
+                         (scan.UntrustedMods != null ? scan.UntrustedMods.Count : 0);
         int unknownCount = scan.UnknownProps != null ? scan.UnknownProps.Count : 0;
 
         if (modCount == 0 && cheatCount == 0 && unknownCount == 0)
@@ -331,6 +332,8 @@ private enum ScanLobbyMode
             NormalizedScanSource source = sources[sourceIndex];
             foreach (PropertySignature signature in propertySignatures.Values)
             {
+                if (IsPlatformFalsePositiveSignature(signature.Name))
+                    continue;
                 if (!NormalizedTextContainsSignature(source, signature))
                     continue;
 
@@ -384,7 +387,7 @@ private enum ScanLobbyMode
 
         PlayerPropScanResult scan = ScanPlayerCustomProperties(player);
         legalCount = scan.LegalMods.Count;
-        illegalCount = scan.IllegalMods.Count;
+        illegalCount = scan.IllegalMods.Count + (scan.UntrustedMods != null ? scan.UntrustedMods.Count : 0);
         unknownCount = scan.UnknownProps.Count;
 
         propertyCountCache[cacheKey] = new PropertyCountCacheEntry
@@ -402,6 +405,7 @@ private enum ScanLobbyMode
         {
             LegalMods = new List<string>(),
             IllegalMods = new List<string>(),
+            UntrustedMods = new List<string>(),
             UnknownProps = new List<string>()
         };
 
@@ -414,6 +418,8 @@ private enum ScanLobbyMode
             Dictionary<string, List<string>> hits = FindPropertySignatureHits(player);
             HashSet<string> explainedPropKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+            CollectKittyAndBlossomHits(player, result, explainedPropKeys);
+
             foreach (KeyValuePair<string, List<string>> hit in hits)
             {
                 if (!propertySignatures.TryGetValue(hit.Key, out PropertySignature signature))
@@ -423,15 +429,7 @@ private enum ScanLobbyMode
                 if (string.IsNullOrWhiteSpace(display) || display == "Unknown")
                     display = signature.Name;
 
-                if (signature.IsLegal)
-                {
-                    if (!result.LegalMods.Contains(display))
-                        result.LegalMods.Add(display);
-                }
-                else if (!result.IllegalMods.Contains(display))
-                {
-                    result.IllegalMods.Add(display);
-                }
+                AddClassifiedModDisplay(result, display, signature.IsLegal);
 
                 if (hit.Value == null)
                     continue;
@@ -440,8 +438,11 @@ private enum ScanLobbyMode
                     MarkExplainedPropertyKeys(explainedPropKeys, hit.Value[i]);
             }
 
+            CollectBlossomStylePropertyHits(player, result, explainedPropKeys);
+
             result.LegalMods.Sort(StringComparer.OrdinalIgnoreCase);
             result.IllegalMods.Sort(StringComparer.OrdinalIgnoreCase);
+            result.UntrustedMods.Sort(StringComparer.OrdinalIgnoreCase);
             CollectUnknownCustomProperties(player, explainedPropKeys, result.UnknownProps);
             result.UnknownProps.Sort(StringComparer.OrdinalIgnoreCase);
         }
@@ -451,6 +452,203 @@ private enum ScanLobbyMode
         }
 
         return result;
+    }
+
+    private static void AddClassifiedModDisplay(PlayerPropScanResult result, string display, bool signatureLegal)
+    {
+        if (string.IsNullOrWhiteSpace(display))
+            return;
+
+        // Steam's "Platform" property can look like "Platform Steam" -> compact "platformsteam"
+        // which falsely matched "platforms". Never show platform-store signals as mods.
+        if (ShouldHideModListEntry(display) || IsPlatformFalsePositiveSignature(display))
+            return;
+
+        if (IsUntrustedModDisplay(display))
+        {
+            if (!result.UntrustedMods.Contains(display) &&
+                !result.IllegalMods.Contains(display) &&
+                !result.LegalMods.Contains(display))
+                result.UntrustedMods.Add(display);
+            return;
+        }
+
+        if (IsHardIllegalModDisplay(display))
+        {
+            if (!result.IllegalMods.Contains(display) && !result.LegalMods.Contains(display))
+                result.IllegalMods.Add(display);
+            return;
+        }
+
+        if (signatureLegal)
+        {
+            if (!result.LegalMods.Contains(display) &&
+                !result.IllegalMods.Contains(display) &&
+                !result.UntrustedMods.Contains(display))
+                result.LegalMods.Add(display);
+            return;
+        }
+
+        if (!result.IllegalMods.Contains(display) && !result.LegalMods.Contains(display))
+            result.IllegalMods.Add(display);
+    }
+
+    private static bool IsUntrustedModDisplay(string display)
+    {
+        string n = SquishPropertyText(display);
+        return n.Contains("fpsnametag") || n.Contains("zlothy") || n.Contains("kigui") ||
+               n.Contains("kittyinfo") || n.Contains("untrusted") || n.Contains("notag") ||
+               n.Contains("toomuchinfo") || n.Contains("monkeclick") || n.Contains("roomutils") ||
+               n.Contains("propspoof") || n.Contains("propspam") || n.Contains("custommodspoof");
+    }
+
+    private static bool IsHardIllegalModDisplay(string display)
+    {
+        string n = SquishPropertyText(display);
+        return n.Contains("bananaos") || n.Contains("polkadotted") || n.Contains("recroomrig") ||
+               n.Contains("hansolo") || n.Contains("walksimulator") || n.Contains("genesis") ||
+               n.Contains("dtasloi") || n.Contains("elixir") || n.Contains("malachi") ||
+               n.Contains("yulookininhereweirdo") || n.Contains("seralyth") || n.Contains("voidmenu") ||
+               n.Contains("cosmetx") || n.Contains("adminconsole") || n.Contains("devconsole") ||
+               n.Contains("iimenu") || n.Contains("sentinel");
+    }
+
+    private static void CollectBlossomStylePropertyHits(
+        Player player,
+        PlayerPropScanResult result,
+        HashSet<string> explainedPropKeys)
+    {
+        if (player?.CustomProperties == null)
+            return;
+
+        foreach (DictionaryEntry entry in player.CustomProperties)
+        {
+            string key = entry.Key != null ? entry.Key.ToString() : "";
+            string valueText = FormatPhotonCustomPropertyValue(entry.Value);
+            TryClassifyRawPropertyText(key, result, explainedPropKeys);
+            TryClassifyRawPropertyText(valueText, result, explainedPropKeys);
+            if (!string.IsNullOrEmpty(key))
+                MarkExplainedPropertyKeys(explainedPropKeys, "PropKey:" + key);
+        }
+    }
+
+    private static void TryClassifyRawPropertyText(
+        string text,
+        PlayerPropScanResult result,
+        HashSet<string> explainedPropKeys)
+    {
+        if (string.IsNullOrWhiteSpace(text) || ShouldHideModListEntry(text) || TextLooksLikeNormalNetworkValue(text))
+            return;
+
+        string display = FormatDetectedModName(text);
+        if (string.IsNullOrWhiteSpace(display) || display == "Unknown")
+            display = text.Trim();
+
+        bool known =
+            IsUntrustedModDisplay(display) ||
+            IsHardIllegalModDisplay(display) ||
+            IsKnownLegalAdvertiseDisplay(display);
+
+        if (!known)
+            return;
+
+        bool legal = IsKnownLegalAdvertiseDisplay(display);
+        AddClassifiedModDisplay(result, display, legal);
+        if (!string.IsNullOrEmpty(text))
+            explainedPropKeys.Add(text);
+    }
+
+    private static bool IsKnownLegalAdvertiseDisplay(string display)
+    {
+        string n = SquishPropertyText(display);
+        return n.Contains("thatutilspad") || n.Contains("thatutilspadfree") ||
+               n.Contains("blossomchecker") || n == "bark" || n.Contains("barkenabled") ||
+               n.Contains("barkversion") || n.Contains("barkplayersize") ||
+               n == "grate" || n.Contains("grateversion") || n.Contains("gorillashirts") ||
+               n.Contains("infowatch") || n.Contains("monkephone") || n.Contains("utilla") ||
+               n.Contains("sakuraa") || n.Contains("openbodytracking") || n.Contains("gorillabody") ||
+               n.Contains("monkster") || n.Contains("monkeye") || n.Contains("bigusnametag") ||
+               n.Contains("holdablepad") || n.Contains("gorillainfo") || n.Contains("gorillawatch") ||
+               n.Contains("bananaphone") || n.Contains("whoisthatmonke") || n.Contains("bigusnametag") ||
+               n.Contains("simpleboards") || n.Contains("gfaces") || n.Contains("gpronouns") ||
+               n.Contains("gorillashirts") || n.Contains("shirtversion") || n.Contains("shirtproperties");
+    }
+
+    private static bool ShouldHideModListEntry(string text)
+    {
+        string n = SquishPropertyText(text);
+        return n == "didtutorial" || n == "didnotutorial" || n == "didnottutorial" ||
+               n == "platform" || n == "platforms" || n == "plat" ||
+               n == "steam" || n == "steamvr" || n == "quest" || n == "meta" ||
+               n == "oculus" || n == "oculuspc" || n == "pc" || n == "pcvr" ||
+               n.Contains("platform");
+    }
+
+    private static bool TextLooksLikeNormalNetworkValue(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return true;
+
+        string trimmed = text.Trim();
+        string normalized = SquishPropertyText(text);
+        if (bool.TryParse(trimmed, out _) ||
+            int.TryParse(trimmed, out _) ||
+            float.TryParse(trimmed, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out _) ||
+            normalized.Length <= 2)
+            return true;
+
+        if (normalized.Contains("photon") || normalized.Contains("actor") || normalized.Contains("room") ||
+            normalized.Contains("queue") || normalized.Contains("gamemode") || normalized.Contains("version") ||
+            normalized.Contains("cosmetic") || normalized.Contains("firstlogin") || normalized.Contains("account") ||
+            normalized.Contains("login") || normalized.Contains("playerid") || normalized.Contains("session") ||
+            normalized.Contains("device") || normalized.Contains("region") || normalized.Contains("hash") ||
+            normalized.Contains("auth") || normalized.Contains("voice") || normalized.Contains("didtutorial"))
+            return true;
+
+        switch (normalized)
+        {
+            case "platform":
+            case "platforms":
+            case "playerplatform":
+            case "currentplatform":
+            case "plat":
+            case "store":
+            case "storename":
+            case "fps":
+            case "hz":
+            case "color":
+            case "playercolor":
+            case "colour":
+            case "playercolour":
+            case "creationdate":
+            case "created":
+            case "userid":
+            case "user":
+            case "id":
+            case "nickname":
+            case "name":
+            case "username":
+            case "quest":
+            case "meta":
+            case "oculus":
+            case "oculuspc":
+            case "steam":
+            case "steamvr":
+            case "pc":
+            case "pcvr":
+            case "desktop":
+            case "computer":
+            case "standalone":
+            case "android":
+            case "rift":
+            case "psvr":
+            case "pico":
+            case "unknown":
+                return true;
+            default:
+                return normalized.Contains("platform") || normalized.Contains("steam64") || normalized.Contains("steamid");
+        }
     }
 
     private static void MarkExplainedPropertyKeys(HashSet<string> explained, string sourceKey)
@@ -491,7 +689,7 @@ private enum ScanLobbyMode
             return;
 
         explainedPropKeys ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        const int maxUnknown = 48;
+        const int maxUnknown = 24;
 
         foreach (DictionaryEntry entry in player.CustomProperties)
         {
@@ -499,79 +697,110 @@ private enum ScanLobbyMode
                 break;
 
             string key = entry.Key != null ? entry.Key.ToString() : "";
-            if (string.IsNullOrWhiteSpace(key) || IsIgnoredVanillaPropertyKey(key))
+            if (string.IsNullOrWhiteSpace(key))
+                continue;
+            if (IsIgnoredVanillaPropertyKey(key) || TextLooksLikeNormalNetworkValue(key))
+                continue;
+            if (explainedPropKeys.Contains(key))
                 continue;
 
-            AppendUnknownPropertyLabels(key, entry.Value, explainedPropKeys, unknownOut, 0, maxUnknown);
+            if (!LooksLikeSuspiciousUnknownProp(key, entry.Value))
+                continue;
+
+            string label = FormatUnknownPropertyLabel(key, entry.Value);
+            if (!string.IsNullOrEmpty(label) && !unknownOut.Contains(label))
+                unknownOut.Add(label);
         }
     }
 
-    private static void AppendUnknownPropertyLabels(
-        string path,
-        object value,
-        HashSet<string> explainedPropKeys,
-        List<string> unknownOut,
-        int depth,
-        int maxUnknown)
+    private static bool LooksLikeSuspiciousUnknownProp(string key, object value)
     {
-        if (unknownOut.Count >= maxUnknown || string.IsNullOrEmpty(path) || depth > 4)
-            return;
+        if (string.IsNullOrWhiteSpace(key))
+            return false;
+        if (IsIgnoredVanillaPropertyKey(key) || TextLooksLikeNormalNetworkValue(key) || ShouldHideModListEntry(key))
+            return false;
 
-        bool explained = explainedPropKeys.Contains(path);
-        if (!explained)
-        {
-            string label = FormatUnknownPropertyLabel(path, value);
-            if (!string.IsNullOrEmpty(label) && !unknownOut.Contains(label))
-                unknownOut.Add(label);
-            return;
-        }
+        string valueText = FormatPhotonCustomPropertyValue(value);
+        if (TextLooksLikeNormalNetworkValue(valueText) && !LooksLikeModAdvertiseToken(key))
+            return false;
 
-        if (value is ExitGames.Client.Photon.Hashtable table)
+        if ((value is ExitGames.Client.Photon.Hashtable || value is IDictionary) &&
+            !LooksLikeModAdvertiseToken(key))
+            return false;
+
+        return LooksLikeModAdvertiseToken(key) || LooksLikeModAdvertiseToken(valueText);
+    }
+
+    private static bool LooksLikeModAdvertiseToken(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        string trimmed = text.Trim();
+        if (trimmed.Length < 4 || trimmed.Length > 64)
+            return false;
+        if (TextLooksLikeNormalNetworkValue(trimmed) || ShouldHideModListEntry(trimmed))
+            return false;
+
+        string n = SquishPropertyText(trimmed);
+        if (n.Length < 4)
+            return false;
+
+        if (LooksLikeGuidOrHash(trimmed))
+            return false;
+
+        int letters = 0;
+        for (int i = 0; i < n.Length; i++)
+            if (char.IsLetter(n[i])) letters++;
+        if (letters < 3)
+            return false;
+
+        if (n.Contains("menu") || n.Contains("modmenu") || n.Contains("modchecker") ||
+            n.Contains("client") || (n.Contains("pad") && n.Length >= 6) ||
+            n.Contains("checker") || (n.Contains("version") && n.Length >= 10) ||
+            (n.Contains("enabled") && n.Length >= 10) ||
+            (n.Contains("using") && n.Length >= 8) ||
+            (n.IndexOf('.') >= 0 && n.Length >= 8))
+            return true;
+
+        bool hasDigit = false;
+        for (int i = 0; i < n.Length; i++)
+            if (char.IsDigit(n[i])) { hasDigit = true; break; }
+        return hasDigit && n.Length >= 8;
+    }
+
+    private static bool LooksLikeGuidOrHash(string text)
+    {
+        string t = text.Trim();
+        if (t.Length == 32 || t.Length == 40 || t.Length == 64)
         {
-            foreach (object nestedKeyObj in table.Keys)
+            for (int i = 0; i < t.Length; i++)
             {
-                if (unknownOut.Count >= maxUnknown)
-                    break;
-                string nestedKey = nestedKeyObj != null ? nestedKeyObj.ToString() : "item";
-                string nestedPath = path + "." + (string.IsNullOrEmpty(nestedKey) ? "item" : nestedKey);
-                AppendUnknownPropertyLabels(
-                    nestedPath,
-                    table[nestedKeyObj],
-                    explainedPropKeys,
-                    unknownOut,
-                    depth + 1,
-                    maxUnknown);
+                char c = t[i];
+                bool hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+                if (!hex) return false;
             }
-            return;
+            return true;
         }
 
-        if (value is IDictionary dictionary)
-        {
-            foreach (DictionaryEntry entry in dictionary)
-            {
-                if (unknownOut.Count >= maxUnknown)
-                    break;
-                string nestedKey = entry.Key != null ? entry.Key.ToString() : "item";
-                string nestedPath = path + "." + (string.IsNullOrEmpty(nestedKey) ? "item" : nestedKey);
-                AppendUnknownPropertyLabels(
-                    nestedPath,
-                    entry.Value,
-                    explainedPropKeys,
-                    unknownOut,
-                    depth + 1,
-                    maxUnknown);
-            }
-        }
+        if (Guid.TryParse(t, out _))
+            return true;
+
+        return false;
     }
 
     private static string FormatUnknownPropertyLabel(string key, object value)
     {
         string valueText = FormatPhotonCustomPropertyValue(value);
-        if (string.IsNullOrEmpty(valueText) || valueText.Equals("null", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrEmpty(valueText) ||
+            valueText.Equals("null", StringComparison.OrdinalIgnoreCase) ||
+            TextLooksLikeNormalNetworkValue(valueText) ||
+            value is ExitGames.Client.Photon.Hashtable ||
+            value is IDictionary)
             return key;
 
-        if (valueText.Length > 42)
-            valueText = valueText.Substring(0, 39) + "...";
+        if (valueText.Length > 36)
+            valueText = valueText.Substring(0, 33) + "...";
 
         return key + " = " + valueText;
     }
@@ -581,15 +810,81 @@ private enum ScanLobbyMode
         if (string.IsNullOrWhiteSpace(key))
             return true;
 
-        switch (key.Trim().ToLowerInvariant())
+        if (ShouldHideModListEntry(key) || TextLooksLikeNormalNetworkValue(key))
+            return true;
+
+        string n = SquishPropertyText(key);
+        switch (n)
         {
             case "actornumber":
             case "userid":
             case "nickname":
             case "ismasterclient":
             case "isinactive":
+            case "didtutorial":
+            case "didnotutorial":
+            case "didnottutorial":
+            case "size":
+            case "scale":
+            case "matcolor":
+            case "setmatcolor":
+            case "nativepreferred":
+            case "returningplayer":
+            case "playercolor":
+            case "playercolour":
+            case "color":
+            case "colour":
+            case "platform":
+            case "platforms":
+            case "playerplatform":
+            case "currentplatform":
+            case "plat":
+            case "store":
+            case "storename":
+            case "fps":
+            case "hz":
+            case "ping":
+            case "voice":
+            case "muted":
+            case "mute":
+            case "zone":
+            case "currentzone":
+            case "queue":
+            case "gamemode":
+            case "mode":
+            case "room":
+            case "roomtype":
+            case "cosmetics":
+            case "cosmetic":
+            case "tryon":
+            case "tryonpack":
+            case "activecosmetics":
+            case "concatstring":
+            case "nametags":
+            case "debug":
+            case "lck":
+            case "pun":
+            case "photon":
+            case "thatutilspadfree":
+            case "thatutilspadfreegui":
+            case "thatutilspad":
+            case "steam":
+            case "steamvr":
+            case "steam64":
+            case "steamid":
+            case "quest":
+            case "meta":
+            case "oculus":
+            case "oculuspc":
+            case "pc":
+            case "pcvr":
                 return true;
             default:
+                if (n.Contains("platform") || n.Contains("steam") || n.Contains("oculus"))
+                    return true;
+                if (n.StartsWith("lma") || n.StartsWith("lme") || n.StartsWith("lmh") ||
+                    n.StartsWith("lmb") || n.StartsWith("lmf") || n.StartsWith("lmk"))
+                    return true;
                 return false;
         }
     }
@@ -599,7 +894,7 @@ private enum ScanLobbyMode
         List<NormalizedScanSource> sources = new List<NormalizedScanSource>(32);
         sources.Add(new NormalizedScanSource(
             "PhotonPlayer",
-            $"{player.NickName} {player.UserId} {player.ActorNumber}"));
+            $"{player.UserId} {player.ActorNumber}"));
 
         StringBuilder allProperties = new StringBuilder();
         if (player.CustomProperties != null)
@@ -634,7 +929,6 @@ private enum ScanLobbyMode
         if (rig != null)
         {
             try { sources.Add(new NormalizedScanSource("Cosmetics", rig.Cosmetics())); } catch { }
-            try { sources.Add(new NormalizedScanSource("Platform", rig.GetPlatform())); } catch { }
             try { sources.Add(new NormalizedScanSource("FPS", RigBits.GetFPS(rig).ToString())); } catch { }
         }
 
@@ -788,7 +1082,15 @@ private enum ScanLobbyMode
                 if (string.IsNullOrEmpty(entry))
                     continue;
 
+                if (IsTooBroadPropertyToken(section, entry))
+                    continue;
+
+                if (IsPlatformFalsePositiveSignature(entry))
+                    continue;
+
                 bool isLegal = IsLegalPropertySignature(section, entry);
+                if (section.Equals("Untrusted mod hints", StringComparison.OrdinalIgnoreCase))
+                    isLegal = false;
                 string normalized = SquishPropertyText(entry);
                 propertySignatures[entry] = new PropertySignature(
                     entry,
@@ -800,6 +1102,73 @@ private enum ScanLobbyMode
             }
         }
 
+    }
+
+    private static bool IsTooBroadPropertyToken(string section, string entry)
+    {
+        if (!section.Equals("Suspicious property tokens", StringComparison.OrdinalIgnoreCase) &&
+            !section.Equals("Heuristic categories", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        string n = SquishPropertyText(entry);
+        switch (n)
+        {
+            case "menu":
+            case "client":
+            case "auth":
+            case "license":
+            case "session":
+            case "template":
+            case "framework":
+            case "runtime":
+            case "cosmetic":
+            case "rpc":
+            case "pull":
+            case "fly":
+            case "inject":
+            case "loader":
+            case "bypass":
+            case "unlocker":
+            case "spoof":
+            case "serial":
+            case "netvar":
+            case "void":
+            case "dark":
+            case "esp":
+            case "xray":
+            case "hash":
+            case "version":
+            case "color":
+            case "name":
+            case "ui":
+            case "gs":
+            case "msp":
+            case "gc":
+            case "atlas":
+            case "orbit":
+            case "mango":
+            case "destiny":
+            case "crystal":
+            case "violet":
+            case "genesis":
+            case "untitled":
+            case "serverdata":
+            case "isusing":
+            case "confirmusing":
+            case "nocone":
+            case "vivid":
+            case "platform":
+            case "platforms":
+            case "platformgravity":
+            case "nonstickyplatforms":
+            case "steam":
+            case "quest":
+            case "oculus":
+            case "meta":
+                return true;
+            default:
+                return n.Length <= 3 || n.Contains("platform");
+        }
     }
 
     private static string LoadPropertyListText()
@@ -825,6 +1194,7 @@ private enum ScanLobbyMode
             case "suspicious property tokens":
             case "high-risk property keys":
             case "illegal mod hints (mods tab red flag)":
+            case "untrusted mod hints":
             case "report severities":
             case "signature keywords":
             case "built-in signatures":
@@ -854,10 +1224,39 @@ private enum ScanLobbyMode
         return true;
     }
 
+    private static bool IsPlatformFalsePositiveSignature(string text)
+    {
+        string n = SquishPropertyText(text).Replace(" ", "");
+        return n == "platform" ||
+               n == "platforms" ||
+               n == "plat" ||
+               n == "platformgravity" ||
+               n == "nonstickyplatforms" ||
+               n == "templateplatforms" ||
+               n == "playerplatform" ||
+               n == "currentplatform" ||
+               (n.Contains("platform") &&
+                (n.Contains("steam") || n.Contains("quest") || n.Contains("meta") ||
+                 n.Contains("oculus") || n.Contains("store")));
+    }
+
     private static bool NormalizedTextContainsSignature(NormalizedScanSource source, PropertySignature signature)
     {
         if (string.IsNullOrEmpty(source.Normalized) || string.IsNullOrEmpty(signature.Normalized))
             return false;
+
+        if (IsPlatformFalsePositiveSignature(signature.Name) ||
+            IsPlatformFalsePositiveSignature(signature.Normalized) ||
+            IsPlatformFalsePositiveSignature(signature.Compact))
+            return false;
+
+        // "Platform Steam" / "platformsteam" must never count as "platforms".
+        if (signature.Compact == "platforms" || signature.Normalized == "platforms")
+            return ContainsWholeNormalizedToken(source.Normalized, "platforms") &&
+                   !source.Compact.Contains("platformsteam") &&
+                   !source.Compact.Contains("platformquest") &&
+                   !source.Compact.Contains("platformmeta") &&
+                   !source.Compact.Contains("platformoculus");
 
         if (signature.RequiresWholeToken)
             return ContainsWholeNormalizedToken(source.Normalized, signature.Normalized);
@@ -986,15 +1385,11 @@ private enum ScanLobbyMode
         {
             string creationDate = result.AccountInfo.Created.ToString(format);
             creationDates[userId] = creationDate;
-            CachePlatformFromPlayFab(userId, result.AccountInfo);
 
             onTranslated?.Invoke(creationDate);
         }, delegate
         {
             creationDates[userId] = "Error";
-            pendingSupportPlatformLookups.Remove(userId);
-            ApplyPlatformFallbackWhenPlayFabMissing(userId);
-            RequestPlayerProfilePlatform(userId);
             onTranslated?.Invoke("Error");
         });
     }

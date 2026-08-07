@@ -1,32 +1,29 @@
-﻿using System;
+using System;
 using CameraMod.Camera;
+using ThatUtilsPad.MenuComponents;
 using UnityEngine;
 
 namespace CameraMod.Button.Buttons
 {
     public class ToggleButton : BaseButton
     {
-        private Vector3 upPosition;
-        private Vector3 downPosition;
         private Func<bool> getter;
         private Action<bool> setter;
         private bool savable;
         private string saveKey;
         private Material material;
+        private Color baseColor = Color.white;
         private float lastClicked;
-        public float clickMinInterval = 0.1f;
-
-        public Color enabledColor = new Color(1f, 0.9f, 0.9f);
-        public Color disabledColor = new Color(0.9f, 1f, 0.9f);
+        public float clickMinInterval = 0.12f;
 
         public ToggleButton InitToggleButton(Action<bool> setter, Func<bool> getter, bool savable = true, string overrideSaveName = null)
         {
             Renderer rend = GetComponent<Renderer>();
             if (rend != null)
+            {
                 material = rend.material;
-
-            upPosition = transform.localPosition;
-            downPosition = transform.localPosition + new Vector3(0.02f, 0f, 0f);
+                baseColor = material.color;
+            }
 
             this.getter = getter;
             this.setter = setter;
@@ -58,9 +55,11 @@ namespace CameraMod.Button.Buttons
 
         private void UpdateAppearance(bool isDown)
         {
-            if (material != null)
-                material.color = isDown ? enabledColor : disabledColor;
-            transform.localPosition = isDown ? downPosition : upPosition;
+            if (material == null)
+                return;
+
+            Color accent = MenuTheme.Current.Accent;
+            material.color = isDown ? Color.Lerp(baseColor, accent, 0.82f) : baseColor;
         }
 
         private void OnTriggerEnter(Collider col)

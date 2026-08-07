@@ -152,7 +152,13 @@ public partial class Main
             Transform outline = tile.Find("Outline") ?? FindChildByName(tile, "Outline");
             group.OutlineRects[i] = outline as RectTransform ?? outline?.GetComponent<RectTransform>();
             if (group.Texts[i] != null && font != null)
+            {
                 group.Texts[i].font = font;
+                group.Texts[i].richText = true;
+                group.Texts[i].fontStyle = FontStyles.Bold;
+                if (string.Equals(titleName, "ModsTitle", StringComparison.OrdinalIgnoreCase))
+                    group.Texts[i].fontSize = 2.55f;
+            }
 
             Transform back = tile.Find("Back") ?? FindChildByName(tile, "Back");
             if (back != null)
@@ -292,7 +298,7 @@ public partial class Main
         if (rend != null)
         {
             rend.material = new Material(ShaderCache.TextShader != null ? ShaderCache.TextShader : Shader.Find("GUI/Text Shader"));
-            rend.material.color = new Color32(203, 166, 247, 255);
+            rend.material.color = MenuTheme.Current.Accent;
         }
 
         GameObject labelObj = new GameObject("Label");
@@ -329,6 +335,14 @@ public partial class Main
         {
             group.PageText.gameObject.SetActive(multiPage || group.Values.Length > 0);
             group.PageText.text = multiPage
+                ? (group.PageIndex + 1) + " / " + pageCount
+                : group.Values.Length > 0 ? "1 / 1" : "0 / 0";
+        }
+
+        if (moreInfoModsExpanded && ReferenceEquals(group, modsTileGroup) && moreInfoPageText != null)
+        {
+            moreInfoPageText.gameObject.SetActive(group.Values.Length > 0);
+            moreInfoPageText.text = multiPage
                 ? (group.PageIndex + 1) + " / " + pageCount
                 : group.Values.Length > 0 ? "1 / 1" : "0 / 0";
         }
@@ -427,8 +441,15 @@ public partial class Main
                 SetCheckerTileWidth(group, i, CheckerTileDefaultWidth);
                 if (group.Texts[i] != null)
                 {
+                    group.Texts[i].richText = true;
                     group.Texts[i].text = ShortTileName(group.Values[valueIndex]);
                     group.Texts[i].alpha = 1f;
+                    if (string.Equals(group.TitleName, "ModsTitle", StringComparison.OrdinalIgnoreCase))
+                    {
+                        group.Texts[i].fontSize = 2.55f;
+                        group.Texts[i].fontStyle = FontStyles.Bold;
+                        group.Texts[i].color = Color.white;
+                    }
                 }
             }
             else
@@ -465,9 +486,16 @@ public partial class Main
         if (group.Texts[tileSlot] != null)
         {
             group.Texts[tileSlot].alpha = 1f;
+            group.Texts[tileSlot].richText = true;
             group.Texts[tileSlot].text = group.Values[valueIndex];
             group.Texts[tileSlot].enableWordWrapping = true;
             group.Texts[tileSlot].overflowMode = TextOverflowModes.Overflow;
+            if (string.Equals(group.TitleName, "ModsTitle", StringComparison.OrdinalIgnoreCase))
+            {
+                group.Texts[tileSlot].fontSize = 3.05f;
+                group.Texts[tileSlot].fontStyle = FontStyles.Bold;
+                group.Texts[tileSlot].color = Color.white;
+            }
         }
 
         yield return AnimateCheckerTileWidth(group, tileSlot, GetRectWidth(group.TileRects[tileSlot]), CheckerTileExpandedWidth, CheckerTileWidthDuration, false);
@@ -795,8 +823,47 @@ public partial class Main
     {
         if (string.IsNullOrWhiteSpace(value)) return "";
         value = value.Trim();
-        return value.Length <= 22 ? value : value.Substring(0, 19) + "...";
-    }    
+        string plain = System.Text.RegularExpressions.Regex.Replace(value, "<.*?>", "");
+        if (plain.Length <= 28)
+            return value;
+        return plain.Length <= 28 ? value : plain.Substring(0, 25) + "...";
+    }
+
+    private static void StyleModTileText(TMP_Text tmp, MoreInfoModKind kind, bool focused)
+    {
+        if (tmp == null)
+            return;
+
+        tmp.richText = true;
+        tmp.enableWordWrapping = focused;
+        tmp.overflowMode = focused ? TextOverflowModes.Overflow : TextOverflowModes.Ellipsis;
+        tmp.fontSize = focused ? 3.05f : 2.55f;
+        tmp.fontStyle = FontStyles.Bold;
+        tmp.color = Color.white;
+        tmp.alpha = 1f;
+    }
+
+    private static Color GetMoreInfoKindColor(MoreInfoModKind kind)
+    {
+        switch (kind)
+        {
+            case MoreInfoModKind.Illegal: return new Color(1f, 0.33f, 0.33f, 1f);
+            case MoreInfoModKind.Untrusted: return new Color(1f, 0.62f, 0.26f, 1f);
+            case MoreInfoModKind.Legal: return new Color(0.33f, 1f, 0.53f, 1f);
+            default: return new Color(1f, 0.82f, 0.4f, 1f);
+        }
+    }
+
+    private static string GetMoreInfoKindHex(MoreInfoModKind kind)
+    {
+        switch (kind)
+        {
+            case MoreInfoModKind.Illegal: return "#FF5555";
+            case MoreInfoModKind.Untrusted: return "#FF9F43";
+            case MoreInfoModKind.Legal: return "#55FF88";
+            default: return "#FFD166";
+        }
+    }
 
     private void InitCheckerText(GameObject menuObj)
     {
@@ -831,6 +898,7 @@ public partial class Main
         InitCheckerPlatformIcons(sideTransform);
         HideCheckerMonkeBoxPermanently();
         if (dateTextComp != null) { dateTextComp.text = "Date: --/--/----"; dateTextComp.font = figtreeFont; }
+        CacheCheckerPanelTitle(sideTransform);
         if (modsCountTextComp != null) { modsCountTextComp.text = "0"; modsCountTextComp.font = figtreeFont; }
         if (cheatsCountTextComp != null) { cheatsCountTextComp.text = "0"; cheatsCountTextComp.font = figtreeFont; }
         lastCheckerPlatform = "Unknown";
@@ -847,6 +915,135 @@ public partial class Main
 
         InitNavButtons(menuObj);
         CleanupStolenCheckerNavClones(sideTransform);
+        HideShieldIcons(menuObj.transform);
+    }
+
+    private static void HideShieldIcons(Transform root)
+    {
+        if (root == null)
+            return;
+
+        Transform[] children = root.GetComponentsInChildren<Transform>(true);
+        for (int i = 0; i < children.Length; i++)
+        {
+            Transform child = children[i];
+            if (child == null)
+                continue;
+
+            string name = child.name ?? "";
+            bool isShield =
+                name.IndexOf("shield", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.Equals("ModsRating", StringComparison.OrdinalIgnoreCase) ||
+                name.IndexOf("Trust", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("Verified", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("Badge", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("Checkmark", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("CheckMark", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (!isShield)
+                continue;
+
+            if (name.IndexOf("SelectorBtn", StringComparison.OrdinalIgnoreCase) >= 0)
+                continue;
+
+            child.gameObject.SetActive(false);
+        }
+    }
+
+    private void CacheCheckerPanelTitle(Transform sideTransform)
+    {
+        if (sideTransform == null)
+            return;
+
+        TMP_Text[] allLabels = sideTransform.GetComponentsInChildren<TMP_Text>(true);
+        TMP_Text best = null;
+        for (int i = 0; i < allLabels.Length; i++)
+        {
+            TMP_Text label = allLabels[i];
+            if (label == null || string.IsNullOrWhiteSpace(label.text))
+                continue;
+
+            string text = label.text.Trim();
+            if (text.Equals("Player Checker", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("Outfit", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("Outfits", StringComparison.OrdinalIgnoreCase))
+            {
+                best = label;
+                break;
+            }
+        }
+
+        if (best == null)
+        {
+            Transform titleRoot =
+                sideTransform.Find("CheckerTitle") ??
+                FindChildByName(sideTransform, "CheckerTitle") ??
+                sideTransform.Find("InfoMain/CheckerTitle") ??
+                FindChildByName(sideTransform, "InfoMain");
+            if (titleRoot != null)
+            {
+                TMP_Text[] labels = titleRoot.GetComponentsInChildren<TMP_Text>(true);
+                for (int i = 0; i < labels.Length; i++)
+                {
+                    TMP_Text label = labels[i];
+                    if (label == null)
+                        continue;
+                    string text = (label.text ?? "").Trim();
+                    if (text.IndexOf("Checker", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        text.IndexOf("Outfit", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        best == null)
+                        best = label;
+                    if (!string.IsNullOrEmpty(text) &&
+                        text.IndexOf("Player Checker", StringComparison.OrdinalIgnoreCase) >= 0)
+                        break;
+                }
+            }
+        }
+
+        if (best == null)
+            return;
+
+        checkerPanelTitleText = best;
+        string current = (best.text ?? "").Trim();
+        if (!string.IsNullOrWhiteSpace(current) &&
+            current.IndexOf("Outfit", StringComparison.OrdinalIgnoreCase) < 0)
+            checkerPanelTitleDefault = current;
+    }
+
+    private void SetCheckerPanelTitle(string title)
+    {
+        if (menuObj == null)
+            return;
+
+        Transform side = menuObj.transform.Find("SideHolder");
+        if (side == null)
+            return;
+
+        if (checkerPanelTitleText == null)
+            CacheCheckerPanelTitle(side);
+
+        TMP_Text[] labels = side.GetComponentsInChildren<TMP_Text>(true);
+        for (int i = 0; i < labels.Length; i++)
+        {
+            TMP_Text label = labels[i];
+            if (label == null)
+                continue;
+
+            string text = (label.text ?? "").Trim();
+            bool isHeader =
+                text.Equals("Player Checker", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("Outfit", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("Outfits", StringComparison.OrdinalIgnoreCase) ||
+                label == checkerPanelTitleText;
+            if (!isHeader)
+                continue;
+
+            label.text = title;
+            checkerPanelTitleText = label;
+        }
+
+        if (checkerPanelTitleText != null)
+            checkerPanelTitleText.text = title;
     }
 
     private void ReplaceAddToSavedWithVersion(Transform sideTransform, TMP_FontAsset font)
@@ -912,7 +1109,7 @@ public partial class Main
                 text.IndexOf("Player", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 text.IndexOf("Version", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                label.text = "Version Beta 2B";
+                label.text = PadDisplayName + " " + PadVersion;
                 if (font != null)
                     label.font = font;
             }
@@ -925,7 +1122,7 @@ public partial class Main
             labelObj.transform.localPosition = Vector3.zero;
             labelObj.transform.localScale = Vector3.one * 0.01f;
             TextMeshPro tmp = labelObj.AddComponent<TextMeshPro>();
-            tmp.text = "Version 1.0.0";
+            tmp.text = PadDisplayName + " " + PadVersion;
             tmp.alignment = TextAlignmentOptions.Center;
             tmp.fontSize = 1.4f;
             tmp.color = Color.white;
@@ -1010,12 +1207,24 @@ public partial class Main
         if (cheatsTitleTransform != null)
             cheatsTitleTransform.gameObject.SetActive(false);
 
+        Transform brokenCard = sideTransform.Find("TUP_MoreInfoCard") ?? FindChildByName(sideTransform, "TUP_MoreInfoCard");
+        if (brokenCard != null)
+        {
+            Transform maybeMods = FindChildByName(brokenCard, "ModsTitle");
+            if (maybeMods != null && maybeMods.parent == brokenCard)
+                maybeMods.SetParent(sideTransform, true);
+            UnityEngine.Object.Destroy(brokenCard.gameObject);
+        }
+
         modsTitleTransform = FindChildByName(sideTransform, "ModsTitle");
         if (modsTitleTransform == null)
             return;
 
+        SanitizeModsTitleScale();
+
         modsTitleTransform.gameObject.SetActive(false);
         moreInfoVisible = false;
+        moreInfoCardRoot = null;
 
         TMP_Text[] labels = modsTitleTransform.GetComponentsInChildren<TMP_Text>(true);
         bool titled = false;
@@ -1036,7 +1245,8 @@ public partial class Main
                 text.IndexOf("CATEGORY", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 text.IndexOf("NONE", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 text.IndexOf("DETECT", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                text.IndexOf("INFO", StringComparison.OrdinalIgnoreCase) >= 0;
+                text.IndexOf("PLAYER DETAILS", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                text.IndexOf("TAP TO GO BACK", StringComparison.OrdinalIgnoreCase) >= 0;
 
             if (looksLikeTitle && !titled)
             {
@@ -1059,7 +1269,6 @@ public partial class Main
 
         if (modsTileGroup != null)
         {
-
             for (int i = 0; i < modsTileGroup.Tiles.Length; i++)
             {
                 if (modsTileGroup.Tiles[i] != null)
@@ -1068,6 +1277,26 @@ public partial class Main
 
             if (modsTileGroup.NoneTitle != null)
                 modsTileGroup.NoneTitle.SetActive(false);
+        }
+    }
+
+    private void SanitizeModsTitleScale()
+    {
+        if (modsTitleTransform == null)
+            return;
+
+        Vector3 scale = modsTitleTransform.localScale;
+        float maxAbs = Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z));
+        if (maxAbs >= 0.45f)
+        {
+            Vector3 safe = new Vector3(0.02f, 0.02f, 0.02f);
+            if (Tools.TryGetRememberedSize(modsTitleTransform, out Vector3 remembered))
+            {
+                float remMax = Mathf.Max(Mathf.Abs(remembered.x), Mathf.Abs(remembered.y), Mathf.Abs(remembered.z));
+                if (remMax > 0.0001f && remMax < 0.45f)
+                    safe = remembered;
+            }
+            modsTitleTransform.localScale = safe;
         }
     }
 
@@ -1175,6 +1404,12 @@ public partial class Main
 
         if (existing != null)
         {
+            if (existing.parent != main)
+                existing.SetParent(main, false);
+            existing.localPosition = new Vector3(0.002f, 0.012f, 0f);
+            existing.localRotation = Quaternion.identity;
+            existing.localScale = Vector3.one * 0.0085f;
+
             moreInfoBodyText = existing.GetComponent<TMP_Text>() ?? existing.GetComponentInChildren<TMP_Text>(true);
             if (moreInfoBodyText != null)
             {
@@ -1183,6 +1418,7 @@ public partial class Main
                 moreInfoBodyText.richText = true;
                 moreInfoBodyText.overflowMode = TextOverflowModes.Overflow;
                 moreInfoBodyText.alignment = TextAlignmentOptions.TopLeft;
+                moreInfoBodyText.fontSize = 1.55f;
                 moreInfoBodyText.text = "";
                 return;
             }
@@ -1257,13 +1493,25 @@ public partial class Main
             ButtonTrigger back = WireInteractive(
                 moreInfoBackArrow,
                 "MoreInfo_PageBack",
-                () => ShiftMoreInfoModsPage(-1),
+                () =>
+                {
+                    if (moreInfoModsExpanded)
+                        ShiftMoreInfoModsPage(-1);
+                    else if (modsTileGroup != null)
+                        ShiftCheckerPage(modsTileGroup, -1);
+                },
                 backCol);
             if (back != null)
             {
                 back.SkipSwitchAnimation = true;
                 back.IsToggle = false;
-                back.CustomAction = () => ShiftMoreInfoModsPage(-1);
+                back.CustomAction = () =>
+                {
+                    if (moreInfoModsExpanded)
+                        ShiftMoreInfoModsPage(-1);
+                    else if (modsTileGroup != null)
+                        ShiftCheckerPage(modsTileGroup, -1);
+                };
             }
 
             moreInfoBackArrow.gameObject.SetActive(false);
@@ -1277,13 +1525,25 @@ public partial class Main
             ButtonTrigger next = WireInteractive(
                 moreInfoNextArrow,
                 "MoreInfo_PageNext",
-                () => ShiftMoreInfoModsPage(1),
+                () =>
+                {
+                    if (moreInfoModsExpanded)
+                        ShiftMoreInfoModsPage(1);
+                    else if (modsTileGroup != null)
+                        ShiftCheckerPage(modsTileGroup, 1);
+                },
                 nextCol);
             if (next != null)
             {
                 next.SkipSwitchAnimation = true;
                 next.IsToggle = false;
-                next.CustomAction = () => ShiftMoreInfoModsPage(1);
+                next.CustomAction = () =>
+                {
+                    if (moreInfoModsExpanded)
+                        ShiftMoreInfoModsPage(1);
+                    else if (modsTileGroup != null)
+                        ShiftCheckerPage(modsTileGroup, 1);
+                };
             }
 
             moreInfoNextArrow.gameObject.SetActive(false);
@@ -1353,14 +1613,10 @@ public partial class Main
 
         if (moreInfoBodyText != null)
         {
-            moreInfoBodyText.gameObject.SetActive(true);
             moreInfoBodyText.richText = true;
+            moreInfoBodyText.gameObject.SetActive(true);
 
-            if (moreInfoModsExpanded)
-            {
-                moreInfoBodyText.text = BuildExpandedModsPageText(pageCount);
-            }
-            else
+            if (!moreInfoModsExpanded)
             {
                 int total = moreInfoModList != null ? moreInfoModList.Length : 0;
                 string platformColored = FormatMoreInfoPlatformLine(platformValue);
@@ -1375,49 +1631,110 @@ public partial class Main
                           "<color=#CBA6F7>Tap MORE INFO to open list</color>");
                 UpdateMoreInfoPlatformIcon(platformValue);
             }
+            else
+            {
+                moreInfoBodyText.text = BuildExpandedModsPageText(pageCount);
+                if (moreInfoPlatformIconImage != null)
+                    moreInfoPlatformIconImage.enabled = false;
+            }
+        }
+        else if (moreInfoModsExpanded && moreInfoPlatformIconImage != null)
+        {
+            moreInfoPlatformIconImage.enabled = false;
         }
 
         UpdateMoreInfoHeaderLabels();
-
-        bool showArrows = moreInfoModsExpanded && pageCount > 1;
-        if (moreInfoBackArrow != null)
-            moreInfoBackArrow.gameObject.SetActive(showArrows);
-        if (moreInfoNextArrow != null)
-            moreInfoNextArrow.gameObject.SetActive(showArrows);
-        if (moreInfoPageText != null)
-        {
-            moreInfoPageText.gameObject.SetActive(moreInfoModsExpanded && moreInfoModList != null && moreInfoModList.Length > 0);
-            moreInfoPageText.text = (moreInfoModsPage + 1) + " / " + pageCount;
-        }
+        ApplyMoreInfoModsTiles();
 
         if (modsCountTextComp != null)
             modsCountTextComp.text = (moreInfoModList != null ? moreInfoModList.Length : 0).ToString();
     }
 
+    private void ApplyMoreInfoModsTiles()
+    {
+        if (modsTileGroup == null)
+            return;
+
+        if (!moreInfoModsExpanded)
+        {
+            for (int i = 0; i < modsTileGroup.Tiles.Length; i++)
+            {
+                if (modsTileGroup.Tiles[i] != null)
+                    modsTileGroup.Tiles[i].SetActive(false);
+            }
+
+            if (modsTileGroup.NoneTitle != null)
+                modsTileGroup.NoneTitle.SetActive(false);
+
+            if (moreInfoBackArrow != null)
+                moreInfoBackArrow.gameObject.SetActive(false);
+            if (moreInfoNextArrow != null)
+                moreInfoNextArrow.gameObject.SetActive(false);
+            if (moreInfoPageText != null)
+                moreInfoPageText.gameObject.SetActive(false);
+            return;
+        }
+
+        for (int i = 0; i < modsTileGroup.Tiles.Length; i++)
+        {
+            if (modsTileGroup.Tiles[i] != null)
+                modsTileGroup.Tiles[i].SetActive(false);
+        }
+        if (modsTileGroup.NoneTitle != null)
+            modsTileGroup.NoneTitle.SetActive(false);
+
+        int pageCount = GetMoreInfoModsPageCount();
+        if (moreInfoBackArrow != null)
+            moreInfoBackArrow.gameObject.SetActive(pageCount > 1);
+        if (moreInfoNextArrow != null)
+            moreInfoNextArrow.gameObject.SetActive(pageCount > 1);
+        if (moreInfoPageText != null)
+        {
+            moreInfoPageText.gameObject.SetActive(true);
+            moreInfoPageText.text = (moreInfoModsPage + 1) + " / " + pageCount;
+        }
+    }
+
+    private static string FormatMoreInfoTileName(MoreInfoModEntry entry)
+    {
+        if (entry.Name == null)
+            return "";
+
+        string hex = GetMoreInfoKindHex(entry.Kind);
+        string badge = entry.Kind == MoreInfoModKind.Illegal
+            ? "ILLEGAL"
+            : entry.Kind == MoreInfoModKind.Untrusted
+                ? "WARN"
+                : entry.Kind == MoreInfoModKind.Legal
+                    ? "LEGAL"
+                    : "UNKNOWN";
+        return "<color=" + hex + "><b>" + badge + "</b></color>  <color=#F5F5F5>" +
+               EscapeTmpText(entry.Name) + "</color>";
+    }
+
     private string BuildExpandedModsPageText(int pageCount)
     {
         if (moreInfoModList == null || moreInfoModList.Length == 0)
-            return "<color=#BDBDBD>No props / mods detected</color>\n\n<color=#CBA6F7>Tap to go back</color>";
+            return "<size=120%><color=#BDBDBD>No props / mods detected</color></size>\n\n<color=#9AD7FF>Tap to go back</color>";
 
         int start = moreInfoModsPage * MoreInfoModsPerPage;
         int end = Mathf.Min(start + MoreInfoModsPerPage, moreInfoModList.Length);
-        System.Text.StringBuilder sb = new System.Text.StringBuilder(256);
-        sb.Append("<color=#CBA6F7>PROPS / MODS</color>  ")
-            .Append(moreInfoModsPage + 1).Append(" / ").Append(pageCount)
-            .Append("\n<color=#BDBDBD>Tap header to go back</color>\n")
-            .Append("<color=#55FF88>G</color> legal  <color=#FF5555>R</color> illegal  <color=#FFD166>Y</color> unknown\n\n");
+        System.Text.StringBuilder sb = new System.Text.StringBuilder(320);
+        sb.Append("<size=130%><color=#9AD7FF><b>PROPS / MODS</b></color></size>  ")
+            .Append("<color=#BDBDBD>").Append(moreInfoModsPage + 1).Append(" / ").Append(pageCount).Append("</color>")
+            .Append("\n<color=#8A8A8A>Tap header to go back</color>\n")
+            .Append("<color=#55FF88><b>LEGAL</b></color>   ")
+            .Append("<color=#FF5555><b>ILLEGAL</b></color>   ")
+            .Append("<color=#FF9F43><b>WARN</b></color>   ")
+            .Append("<color=#FFD166><b>UNKNOWN</b></color>\n\n");
 
         for (int i = start; i < end; i++)
         {
             MoreInfoModEntry entry = moreInfoModList[i];
-            string color = entry.Kind == MoreInfoModKind.Illegal
-                ? "#FF5555"
-                : entry.Kind == MoreInfoModKind.Legal
-                    ? "#55FF88"
-                    : "#FFD166";
-            sb.Append("<color=").Append(color).Append(">• ")
+            string color = GetMoreInfoKindHex(entry.Kind);
+            sb.Append("<size=115%><color=").Append(color).Append("><b>• ")
                 .Append(EscapeTmpText(entry.Name))
-                .Append("</color>\n");
+                .Append("</b></color></size>\n");
         }
 
         return sb.ToString().TrimEnd();
@@ -1444,6 +1761,7 @@ public partial class Main
                 label.text = moreInfoModsExpanded ? "MODS" : "MORE INFO";
             }
             else if (text.Equals("PLAYER DETAILS", StringComparison.OrdinalIgnoreCase) ||
+                     text.Equals("TAP FOR MODS", StringComparison.OrdinalIgnoreCase) ||
                      text.IndexOf("TAP", StringComparison.OrdinalIgnoreCase) >= 0 ||
                      text.IndexOf("BACK", StringComparison.OrdinalIgnoreCase) >= 0 ||
                      text.IndexOf("DETAIL", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -1473,12 +1791,20 @@ public partial class Main
 
         if (visible)
         {
+            SanitizeModsTitleScale();
             modsTitleTransform.gameObject.SetActive(true);
-            Vector3 remembered = Tools.GetRememberedSize(modsTitleTransform);
-            if (remembered.sqrMagnitude > 0.0001f)
-                modsTitleTransform.localScale = remembered;
+            if (Tools.TryGetRememberedSize(modsTitleTransform, out Vector3 remembered))
+            {
+                float remMax = Mathf.Max(Mathf.Abs(remembered.x), Mathf.Abs(remembered.y), Mathf.Abs(remembered.z));
+                if (remMax > 0.0001f && remMax < 0.45f)
+                    modsTitleTransform.localScale = remembered;
+            }
             else if (modsTitleTransform.localScale.sqrMagnitude < 0.0001f)
-                modsTitleTransform.localScale = Vector3.one;
+            {
+                modsTitleTransform.localScale = new Vector3(0.02f, 0.02f, 0.02f);
+            }
+
+            SanitizeModsTitleScale();
 
             if (!alreadyOpen)
             {
@@ -1509,7 +1835,10 @@ public partial class Main
             if (modsCountTextComp != null)
                 modsCountTextComp.text = "0";
             if (moreInfoBodyText != null)
+            {
                 moreInfoBodyText.text = "";
+                moreInfoBodyText.gameObject.SetActive(false);
+            }
             if (moreInfoBackArrow != null)
                 moreInfoBackArrow.gameObject.SetActive(false);
             if (moreInfoNextArrow != null)
@@ -1561,7 +1890,13 @@ public partial class Main
             legalList.Length + illegalList.Length + unknownList.Length + 4);
 
         for (int i = 0; i < illegalList.Length; i++)
-            modEntries.Add(new MoreInfoModEntry(illegalList[i], MoreInfoModKind.Illegal));
+        {
+            string name = illegalList[i];
+            if (name.StartsWith("Untrusted:", StringComparison.OrdinalIgnoreCase))
+                modEntries.Add(new MoreInfoModEntry(name.Substring("Untrusted:".Length).Trim(), MoreInfoModKind.Untrusted));
+            else
+                modEntries.Add(new MoreInfoModEntry(name, MoreInfoModKind.Illegal));
+        }
         for (int i = 0; i < legalList.Length; i++)
             modEntries.Add(new MoreInfoModEntry(legalList[i], MoreInfoModKind.Legal));
         for (int i = 0; i < unknownList.Length; i++)
@@ -1574,18 +1909,6 @@ public partial class Main
         moreInfoModList = modEntries.ToArray();
         int pageCount = GetMoreInfoModsPageCount();
         moreInfoModsPage = Mathf.Clamp(moreInfoModsPage, 0, pageCount - 1);
-
-        if (modsTileGroup != null)
-        {
-            for (int i = 0; i < modsTileGroup.Tiles.Length; i++)
-            {
-                if (modsTileGroup.Tiles[i] != null)
-                    modsTileGroup.Tiles[i].SetActive(false);
-            }
-
-            if (modsTileGroup.NoneTitle != null)
-                modsTileGroup.NoneTitle.SetActive(false);
-        }
 
         UpdateMoreInfoBodyAndChrome();
     }
@@ -1785,18 +2108,25 @@ public partial class Main
                     continue;
 
                 string name = sr.gameObject.name ?? "";
-                if (platformSpriteSteam == null && name.IndexOf("Steam", StringComparison.OrdinalIgnoreCase) >= 0)
+                string spriteName = sr.sprite != null ? (sr.sprite.name ?? "") : "";
+                string combined = name + " " + spriteName;
+                if (platformSpriteSteam == null && combined.IndexOf("Steam", StringComparison.OrdinalIgnoreCase) >= 0)
                     platformSpriteSteam = sr.sprite;
                 else if (platformSpriteMeta == null &&
-                         (name.IndexOf("Meta", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                          name.IndexOf("Quest", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                          name.IndexOf("Standalone", StringComparison.OrdinalIgnoreCase) >= 0))
+                         (combined.IndexOf("Meta", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          combined.IndexOf("Quest", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          combined.IndexOf("Standalone", StringComparison.OrdinalIgnoreCase) >= 0))
                     platformSpriteMeta = sr.sprite;
                 else if (platformSpritePc == null &&
-                         (name.IndexOf("PC", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                          name.IndexOf("Oculus", StringComparison.OrdinalIgnoreCase) >= 0))
+                         (combined.IndexOf("IconPC", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          combined.IndexOf("IconPc", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          combined.IndexOf("OculusPC", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          (combined.IndexOf("Oculus", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                           combined.IndexOf("Quest", StringComparison.OrdinalIgnoreCase) < 0)))
                     platformSpritePc = sr.sprite;
-                else if (platformSpriteUnknown == null && name.IndexOf("Unknown", StringComparison.OrdinalIgnoreCase) >= 0)
+                else if (platformSpriteUnknown == null &&
+                         (combined.IndexOf("Unknown", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          combined.IndexOf("Question", StringComparison.OrdinalIgnoreCase) >= 0))
                     platformSpriteUnknown = sr.sprite;
             }
 
@@ -1808,18 +2138,25 @@ public partial class Main
                     continue;
 
                 string name = img.gameObject.name ?? "";
-                if (platformSpriteSteam == null && name.IndexOf("Steam", StringComparison.OrdinalIgnoreCase) >= 0)
+                string spriteName = img.sprite != null ? (img.sprite.name ?? "") : "";
+                string combined = name + " " + spriteName;
+                if (platformSpriteSteam == null && combined.IndexOf("Steam", StringComparison.OrdinalIgnoreCase) >= 0)
                     platformSpriteSteam = img.sprite;
                 else if (platformSpriteMeta == null &&
-                         (name.IndexOf("Meta", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                          name.IndexOf("Quest", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                          name.IndexOf("Standalone", StringComparison.OrdinalIgnoreCase) >= 0))
+                         (combined.IndexOf("Meta", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          combined.IndexOf("Quest", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          combined.IndexOf("Standalone", StringComparison.OrdinalIgnoreCase) >= 0))
                     platformSpriteMeta = img.sprite;
                 else if (platformSpritePc == null &&
-                         (name.IndexOf("PC", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                          name.IndexOf("Oculus", StringComparison.OrdinalIgnoreCase) >= 0))
+                         (combined.IndexOf("IconPC", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          combined.IndexOf("IconPc", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          combined.IndexOf("OculusPC", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          (combined.IndexOf("Oculus", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                           combined.IndexOf("Quest", StringComparison.OrdinalIgnoreCase) < 0)))
                     platformSpritePc = img.sprite;
-                else if (platformSpriteUnknown == null && name.IndexOf("Unknown", StringComparison.OrdinalIgnoreCase) >= 0)
+                else if (platformSpriteUnknown == null &&
+                         (combined.IndexOf("Unknown", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          combined.IndexOf("Question", StringComparison.OrdinalIgnoreCase) >= 0))
                     platformSpriteUnknown = img.sprite;
             }
         }
@@ -1835,7 +2172,8 @@ public partial class Main
         switch (platform)
         {
             case "Steam":
-                return platformSpriteSteam != null ? platformSpriteSteam : platformSpritePc;
+                return platformSpriteSteam != null ? platformSpriteSteam
+                    : (platformSpritePc != null ? platformSpritePc : platformSpriteMeta);
             case "PC":
             case "Oculus PC":
             case "Oculus":

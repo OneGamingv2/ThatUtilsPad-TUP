@@ -1,0 +1,56 @@
+ThatUtilsPad Free Performance Update
+======================================
+
+This update focuses on smoother gameplay and less hitching while the pad is open or closed.
+
+
+What’s improved
+---------------
+
+Menu only works when you need it
+• Pad networking runs only while the menu is open
+• Player / outfit previews update only on Select User and Cosmetics
+• Other tabs skip that extra work so the game stays lighter
+
+Smarter Auto Scan
+• Scans the lobby less often
+• Skips players who were already scanned
+• Full lobby rescans happen far less often
+• Results are cached so the same checks aren’t repeated every tick
+
+Quieter background updates
+• Region player counts refresh less often
+• Nametag info and mod checks are rate-limited
+• Selected-player checker details refresh on a timer, not every frame
+
+Faster room hopping
+• Leave → join no longer sits on a long fixed delay
+• The pad waits only until you’re actually out of the room, then joins
+• Lobby hop, join random, and room-code search all use this smoother path
+
+Smoother UI
+• Outfit / player previews build across multiple frames instead of one spike
+• Preview geometry is capped so the UI monke doesn’t copy the whole world
+• Category buttons still appear one-by-one to avoid a single hitch when switching tabs
+
+Leaner Free build
+• Free does not run paid Camera, Spotify, or Anticheat systems
+• Less always-on HUD and update cost than the full paid feature set
+
+
+What you’ll notice
+------------------
+• Less stutter when opening the pad or changing tabs
+• Quicker, cleaner leave / join / lobby hop
+• Lower overhead while Auto Scan and nametags are on
+• Outfit preview that stays usable without tanking frames
+
+
+Notes
+-----
+• Disconnect / “coroutine continue” messages in logs can still appear from the game’s networking during leave  that’s normal Photon teardown, not a pad hang.
+• Running without a headset can still show OpenVR / SteamVR warnings; those are unrelated to this performance work.
+
+
+Enjoy the smoother Free pad.
+- ThatUtilsPad

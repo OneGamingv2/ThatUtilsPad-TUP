@@ -204,8 +204,6 @@ externalguiserver
 iimenu.resources.client
 fly toward gun
 hidden on camera
-platform gravity
-non-sticky platforms
 apreds
 apreds ui
 velmax
@@ -493,7 +491,6 @@ NO CLIP
 WALL WALK
 AIRWALK
 LONG ARMS
-PLATFORMS
 BAN GUN
 KICK GUN
 SLOW ALL
@@ -609,7 +606,6 @@ TEMPLATE BAN
 TEMPLATE KICK
 TEMPLATE FREEZE
 TEMPLATE LONG ARMS
-TEMPLATE PLATFORMS
 EXECUTOR
 INJECTOR
 UNLOCKER
@@ -718,7 +714,6 @@ CRYSTALMENU
 CRYSTAL MENU BUILD
 FLY TOWARDS GUN
 HIDDEN ON CAMERA
-NON-STICKY PLATFORMS
 PLATFORM GRAVITY
 CHANGE PLATFORM TYPE
 CHANGE PLATFORM SHAPE
@@ -938,6 +933,9 @@ BarkVersion
 BarkPlayerSize
 Juul
 ThatUtilsPad
+ThatUtilsPad Free
+ThatUtilsPadFree
+ThatUtilsPadFreeGui
 
 Illegal mod hints (mods tab red flag)
 
@@ -950,6 +948,9 @@ WalkSimulator
 genesis
 DTASLOI
 Elixir
+
+Untrusted mod hints
+
 fps-nametags for zlothy
 FPS-Nametages for Zlothy
 ki.gui

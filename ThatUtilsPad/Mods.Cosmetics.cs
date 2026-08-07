@@ -55,29 +55,7 @@ public static partial class Mods
 
     private static void RotateOutfits()
     {
-        var controller = CosmeticsController.instance;
-        if (controller == null)
-        {
-            return;
-        }
-
-        FieldInfo savedField = controller.GetType().GetField(
-            "savedOutfits",
-            BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance
-        );
-
-        if (savedField == null)
-        {
-            Debug.LogError("[TUP] 'savedOutfits' field not found");
-            return;
-        }
-
-        var outfits = savedField.GetValue(controller) as Array;
-        if (outfits == null || outfits.Length == 0)
-            return;
-
-        currentOutfitIndex = (currentOutfitIndex + 1) % outfits.Length;
-        controller.LoadSavedOutfit(currentOutfitIndex);
+        BrowseOutfit(1);
     }
 
     private static int NextOutfitNumber()
@@ -93,56 +71,162 @@ public static partial class Mods
 
         int n = NextOutfitNumber();
         if (n < 0) return;
-        int slotIdx = currentOutfitIndex;
+        int slotIdx = browsingOutfitIndex;
 
         savedOutfitSlots[n] = slotIdx;
-        Actions["Cosmetics"].Actions["Saved Outfit #" + n] = new ModAction(() => LoadOutfitSlot(slotIdx));
-
         SaveButtonStates();
-        Main.Instance?.AppendOutfitButton(n);
-
+        Main.Instance?.RefreshOutfitPreviewDelayed();
     }
 
     private static void LoadOutfitSlot(int index)
     {
-        var controller = CosmeticsController.instance;
+        object controller = GameTypeCloak.CosmeticsInstance();
         if (controller == null) return;
 
-        controller.LoadSavedOutfit(index);
+        int count = GetOutfitCount();
+        if (count <= 0) return;
+        index = ((index % count) + count) % count;
+
+        GameTypeCloak.CosmeticsLoadSavedOutfit(controller, index);
+        browsingOutfitIndex = index;
         currentOutfitIndex = index;
+        Main.Instance?.RefreshOutfitPreviewDelayed();
     }
 
-    public static void InitOutfitSlotActions()
-    {
-        int count = 5;
+    private static int browsingOutfitIndex;
+    private static int equippedOutfitIndex = -1;
 
-        var controller = CosmeticsController.instance;
+    public static int GetCurrentOutfitIndex() => browsingOutfitIndex;
+
+    public static int GetOutfitCount()
+    {
+        int count = 10;
+        object controller = GameTypeCloak.CosmeticsInstance();
         if (controller != null)
         {
-            FieldInfo savedField = controller.GetType().GetField(
-                "savedOutfits",
-                BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance
-            );
-            if (savedField != null)
-            {
-                var outfits = savedField.GetValue(controller) as Array;
-                if (outfits != null && outfits.Length > 0)
-                    count = outfits.Length;
-            }
+            Array outfits = GameTypeCloak.CosmeticsSavedOutfits(controller);
+            if (outfits != null && outfits.Length > 0)
+                count = Mathf.Max(outfits.Length, 10);
+        }
+        else if (savedOutfitSlots.Count > 0)
+        {
+            count = Mathf.Max(savedOutfitSlots.Count, 10);
         }
 
-        Actions["Cosmetics"].Actions.Clear();
-        Actions["Cosmetics"].Actions["Rotate Outfit"] = new ModAction(RotateOutfits, false);
+        return count;
+    }
+
+    public static string GetBrowsingOutfitLabel()
+        => "Outfit #" + (browsingOutfitIndex + 1);
+
+    public static string GetOutfitDotsLabel()
+    {
+        int count = Mathf.Clamp(GetOutfitCount(), 1, 10);
+        int index = Mathf.Clamp(browsingOutfitIndex, 0, count - 1);
+        var chars = new char[count * 2 - 1];
         for (int i = 0; i < count; i++)
         {
-            int slot = i;
-            int n    = i + 1;
-            Actions["Cosmetics"].Actions["Saved Outfit #" + n] = new ModAction(() => LoadOutfitSlot(slot));
+            chars[i * 2] = i == index ? '\u25CF' : '\u25CB'; // ● / ○
+            if (i * 2 + 1 < chars.Length)
+                chars[i * 2 + 1] = ' ';
         }
+        return new string(chars);
+    }
+
+    public static bool IsBrowsingOutfitEquipped()
+        => equippedOutfitIndex >= 0 && equippedOutfitIndex == browsingOutfitIndex;
+
+    public static void BrowseOutfit(int delta)
+    {
+        int count = GetOutfitCount();
+        if (count <= 0)
+            return;
+
+        browsingOutfitIndex = (browsingOutfitIndex + delta) % count;
+        if (browsingOutfitIndex < 0)
+            browsingOutfitIndex += count;
+
+        PreviewBrowsingOutfit();
+    }
+
+    public static void BrowseToOutfit(int index)
+    {
+        int count = GetOutfitCount();
+        if (count <= 0)
+            return;
+        browsingOutfitIndex = ((index % count) + count) % count;
+        PreviewBrowsingOutfit();
+    }
+
+    private static void PreviewBrowsingOutfit()
+    {
+        object controller = GameTypeCloak.CosmeticsInstance();
+        if (controller == null)
+        {
+            Main.Instance?.OnOutfitCarouselChanged();
+            return;
+        }
+
+        GameTypeCloak.CosmeticsLoadSavedOutfit(controller, browsingOutfitIndex);
+        currentOutfitIndex = browsingOutfitIndex;
+        Main.Instance?.RefreshOutfitPreviewDelayed();
+        Main.Instance?.OnOutfitCarouselChanged();
+    }
+
+    private static void EquipBrowsingOutfit()
+    {
+        object controller = GameTypeCloak.CosmeticsInstance();
+        if (controller == null)
+        {
+            ShowNotification("Cosmetics unavailable", NotificationDefaultDuration);
+            return;
+        }
+
+        GameTypeCloak.CosmeticsLoadSavedOutfit(controller, browsingOutfitIndex);
+        currentOutfitIndex = browsingOutfitIndex;
+        equippedOutfitIndex = browsingOutfitIndex;
+        ShowNotification("Equipped " + GetBrowsingOutfitLabel(), NotificationDefaultDuration);
+        Main.Instance?.RefreshOutfitPreviewDelayed();
+        Main.Instance?.OnOutfitCarouselChanged();
+    }
+
+    private static void PreviousOutfit() => BrowseOutfit(-1);
+    private static void NextOutfit() => BrowseOutfit(1);
+
+    public static VRRig GetLocalVRRig()
+    {
+        if (GorillaTagger.Instance != null && GorillaTagger.Instance.offlineVRRig != null)
+            return GorillaTagger.Instance.offlineVRRig;
+
+        foreach (VRRig rig in VRRigCache.ActiveRigs)
+        {
+            if (rig != null && rig.isLocal && rig.gameObject.activeInHierarchy)
+                return rig;
+        }
+
+        return null;
+    }
+
+    public static void InitOutfitSlotCaches()
+    {
+        int count = GetOutfitCount();
+        browsingOutfitIndex = Mathf.Clamp(browsingOutfitIndex, 0, Mathf.Max(0, count - 1));
+        if (equippedOutfitIndex < 0)
+            equippedOutfitIndex = browsingOutfitIndex;
+
+        Actions["Cosmetics"].Actions.Clear();
+        Actions["Cosmetics"].Actions["Previous"] = new ModAction(PreviousOutfit, false);
+        Actions["Cosmetics"].Actions["Next"] = new ModAction(NextOutfit, false);
+        Actions["Cosmetics"].Actions["Equip Outfit"] = new ModAction(EquipBrowsingOutfit, false);
     }
 
     public static string GetOutfitDisplayName(int n)
-        => outfitSlotNames.TryGetValue(n, out string name) ? name : "Outfit Slot #" + n;
+    {
+        if (outfitSlotNames.TryGetValue(n, out string name))
+            return name;
+        bool equipped = equippedOutfitIndex + 1 == n;
+        return equipped ? "Outfit #" + n + "  (on)" : "Outfit #" + n;
+    }
 
     public static void StartRename(int outfitN, TMP_Text label, GameObject keyboard)
     {
@@ -180,6 +264,12 @@ public static partial class Mods
     public static void ConfirmRename()
     {
         if (!isRenaming) return;
+        if (isRoomCodeSearch)
+        {
+            ConfirmRoomCodeJoin();
+            return;
+        }
+
         if (currentRenameText.Length > 0)
         {
             outfitSlotNames[renamingOutfitN] = currentRenameText;
@@ -196,6 +286,12 @@ public static partial class Mods
     public static void CancelRename()
     {
         if (!isRenaming) return;
+        if (isRoomCodeSearch)
+        {
+            CloseRoomCodeSearchUi();
+            return;
+        }
+
         if (renamingLabel != null) renamingLabel.text = originalLabel;
         CloseRename();
     }
@@ -216,8 +312,8 @@ public static partial class Mods
     {
         savedOutfitSlots.Remove(n);
         outfitSlotNames.Remove(n);
-        Actions["Cosmetics"].Actions.Remove("Saved Outfit #" + n);
         SaveButtonStates();
         Main.Instance?.RefreshCurrentPage();
+        Main.Instance?.ApplyOutfitCarouselSideUi();
     }
 }

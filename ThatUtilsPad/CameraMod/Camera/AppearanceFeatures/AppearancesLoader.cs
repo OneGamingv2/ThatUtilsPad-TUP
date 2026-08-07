@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace CameraMod.Camera.AppearanceFeatures
@@ -11,8 +11,8 @@ namespace CameraMod.Camera.AppearanceFeatures
         private static void Load()
         {
             if (isLoaded) return;
-            appearancePrefabs["Default"] = ProceduralGui.BuildAppearance("Default", new Color(0.11f, 0.12f, 0.14f));
-            appearancePrefabs["Purple"] = ProceduralGui.BuildAppearance("Purple", new Color(0.14f, 0.42f, 0.46f));
+            appearancePrefabs["Default"] = ProceduralGui.BuildAppearance("Default", new Color(0.035f, 0.035f, 0.055f));
+            appearancePrefabs["Purple"] = ProceduralGui.BuildAppearance("Purple", new Color(0.22f, 0.14f, 0.32f));
             foreach (GameObject prefab in appearancePrefabs.Values)
                 prefab.SetActive(false);
             isLoaded = true;

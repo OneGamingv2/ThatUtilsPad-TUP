@@ -20,7 +20,7 @@ public static partial class Mods
     // Free aliases so free clients can see paid pads / older free builds stay visible.
     public const string PadNetworkHandKeyFree = "ThatUtilsPadFree";
     public const string PadNetworkGuiKeyFree = "ThatUtilsPadFreeGui";
-    public const string PadNetworkVersion = "1.0.0";
+    public const string PadNetworkVersion = "1.0.2";
 
     private sealed class RemotePadView
     {

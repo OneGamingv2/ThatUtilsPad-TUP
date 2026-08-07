@@ -23,14 +23,21 @@ public partial class Main
     private Transform playerModelPreviewRoot;
     private VRRig playerModelPreviewSourceRig;
     private Coroutine playerModelPreviewBuildRoutine;
+    private Coroutine outfitPreviewRefreshRoutine;
     private int playerModelBuildVersion;
     private bool playerModelPreviewBuildInProgress;
+    private bool outfitPreviewMode;
     private Vector3 playerModelPreviewMeshOriginOffset;
     private const int PlayerModelPreviewRendererLimit = 28;
+    private Transform volumeControlsRoot;
 
     private static readonly Vector3 PlayerModelPreviewLocalPosition = new Vector3(0f, -0.01f, -0.03f);
     private static readonly Vector3 PlayerModelPreviewLocalEuler = new Vector3(0f, 180f, 0f);
     private static readonly Vector3 PlayerModelPreviewLocalScale = new Vector3(0.09f, 0.09f, 0.09f);
+    private const float PlayerModelPreviewTargetSize = 0.17f;
+    private const float OutfitOverviewTargetSize = 0.22f;
+    private float playerModelPreviewCachedScale = 0.09f;
+    private bool playerModelPreviewScaleReady;
 
     private void CachePlayerModelPreviewRoot()
     {
@@ -53,6 +60,92 @@ public partial class Main
         playerModelPreviewRoot = checkerMonke != null ? checkerMonke : side;
     }
 
+    private Vector3 GetCheckerMonkeSlotCenterLocal()
+    {
+        if (playerModelPreviewRoot == null)
+            return Vector3.zero;
+
+        Transform monkeBase =
+            playerModelPreviewRoot.Find("MonkeBase") ??
+            FindChildByName(playerModelPreviewRoot, "MonkeBase");
+        if (monkeBase != null)
+            return monkeBase.localPosition;
+
+        Transform monkeColor =
+            playerModelPreviewRoot.Find("MonkeColor") ??
+            FindChildByName(playerModelPreviewRoot, "MonkeColor");
+        if (monkeColor != null)
+            return monkeColor.localPosition;
+
+        return Vector3.zero;
+    }
+
+    private void KeepPreviewPoseAnchored()
+    {
+        if (playerModelPreviewObj == null)
+            return;
+
+        CachePlayerModelPreviewRoot();
+        Transform parent = playerModelPreviewRoot != null ? playerModelPreviewRoot : menuObj != null ? menuObj.transform : null;
+        Transform t = playerModelPreviewObj.transform;
+        if (parent != null && t.parent != parent)
+            t.SetParent(parent, false);
+
+        t.localPosition = PlayerModelPreviewLocalPosition;
+        t.localRotation = Quaternion.Euler(PlayerModelPreviewLocalEuler);
+        float fitted = playerModelPreviewScaleReady
+            ? playerModelPreviewCachedScale
+            : FitPreviewScaleToSlot();
+        playerModelPreviewCachedScale = fitted;
+        playerModelPreviewScaleReady = true;
+        t.localScale = new Vector3(fitted, fitted, fitted);
+    }
+
+    private float FitPreviewScaleToSlot()
+    {
+        if (playerModelPreviewObj == null)
+            return 0.08f;
+
+        bool outfitPage = outfitPreviewMode || string.Equals(currentCategory, "Cosmetics", StringComparison.OrdinalIgnoreCase);
+        float targetSize = outfitPage ? OutfitOverviewTargetSize : PlayerModelPreviewTargetSize;
+        float minScale = outfitPage ? 0.08f : 0.06f;
+        float maxScale = outfitPage ? 0.32f : 0.28f;
+
+        Renderer[] renderers = playerModelPreviewObj.GetComponentsInChildren<Renderer>(true);
+        if (renderers == null || renderers.Length == 0)
+            return outfitPage ? 0.12f : 0.08f;
+
+        Bounds? combined = null;
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer r = renderers[i];
+            if (r == null || !r.enabled)
+                continue;
+            if (combined == null)
+                combined = r.bounds;
+            else
+            {
+                Bounds b = combined.Value;
+                b.Encapsulate(r.bounds);
+                combined = b;
+            }
+        }
+
+        if (combined == null)
+            return outfitPage ? 0.12f : 0.08f;
+
+        Transform parent = playerModelPreviewObj.transform.parent;
+        float parentLossy = parent != null
+            ? Mathf.Max(Mathf.Abs(parent.lossyScale.x), 0.0001f)
+            : 1f;
+        float worldMax = Mathf.Max(combined.Value.size.x, combined.Value.size.y, combined.Value.size.z);
+        float localMaxAtUnitScale = worldMax / parentLossy;
+        if (localMaxAtUnitScale < 0.0001f)
+            return outfitPage ? 0.12f : 0.08f;
+
+        return Mathf.Clamp(targetSize / localMaxAtUnitScale, minScale, maxScale);
+    }
+
     public void StartPlayerModelPreview(VRRig rig)
     {
         if (rig == null || !rig.gameObject.activeInHierarchy)
@@ -71,6 +164,183 @@ public partial class Main
         playerModelPreviewBuildRoutine = StartCoroutine(BuildPlayerModelPreviewOverFrames(rig, playerModelBuildVersion));
     }
 
+    public void EnterOutfitPreviewMode()
+    {
+        outfitPreviewMode = true;
+        Mods.BrowseToOutfit(Mods.GetCurrentOutfitIndex());
+        ApplyOutfitCarouselSideUi();
+        RefreshOutfitPreviewDelayed();
+        if (outfitTitleEnforceRoutine != null)
+            StopCoroutine(outfitTitleEnforceRoutine);
+        outfitTitleEnforceRoutine = StartCoroutine(EnforceOutfitTitleForAMoment());
+    }
+
+    private Coroutine outfitTitleEnforceRoutine;
+
+    private IEnumerator EnforceOutfitTitleForAMoment()
+    {
+        for (int i = 0; i < 8; i++)
+        {
+            if (!outfitPreviewMode || currentCategory != "Cosmetics")
+                break;
+            SetCheckerPanelTitle("Outfit");
+            ApplyOutfitCarouselSideUi();
+            yield return null;
+        }
+        outfitTitleEnforceRoutine = null;
+    }
+
+    public void ExitOutfitPreviewMode()
+    {
+        if (!outfitPreviewMode && currentCategory != "Cosmetics")
+        {
+            if (checkerPanelTitleText != null &&
+                string.Equals(checkerPanelTitleText.text, "Outfit", StringComparison.OrdinalIgnoreCase))
+                RestorePlayerCheckerSideUiFromOutfitMode();
+            return;
+        }
+
+        outfitPreviewMode = false;
+        if (outfitPreviewRefreshRoutine != null)
+        {
+            StopCoroutine(outfitPreviewRefreshRoutine);
+            outfitPreviewRefreshRoutine = null;
+        }
+        if (outfitTitleEnforceRoutine != null)
+        {
+            StopCoroutine(outfitTitleEnforceRoutine);
+            outfitTitleEnforceRoutine = null;
+        }
+
+        RestorePlayerCheckerSideUiFromOutfitMode();
+        if (currentCategory != "SelectUser" || !Mods.HasSelectedPlayer())
+            DestroyPlayerModelPreview();
+    }
+
+    public void ForceCloseOutfitPreviewMode()
+    {
+        outfitPreviewMode = false;
+        if (outfitPreviewRefreshRoutine != null)
+        {
+            StopCoroutine(outfitPreviewRefreshRoutine);
+            outfitPreviewRefreshRoutine = null;
+        }
+        if (outfitTitleEnforceRoutine != null)
+        {
+            StopCoroutine(outfitTitleEnforceRoutine);
+            outfitTitleEnforceRoutine = null;
+        }
+        RestorePlayerCheckerSideUiFromOutfitMode();
+        DestroyPlayerModelPreview();
+    }
+
+    public void RefreshOutfitPreviewDelayed()
+    {
+        if (!isMenuOpened || currentCategory != "Cosmetics")
+            return;
+
+        if (outfitPreviewRefreshRoutine != null)
+            StopCoroutine(outfitPreviewRefreshRoutine);
+        outfitPreviewRefreshRoutine = StartCoroutine(RefreshOutfitPreviewAfterCosmeticsApply());
+    }
+
+    private IEnumerator RefreshOutfitPreviewAfterCosmeticsApply()
+    {
+        yield return null;
+        yield return null;
+        yield return new WaitForSeconds(0.12f);
+
+        if (!isMenuOpened || currentCategory != "Cosmetics")
+        {
+            outfitPreviewRefreshRoutine = null;
+            yield break;
+        }
+
+        VRRig localRig = Mods.GetLocalVRRig();
+        if (localRig != null)
+            StartPlayerModelPreview(localRig);
+        ApplyOutfitCarouselSideUi();
+        outfitPreviewRefreshRoutine = null;
+    }
+
+    public void ApplyOutfitCarouselSideUi()
+    {
+        if (!outfitPreviewMode && currentCategory != "Cosmetics")
+            return;
+
+        SetCheckerPanelTitle("Outfit");
+        if (nameTextComp != null)
+            nameTextComp.text = Mods.GetBrowsingOutfitLabel();
+        if (fpsPingTextComp != null)
+        {
+            MakeCheckerTextShow(fpsPingTextComp);
+            fpsPingTextComp.text = Mods.GetOutfitDotsLabel();
+        }
+        if (platformTextComp != null)
+            platformTextComp.text = Mods.IsBrowsingOutfitEquipped() ? "Equipped" : "Preview";
+        if (dateTextComp != null)
+            dateTextComp.text = Mods.IsBrowsingOutfitEquipped()
+                ? "This look is on"
+                : "Equip to wear this look";
+        UpdateCheckerPlatformIcon("Unknown");
+        SetVolumeControlsVisible(false);
+    }
+
+    private void ApplyOutfitPreviewSideUi()
+    {
+        ApplyOutfitCarouselSideUi();
+    }
+
+    private void RestorePlayerCheckerSideUiFromOutfitMode()
+    {
+        SetCheckerPanelTitle(string.IsNullOrEmpty(checkerPanelTitleDefault) ? "Player Checker" : checkerPanelTitleDefault);
+        SetVolumeControlsVisible(true);
+        if (currentCategory == "SelectUser" && Mods.HasSelectedPlayer())
+            return;
+        ClearCheckerSelectionUiKeepPreview(false);
+        SetMoreInfoVisible(false);
+    }
+
+    private void ClearCheckerSelectionUiKeepPreview(bool destroyPreview)
+    {
+        lastCheckerName = "-----";
+        lastCheckerFpsPing = "--Hz \u2022 --Ms";
+        lastCheckerPlatform = "Unknown";
+        lastCheckerDate = "Date: --/--/----";
+        lastCheckerColorStr = "--";
+        lastCheckerLegalMods = "None";
+        lastCheckerIllegalMods = "None";
+        lastCheckerUnknownPropList = Array.Empty<string>();
+        hasLastCheckerColor = false;
+        moreInfoModList = Array.Empty<MoreInfoModEntry>();
+        moreInfoModsPage = 0;
+        moreInfoModsExpanded = false;
+        if (nameTextComp != null) nameTextComp.text = lastCheckerName;
+        if (fpsPingTextComp != null) { MakeCheckerTextShow(fpsPingTextComp); fpsPingTextComp.text = lastCheckerFpsPing; }
+        if (platformTextComp != null) platformTextComp.text = "Platform";
+        UpdateCheckerPlatformIcon("Unknown");
+        if (dateTextComp != null) dateTextComp.text = lastCheckerDate;
+        if (destroyPreview)
+            DestroyPlayerModelPreview();
+    }
+
+    private void SetVolumeControlsVisible(bool visible)
+    {
+        if (volumeControlsRoot == null && menuObj != null)
+        {
+            Transform side = menuObj.transform.Find("SideHolder");
+            if (side != null)
+            {
+                volumeControlsRoot =
+                    side.Find("VolumeControls") ??
+                    FindChildByName(side, "VolumeControls");
+            }
+        }
+
+        if (volumeControlsRoot != null)
+            volumeControlsRoot.gameObject.SetActive(visible);
+    }
+
     public void DestroyPlayerModelPreview()
     {
         playerModelBuildVersion++;
@@ -85,6 +355,8 @@ public partial class Main
         playerModelPreviewBindings.Clear();
         playerModelPreviewSourceRig = null;
         playerModelPreviewMeshOriginOffset = Vector3.zero;
+        playerModelPreviewScaleReady = false;
+        playerModelPreviewCachedScale = 0.1f;
 
         if (playerModelPreviewObj != null)
         {
@@ -115,15 +387,40 @@ public partial class Main
             if (child == null)
                 continue;
 
+            if (playerModelPreviewObj != null &&
+                (child == playerModelPreviewObj.transform || child.IsChildOf(playerModelPreviewObj.transform)))
+                continue;
+
             string name = child.name ?? "";
+            if (name.StartsWith("TUP_", StringComparison.OrdinalIgnoreCase))
+                continue;
+
             if (name.IndexOf("MonkeBase", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("MonkeColor", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 name.IndexOf("Box", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 name.IndexOf("Frame", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 name.IndexOf("Border", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 name.IndexOf("Background", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                name.IndexOf("Silhouette", StringComparison.OrdinalIgnoreCase) >= 0)
+                name.IndexOf("Silhouette", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("Placeholder", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("Panel", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 child.gameObject.SetActive(false);
+                continue;
+            }
+
+            Image[] images = child.GetComponentsInChildren<Image>(true);
+            for (int img = 0; img < images.Length; img++)
+            {
+                if (images[img] != null)
+                    images[img].enabled = false;
+            }
+
+            SpriteRenderer[] sprites = child.GetComponentsInChildren<SpriteRenderer>(true);
+            for (int s = 0; s < sprites.Length; s++)
+            {
+                if (sprites[s] != null)
+                    sprites[s].enabled = false;
             }
         }
 
@@ -136,7 +433,7 @@ public partial class Main
 
     private void UpdatePlayerModelPreviewLive()
     {
-        if (playerModelPreviewObj == null || playerModelPreviewBindings.Count == 0)
+        if (playerModelPreviewObj == null)
             return;
 
         if (playerModelPreviewSourceRig == null || !playerModelPreviewSourceRig.gameObject.activeInHierarchy)
@@ -145,20 +442,7 @@ public partial class Main
             return;
         }
 
-        UpdatePlayerModelPreviewBindings(true);
         KeepPreviewPoseAnchored();
-    }
-
-    private void KeepPreviewPoseAnchored()
-    {
-        if (playerModelPreviewObj == null)
-            return;
-
-        Transform t = playerModelPreviewObj.transform;
-        t.localPosition = PlayerModelPreviewLocalPosition;
-
-        t.localRotation = Quaternion.Euler(PlayerModelPreviewLocalEuler);
-        t.localScale = PlayerModelPreviewLocalScale;
     }
 
     private IEnumerator BuildPlayerModelPreviewOverFrames(VRRig rig, int version)
@@ -254,8 +538,12 @@ public partial class Main
         if (copied > 0)
         {
             RecenterPreviewMeshes();
+            playerModelPreviewScaleReady = false;
+            KeepPreviewPoseAnchored();
+            playerModelPreviewScaleReady = false;
             KeepPreviewPoseAnchored();
             SetCheckerMonkeSilhouetteVisible(false);
+            HideCheckerMonkeBoxPermanently();
         }
         else
         {
@@ -305,8 +593,8 @@ public partial class Main
             return;
         }
 
-        Vector3 feetCenter = new Vector3(combined.Value.center.x, combined.Value.min.y, combined.Value.center.z);
-        playerModelPreviewMeshOriginOffset = playerModelPreviewObj.transform.InverseTransformPoint(feetCenter);
+        Vector3 center = combined.Value.center;
+        playerModelPreviewMeshOriginOffset = playerModelPreviewObj.transform.InverseTransformPoint(center);
 
         for (int i = 0; i < playerModelPreviewBindings.Count; i++)
         {
@@ -353,6 +641,8 @@ public partial class Main
     {
         playerModelPreviewBindings.Clear();
         playerModelPreviewMeshOriginOffset = Vector3.zero;
+        playerModelPreviewScaleReady = false;
+        playerModelPreviewCachedScale = 0.1f;
         if (playerModelPreviewObj != null)
         {
             Destroy(playerModelPreviewObj);

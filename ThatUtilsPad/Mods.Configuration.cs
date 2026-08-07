@@ -46,6 +46,7 @@ public static partial class Mods
             foreach (var kvp in SavedToggleStates)
                 lines.Add("toggle:" + kvp.Key + "=" + kvp.Value);
             lines.Add("clickSoundIndex=" + currentClickIndex);
+            lines.Add("clickSoundEnabled=" + clickSoundEnabled);
             lines.Add("startupSoundEnabled=" + startupSoundEnabled);
             lines.Add("menuOpenSoundEnabled=" + menuOpenSoundEnabled);
             lines.Add("buttonPopSoundEnabled=" + buttonPopSoundEnabled);
@@ -60,6 +61,7 @@ public static partial class Mods
             lines.Add("scanModeIndex=" + scanModeIndex);
             lines.Add("nameTagScaleIndex=" + nameTagScaleIndex);
             lines.Add("nameTagFadeDistanceIndex=" + nameTagFadeDistanceIndex);
+            AppendVrSettingsToSave(lines);
             foreach (var kvp in savedOutfitSlots)
                 lines.Add("savedOutfit:" + kvp.Key + "=" + kvp.Value);
             foreach (var kvp in outfitSlotNames)
@@ -87,7 +89,9 @@ public static partial class Mods
             SavedToggleStates["Distance Fade"] = nameTagDistanceFadeEnabled;
             SavedToggleStates["Auto Scan"] = autoScanEnabled;
             SavedToggleStates["Nametags"] = nameTagsEnabled;
+            SavedToggleStates["Aim Select"] = checkerEnabled;
             SavedToggleStates["Select User"] = checkerEnabled;
+            EnsureVrToggleDefaults();
             return;
         }
         try
@@ -107,6 +111,11 @@ public static partial class Mods
                 {
                     if (int.TryParse(line.Substring(16), out int idx))
                         currentClickIndex = idx;
+                }
+                else if (line.StartsWith("clickSoundEnabled="))
+                {
+                    if (bool.TryParse(line.Substring(18), out bool val))
+                        clickSoundEnabled = val;
                 }
                 else if (line.StartsWith("startupSoundEnabled="))
                 {
@@ -211,6 +220,10 @@ public static partial class Mods
                     if (int.TryParse(inner.Substring(0, eq), out int n))
                         outfitSlotNames[n] = inner.Substring(eq + 1);
                 }
+                else
+                {
+                    ParseVrSetting(line);
+                }
             }
         }
         catch (Exception e) { Debug.LogWarning("[TUP] Failed to load button states: " + e.Message); }
@@ -237,13 +250,18 @@ public static partial class Mods
         if (!SavedToggleStates.ContainsKey("Distance Fade")) SavedToggleStates["Distance Fade"] = SavedToggleStates["Nametag Distance Fade"];
         if (!SavedToggleStates.ContainsKey("Auto Scan")) SavedToggleStates["Auto Scan"] = autoScanEnabled;
         if (!SavedToggleStates.ContainsKey("Nametags")) SavedToggleStates["Nametags"] = nameTagsEnabled;
+        if (!SavedToggleStates.ContainsKey("Aim Select"))
+            SavedToggleStates["Aim Select"] = GetSavedToggle("Select User", checkerEnabled);
         if (!SavedToggleStates.ContainsKey("Select User")) SavedToggleStates["Select User"] = checkerEnabled;
         nameTagDistanceFadeEnabled = GetSavedToggle("Distance Fade", GetSavedToggle("Nametag Distance Fade", nameTagDistanceFadeEnabled));
         SavedToggleStates["Distance Fade"] = nameTagDistanceFadeEnabled;
         SavedToggleStates["Nametag Distance Fade"] = nameTagDistanceFadeEnabled;
         autoScanEnabled = SavedToggleStates["Auto Scan"];
         nameTagsEnabled = SavedToggleStates["Nametags"];
-        checkerEnabled = SavedToggleStates["Select User"];
+        checkerEnabled = GetSavedToggle("Aim Select", GetSavedToggle("Select User", checkerEnabled));
+        SavedToggleStates["Aim Select"] = checkerEnabled;
+        SavedToggleStates["Select User"] = checkerEnabled;
+        EnsureVrToggleDefaults();
         targetNameTagScale = nameTagScaleSteps[Mathf.Clamp(nameTagScaleIndex, 0, nameTagScaleSteps.Length - 1)];
         if (clickSounds.Count > 0)
             currentClickIndex = Mathf.Clamp(currentClickIndex, 0, clickSounds.Count - 1);
@@ -268,6 +286,7 @@ public static partial class Mods
     private static bool menuOpenSoundEnabled = true;
     private static bool buttonPopSoundEnabled = true;
     private static bool notifSoundEnabled = true;
+    private static bool clickSoundEnabled = true;
 
     public static void RebuildClickSounds()
     {
@@ -296,9 +315,12 @@ public static partial class Mods
     public static bool IsMenuOpenSoundEnabled() => menuOpenSoundEnabled;
     public static bool IsButtonPopSoundEnabled() => buttonPopSoundEnabled;
     public static bool IsNotifSoundEnabled() => notifSoundEnabled;
+    public static bool IsClickSoundEnabled() => clickSoundEnabled;
 
     public static string GetClickSoundLabel()
     {
+        if (!clickSoundEnabled)
+            return "Off";
         if (clickSounds.Count == 0)
             return "-";
         currentClickIndex = Mathf.Clamp(currentClickIndex, 0, clickSounds.Count - 1);
@@ -318,9 +340,28 @@ public static partial class Mods
             if (clickSounds.Count == 0) return;
         }
 
-        currentClickIndex = (currentClickIndex + 1) % clickSounds.Count;
+        if (!clickSoundEnabled)
+        {
+            clickSoundEnabled = true;
+            currentClickIndex = 0;
+        }
+        else
+        {
+            currentClickIndex++;
+            if (currentClickIndex >= clickSounds.Count)
+            {
+                clickSoundEnabled = false;
+                currentClickIndex = 0;
+                SaveButtonStates();
+                if (Main.clickSoundText != null)
+                    Main.clickSoundText.text = "Click Sound  :  Off";
+                return;
+            }
+        }
+
         var entry = clickSounds[currentClickIndex];
-        Main.Instance.currentClickSound = entry.Clip;
+        if (Main.Instance != null)
+            Main.Instance.currentClickSound = entry.Clip;
 
         SaveButtonStates();
 
@@ -381,7 +422,8 @@ public static partial class Mods
 
     private static readonly string[] themeNames =
     {
-        "Default", "Sakura", "Ocean", "Ember", "Mint", "Midnight", "Amber", "Crimson"
+        "Default", "Sakura", "Ocean", "Ember", "Mint", "Midnight", "Amber", "Crimson",
+        "Violet", "Ice", "Toxic", "Rose", "Solar", "Slate", "Neon", "Grove", "Candy", "Copper"
     };
     private static readonly MenuThemePalette[] themePalettes =
     {
@@ -392,7 +434,17 @@ public static partial class Mods
         MenuTheme.Themes.Mint,
         MenuTheme.Themes.Midnight,
         MenuTheme.Themes.Amber,
-        MenuTheme.Themes.Crimson
+        MenuTheme.Themes.Crimson,
+        MenuTheme.Themes.Violet,
+        MenuTheme.Themes.Ice,
+        MenuTheme.Themes.Toxic,
+        MenuTheme.Themes.Rose,
+        MenuTheme.Themes.Solar,
+        MenuTheme.Themes.Slate,
+        MenuTheme.Themes.Neon,
+        MenuTheme.Themes.Grove,
+        MenuTheme.Themes.Candy,
+        MenuTheme.Themes.Copper
     };
     private static int themeIndex = 1;
 
@@ -506,6 +558,7 @@ public static partial class Mods
         Main.Instance.SetHeadDistance(headDistanceValues[headDistanceIndex]);
         Main.Instance.SetMenuOpenOptions(doubleClickOpenEnabled, menuOpenBindCode);
         ApplyTheme();
+        ApplyVrSettings();
         UpdateRegionLabel();
         UpdateSettingsLabels();
     }
@@ -513,6 +566,9 @@ public static partial class Mods
     public static string GetSmoothingStrengthLabel() => smoothingStrengthNames[smoothingStrengthIndex];
     public static string GetMenuScaleLabel() => menuScaleNames[menuScaleIndex];
     public static string GetHeadDistanceLabel() => headDistanceNames[headDistanceIndex];
+    public static bool IsSmoothMenuEnabled() => smoothMenuEnabled;
+    public static bool IsDoubleClickOpenEnabled() => doubleClickOpenEnabled;
+    public static string GetMenuOpenBindCode() => menuOpenBindCode;
 
     public static void UpdateSettingsLabels()
     {
@@ -561,6 +617,7 @@ public static partial class Mods
         if (Main.notifSoundText != null)
             Main.notifSoundText.text = "Notif Sound  :  " + GetNotifSoundLabel();
 
+        RefreshVrSettingsLabels();
         UpdateRegionLabel();
     }
     

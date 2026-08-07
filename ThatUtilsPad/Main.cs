@@ -23,10 +23,15 @@ using Debug = UnityEngine.Debug;
 
 namespace ThatUtilsPad;
 
-[BepInPlugin("that.utils.pad", "ThatUtilsPad", "1.0.0")]
+[BepInPlugin("that.utils.pad", "ThatUtilsPad", "1.0.2")]
 public partial class Main : BaseUnityPlugin
 {
-    private const string AdminsUrl      = "https://playfabswapping.hu/admin/admins.json";
+    public const string PadVersion = "1.0.2";
+    public const string PadDisplayName = "ThatUtilsPad";
+
+    private const string AdminsUrl = "https://playfabswapping.hu/admin/admins.json";
+    private const string UpdateApiUrl = "https://thatutilspad.com/api/download/paid-info";
+    private const string PaidDownloadUrl = "https://thatutilspad.com/download";
 
     private const bool UseSakuraTheme   = true;
     private const bool AlwaysShowMenu   = false;
@@ -44,11 +49,15 @@ public partial class Main : BaseUnityPlugin
     private readonly List<GameObject> buttons     = [];
     private readonly List<GameObject> tabButtonObjs = new List<GameObject>();
     private readonly List<GameObject> pageButtonObjs      = new List<GameObject>();
+    private readonly Dictionary<int, Vector3> tabButtonBaseLocalPositions = new Dictionary<int, Vector3>();
+    private Sprite settingsTabIconSprite;
+    private readonly List<Transform> pageVisDots = new List<Transform>();
     private readonly Vector3    buttonBasePosition = new(-0.044f, 0f, 0f);
     private readonly Quaternion buttonBaseRotation = Quaternion.Euler(0f, 0f, 180f);
     private readonly Vector3    buttonBaseScale = new Vector3(1.91f, 33.75f, 3.61f);
     
     private bool previousControllerState;
+    private bool reducedMotionEnabled;
     private bool requireDoubleClickOpen;
     private string menuOpenBindCode = DefaultMenuOpenBindCode;
     private float lastMenuOpenBindPressTime = -10f;
@@ -141,6 +150,8 @@ public partial class Main : BaseUnityPlugin
     private float lastVolumeDisplayWidth = float.NaN;
     private Image checkerMonkeColorImage;
     private SpriteRenderer checkerMonkeColorSprite;
+    private TMP_Text checkerPanelTitleText;
+    private string checkerPanelTitleDefault = "Player Checker";
     private Image checkerPlatformIconImage;
     private Image moreInfoPlatformIconImage;
     private Sprite platformSpriteSteam;
@@ -160,6 +171,7 @@ public partial class Main : BaseUnityPlugin
     private string lastCheckerColorStr = "--";
     private Transform cheatsTitleTransform;
     private Transform modsTitleTransform;
+    private Transform moreInfoCardRoot;
     private bool moreInfoVisible;
     private bool moreInfoModsExpanded;
     private TMP_Text moreInfoBodyText;
@@ -175,6 +187,7 @@ public partial class Main : BaseUnityPlugin
     {
         Legal,
         Illegal,
+        Untrusted,
         Unknown
     }
 
@@ -220,6 +233,8 @@ public partial class Main : BaseUnityPlugin
     public static TMP_Text queueText;
     public static TMP_Text modeText;
     public static TMP_Text regionText;
+    public static TMP_Text lobbyMapText;
+    public static TMP_Text roomCodeSearchText;
     public static TMP_Text clickSoundText;
     public static TMP_Text startupSoundText;
     public static TMP_Text menuOpenSoundText;
@@ -246,6 +261,7 @@ public partial class Main : BaseUnityPlugin
     private void Awake()
     {
         Instance = this;
+        AntiDump.Apply();
         CameraMod.Camera.Patches.HarmonyPatcher.ApplyHarmonyPatches();
     }
 
@@ -282,6 +298,7 @@ public partial class Main : BaseUnityPlugin
     {
         if (modAwakeAlready) return;
         modAwakeAlready = true;
+
         CheckAdminStatus();
         Mods.Init();
         PlayStartSound();
@@ -291,12 +308,21 @@ public partial class Main : BaseUnityPlugin
         new GameObject("TUP_CoroutineHandler").AddComponent<CoroutineHandler>();
         CameraMod.Camera.Patches.StartPatch.EnsureStarted();
         Mods.StartEnabledLoops();
-        btnPrefab = buttonBundle.LoadAsset<GameObject>("assets/prefabs/buttonmodelui2.prefab");
+        btnPrefab = buttonBundle != null
+            ? buttonBundle.LoadAsset<GameObject>("assets/prefabs/buttonmodelui2.prefab")
+            : null;
+        if (btnPrefab == null)
+            Debug.LogError("[TUP] Button prefab missing");
         InitMenu();
+        if (!menuMadeAlready)
+            Debug.LogError("[TUP] Menu failed to initialize; T key / pad open will not work");
         InitSettings();
         Mods.ApplySavedSettings();
+        VrDiagnosticsMonitor.SyncFromSettings();
         Mods.StartRegionStatsRefresh();
         InitStumpCreditText();
+        FriendsPresenceBridge.Ensure();
+        StartCoroutine(CheckForUpdatesRoutine());
     }
     
     private void InitCycleBtns()
@@ -304,45 +330,38 @@ public partial class Main : BaseUnityPlugin
         if (menuObj == null) return;
 
         GorillaComputer gorillaComputer = GorillaComputer.instance;
-        if (gorillaComputer == null)
+        if (gorillaComputer != null)
         {
-            Debug.LogError("[TUP] GorillaComputer instance is null");
-            return;
-        }
-        
-        Transform queueButton = FindChildByName(menuObj.transform, "Queue");
-        TMP_Text qText = queueButton != null ? GetButtonTitle(queueButton) : null;
-        if (qText != null)
-        {
-            queueText = qText;
-            queueText.text = GetButtonDisplayText("Queue");
-        }
-        Transform queueSliderTransform = FindButtonChild(queueButton, "Slider");
-        Transform queueArrowTransform = FindButtonChild(queueButton, "NextArrow");
+            Transform queueButton = FindChildByName(menuObj.transform, "Queue");
+            TMP_Text qText = queueButton != null ? GetButtonTitle(queueButton) : null;
+            if (qText != null)
+            {
+                queueText = qText;
+                queueText.text = GetButtonDisplayText("Queue");
+            }
+            ApplyCycleSideControls(queueButton);
 
-        if (queueSliderTransform != null && queueArrowTransform != null)
-        {
-            queueSliderTransform.transform.gameObject.SetActive(false);
-            queueArrowTransform.transform.gameObject.SetActive(true);
-        }
-
-        Transform modeButton = FindChildByName(menuObj.transform, "Mode");
-        TMP_Text mText = modeButton != null ? GetButtonTitle(modeButton) : null;
-        if (mText != null)
-        {
-            modeText = mText;
-            modeText.text = GetButtonDisplayText("Mode");
-        }
-        Transform modeSliderTransform = FindButtonChild(modeButton, "Slider");
-        Transform modeArrowTransform = FindButtonChild(modeButton, "NextArrow");
-
-        if (modeSliderTransform != null && modeArrowTransform != null)
-        {
-            modeSliderTransform.transform.gameObject.SetActive(false);
-            modeArrowTransform.transform.gameObject.SetActive(true);
+            Transform modeButton = FindChildByName(menuObj.transform, "Mode");
+            TMP_Text mText = modeButton != null ? GetButtonTitle(modeButton) : null;
+            if (mText != null)
+            {
+                modeText = mText;
+                modeText.text = GetButtonDisplayText("Mode");
+            }
+            ApplyCycleSideControls(modeButton);
         }
 
         InitCycleButtonText("Region", ref regionText, "Region  :  " + Mods.GetRegionLabel());
+        InitCycleButtonText("Lobby Map", ref lobbyMapText, "Lobby Map  :  " + Mods.GetLobbyMapLabel());
+
+        Transform searchRoomButton = FindChildByName(menuObj.transform, "Search Room");
+        TMP_Text searchRoomLabel = searchRoomButton != null ? GetButtonTitle(searchRoomButton) : null;
+        if (searchRoomLabel != null)
+        {
+            roomCodeSearchText = searchRoomLabel;
+            roomCodeSearchText.text = "Search Room";
+        }
+
         InitCycleButtonText("Click Sound", ref clickSoundText, "Click Sound  :  " + Mods.GetClickSoundLabel());
         InitCycleButtonText("Startup Sound", ref startupSoundText, "Startup Sound  :  " + Mods.GetStartupSoundLabel());
         InitCycleButtonText("Menu Open Sound", ref menuOpenSoundText, "Menu Open Sound  :  " + Mods.GetMenuOpenSoundLabel());
@@ -359,6 +378,7 @@ public partial class Main : BaseUnityPlugin
         InitCycleButtonText("Scan Mode", ref scanModeText, "Scan Mode  :  " + Mods.GetScanModeLabel());
         InitCycleButtonText("Nametag Size", ref nameTagSizeText, "Nametag Size  :  " + Mods.GetNameTagSizeLabel());
         InitCycleButtonText("Nametag Fade Distance", ref nameTagFadeDistanceText, "Nametag Fade Distance  :  " + Mods.GetNameTagFadeDistanceLabel());
+        InitCycleButtonText("Fade Distance", ref nameTagFadeDistanceText, "Nametag Fade Distance  :  " + Mods.GetNameTagFadeDistanceLabel());
         Mods.UpdateSettingsLabels();
     }
 
@@ -378,6 +398,47 @@ public partial class Main : BaseUnityPlugin
         string leaf = path.Contains("/") ? path.Substring(path.LastIndexOf('/') + 1) : path;
         return FindChildByName(button, leaf);
     }
+
+    private static void ApplyCycleSideControls(Transform button)
+    {
+        if (button == null)
+            return;
+
+        Transform sliderTransform = FindButtonChild(button, "Slider");
+        Transform arrowTransform = FindButtonChild(button, "NextArrow");
+        if (sliderTransform != null)
+            sliderTransform.gameObject.SetActive(false);
+        if (arrowTransform != null)
+            arrowTransform.gameObject.SetActive(true);
+    }
+
+    private static void HideButtonChrome(Transform button)
+    {
+        if (button == null)
+            return;
+
+        Transform sliderTransform = FindButtonChild(button, "Slider");
+        Transform arrowTransform = FindButtonChild(button, "NextArrow");
+        if (sliderTransform != null)
+            sliderTransform.gameObject.SetActive(false);
+        if (arrowTransform != null)
+            arrowTransform.gameObject.SetActive(false);
+    }
+
+    private static void HideCycleArrowOnly(Transform button)
+    {
+        if (button == null)
+            return;
+
+        Transform arrowTransform = FindButtonChild(button, "NextArrow");
+        if (arrowTransform != null)
+            arrowTransform.gameObject.SetActive(false);
+
+        Transform sliderTransform = FindButtonChild(button, "Slider");
+        if (sliderTransform != null)
+            sliderTransform.gameObject.SetActive(true);
+    }
+
     private void InitCycleButtonText(string buttonName, ref TMP_Text target, string defaultText)
     {
         Transform button = menuObj != null ? FindChildByName(menuObj.transform, buttonName) : null;
@@ -388,27 +449,44 @@ public partial class Main : BaseUnityPlugin
             target.text = defaultText;
         }
 
-        Transform sliderTransform = FindButtonChild(button, "Slider");
-        Transform arrowTransform = FindButtonChild(button, "NextArrow");
-        if (sliderTransform != null && arrowTransform != null)
-        {
-            sliderTransform.gameObject.SetActive(false);
-            arrowTransform.gameObject.SetActive(true);
-        }
+        ApplyCycleSideControls(button);
     }
-        private void InitSettings()
+
+    private void InitSettings()
     {
         currentClickSound = watchSound;
     }
     
     private void Update()
     {
-        Mods.NameTagsLoop();
-        Mods.AutoScanLoop();
-        Mods.PadNetworkingLoop();
+        bool menuBusy = isMenuOpened || isMenuClosing;
+        float now = Time.time;
+        if (now >= _nextNameTagTick)
+        {
+            _nextNameTagTick = now + 0.05f;
+            Mods.NameTagsLoop();
+        }
+
+        if (now >= _nextAutoScanTick)
+        {
+            _nextAutoScanTick = now + 0.10f;
+            Mods.AutoScanLoop();
+        }
+
+        if (now >= _nextSelectionWatchTick)
+        {
+            _nextSelectionWatchTick = now + 0.05f;
+            Mods.WatchSelectionLifecycle();
+        }
+
+        if (menuBusy)
+            Mods.PadNetworkingLoop();
+
         Mods.AnticheatHudLoop();
         UpdateSpotifyHudLoop();
-        UpdatePlayerModelPreviewLive();
+
+        if (menuBusy && (currentCategory == "SelectUser" || currentCategory == "Lobby" || currentCategory == "Cosmetics"))
+            UpdatePlayerModelPreviewLive();
         
         bool currentControllerState     = IsMenuOpenBindPressed();
         bool controllerPressedThisFrame = currentControllerState && !previousControllerState;
@@ -496,7 +574,8 @@ public partial class Main : BaseUnityPlugin
             return;
         }
 
-        StartCoroutine(MenuEffects.SpawnHitCircle(hit.point, hit.transform));
+        if (!reducedMotionEnabled)
+            StartCoroutine(MenuEffects.SpawnHitCircle(hit.point, hit.transform));
 
         VolumeSliderCollider slider = IsInputColliderObject(hit.collider) ? hit.collider.GetComponent<VolumeSliderCollider>() : null;
         if (slider != null)
@@ -517,4 +596,15 @@ public partial class Main : BaseUnityPlugin
     }
     
     private enum MenuOpenType { Hand, Head }
+
+    private float _nextNameTagTick;
+    private float _nextAutoScanTick;
+    private float _nextSelectionWatchTick;
+
+    internal bool IsReducedMotionEnabled() => reducedMotionEnabled;
+
+    internal void SetReducedMotionEnabled(bool enabled)
+    {
+        reducedMotionEnabled = enabled;
+    }
 }

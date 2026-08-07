@@ -19,6 +19,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
 using UnityEngine.Networking;
+using UnityEngine.XR;
 using Debug = UnityEngine.Debug;
 
 namespace ThatUtilsPad;
@@ -65,22 +66,22 @@ public partial class Main
             return IsInputSystemButtonPressed(path);
         }
 
-        ControllerInputPoller poller = ControllerInputPoller.instance;
+        object poller = GameTypeCloak.PollerInstance();
         if (poller == null)
             return false;
 
         return bindCode switch
         {
             "Left:JoystickButton" => IsControllerInputSystemButtonPressed(true, "primary2daxisclick", "thumbstickclicked", "joystickclick", "stickclick"),
-            "Left:SecondaryButton" => poller.leftControllerSecondaryButton,
-            "Left:PrimaryButton" => poller.leftControllerPrimaryButton,
-            "Left:TriggerButton" => poller.leftControllerTriggerButton || poller.leftControllerIndexFloat > 0.75f,
-            "Left:GripButton" => poller.leftControllerGripFloat > 0.75f,
+            "Left:SecondaryButton" => GameTypeCloak.LeftSecondary(poller),
+            "Left:PrimaryButton" => GameTypeCloak.LeftPrimary(poller),
+            "Left:TriggerButton" => GameTypeCloak.LeftTriggerButton(poller) || GameTypeCloak.LeftIndex(poller) > 0.75f,
+            "Left:GripButton" => GameTypeCloak.LeftGrip(poller) > 0.75f,
             "Right:JoystickButton" => IsControllerInputSystemButtonPressed(false, "primary2daxisclick", "thumbstickclicked", "joystickclick", "stickclick"),
-            "Right:SecondaryButton" => poller.rightControllerSecondaryButton,
-            "Right:PrimaryButton" => poller.rightControllerPrimaryButton,
-            "Right:TriggerButton" => poller.rightControllerTriggerButton || poller.rightControllerIndexFloat > 0.75f,
-            "Right:GripButton" => poller.rightControllerGripFloat > 0.75f,
+            "Right:SecondaryButton" => GameTypeCloak.RightSecondary(poller),
+            "Right:PrimaryButton" => GameTypeCloak.RightPrimary(poller),
+            "Right:TriggerButton" => GameTypeCloak.RightTriggerButton(poller) || GameTypeCloak.RightIndex(poller) > 0.75f,
+            "Right:GripButton" => GameTypeCloak.RightGrip(poller) > 0.75f,
             _ => false
         };
     }
@@ -190,6 +191,67 @@ public partial class Main
             "Right:GripButton" => "Right Grip",
             _ => "Left Secondary"
         };
+    }
+
+    public static bool TryGetControllerJoystick(bool leftHand, out Vector2 axis)
+    {
+        axis = Vector2.zero;
+
+        string hand = leftHand ? "LeftHand" : "RightHand";
+        UnityEngine.InputSystem.InputControl? control =
+            InputSystem.FindControl("<XRController>{" + hand + "}/primary2DAxis")
+            ?? InputSystem.FindControl("<XRController>{" + hand + "}/thumbstick");
+
+        if (control is UnityEngine.InputSystem.Controls.Vector2Control stick)
+        {
+            axis = stick.ReadValue();
+            return true;
+        }
+
+        foreach (UnityEngine.InputSystem.InputDevice device in InputSystem.devices)
+        {
+            if (device == null || device is Keyboard || device is Mouse)
+                continue;
+
+            bool matchesHand = device.usages.Any(usage =>
+                usage.ToString().IndexOf(hand, StringComparison.OrdinalIgnoreCase) >= 0);
+            if (!matchesHand)
+                continue;
+
+            foreach (UnityEngine.InputSystem.InputControl c in device.allControls)
+            {
+                if (c is not UnityEngine.InputSystem.Controls.Vector2Control vec)
+                    continue;
+
+                string name = (c.name ?? "").Replace(" ", "").ToLowerInvariant();
+                string path = (c.path ?? "").Replace(" ", "").ToLowerInvariant();
+                if (!name.Contains("primary2daxis") && !name.Contains("thumbstick") &&
+                    !path.Contains("primary2daxis") && !path.Contains("thumbstick"))
+                    continue;
+
+                axis = vec.ReadValue();
+                return true;
+            }
+        }
+
+        try
+        {
+            var devices = new List<UnityEngine.XR.InputDevice>();
+            InputDevices.GetDevicesAtXRNode(leftHand ? XRNode.LeftHand : XRNode.RightHand, devices);
+            for (int i = 0; i < devices.Count; i++)
+            {
+                if (devices[i].TryGetFeatureValue(UnityEngine.XR.CommonUsages.primary2DAxis, out Vector2 value))
+                {
+                    axis = value;
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
     }
 
     private static bool IsInputSystemButtonPressed(string path)

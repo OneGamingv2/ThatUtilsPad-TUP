@@ -30,12 +30,23 @@ public partial class Main
         if (menuMadeAlready)
             return;
 
-        string prefabPath = UseSakuraTheme
+        AssetBundle bundle = menuReduxBundle != null ? menuReduxBundle : menuBundle;
+        string prefabPath = bundle == menuReduxBundle
             ? "assets/prefabs/TUP-overv18.prefab"
             : "assets/prefabs/tup-modelsmooth.prefab";
 
-        AssetBundle bundle = UseSakuraTheme ? menuReduxBundle : menuBundle;
-        GameObject  prefab = bundle.LoadAsset<GameObject>(prefabPath);
+        if (bundle == null)
+        {
+            Debug.LogError("[TUP] Menu asset bundle missing");
+            return;
+        }
+
+        GameObject prefab = bundle.LoadAsset<GameObject>(prefabPath);
+        if (prefab == null)
+        {
+            Debug.LogError("[TUP] Menu prefab missing: " + prefabPath);
+            return;
+        }
 
         menuObj = Instantiate(prefab);
         menuObj.transform.localScale = Vector3.one * menuScale;
@@ -65,6 +76,8 @@ public partial class Main
 
         InitNavButtons(menuObj);
         InitSpotifyHudPage(menuObj);
+        CachePageVisDots(menuObj);
+        UpdatePageIndicators();
         InitKeyboard();
         PutCollidersBackInvis();
 
@@ -78,8 +91,9 @@ public partial class Main
     if (!menuMadeAlready || menuObj == null || isMenuClosing)
         return false;
 
+    Camera activeCamera = GetActiveCamera();
     Transform parent = currentOpenType == MenuOpenType.Head  
-        ? GetActiveCamera().transform
+        ? activeCamera != null ? activeCamera.transform : null
         : GetHandMenuTarget();
 
     if (parent == null)
@@ -224,9 +238,19 @@ public partial class Main
     {
         Transform mainMenu = FindMainMenuPanel();
         buttonShelf = mainMenu != null ? mainMenu.Find("ButtonsHolder") ?? FindChildByName(mainMenu, "ButtonsHolder") : null;
-        buttonSeed = buttonShelf != null ? buttonShelf.Find("Button")?.gameObject : null;
+        buttonSeed = null;
+        if (buttonShelf != null)
+        {
+            buttonSeed = buttonShelf.Find("Button")?.gameObject
+                ?? buttonShelf.Find("ButtonTemplate")?.gameObject
+                ?? FindChildByName(buttonShelf, "Button")?.gameObject
+                ?? FindChildByName(buttonShelf, "ButtonTemplate")?.gameObject;
+        }
         if (buttonSeed == null)
+        {
+            Debug.LogError("[TUP] ButtonsHolder/Button seed missing — menu rows may sit in the wrong place");
             return;
+        }
 
         buttonSeed.SetActive(false);
         buttonSeed.name = "ButtonTemplate";
@@ -259,6 +283,24 @@ public partial class Main
         if (string.Equals(btnName, "Region", StringComparison.OrdinalIgnoreCase))
             return "Region  :  " + Mods.GetRegionLabel();
 
+        if (string.Equals(btnName, "Lobby Map", StringComparison.OrdinalIgnoreCase))
+            return "Lobby Map  :  " + Mods.GetLobbyMapLabel();
+
+        if (string.Equals(btnName, "Search Room", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Search", StringComparison.OrdinalIgnoreCase))
+            return "Search";
+
+        if (string.Equals(btnName, "Scan All", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Scan Lobby", StringComparison.OrdinalIgnoreCase))
+            return "Scan All";
+
+        if (string.Equals(btnName, "Aim Select", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Select User", StringComparison.OrdinalIgnoreCase))
+            return "Aim Select";
+
+        if (string.Equals(btnName, "Clear", StringComparison.OrdinalIgnoreCase))
+            return "Clear";
+
         if (string.Equals(btnName, "Click Sound", StringComparison.OrdinalIgnoreCase))
             return "Click Sound  :  " + Mods.GetClickSoundLabel();
 
@@ -274,7 +316,138 @@ public partial class Main
         if (string.Equals(btnName, "Notif Sound", StringComparison.OrdinalIgnoreCase))
             return "Notif Sound  :  " + Mods.GetNotifSoundLabel();
 
+        if (string.Equals(btnName, "Master Volume", StringComparison.OrdinalIgnoreCase))
+            return "Master Volume  :  " + Mods.GetMasterVolumeLabel();
+
+        if (string.Equals(btnName, "Menu Smoothing", StringComparison.OrdinalIgnoreCase))
+            return "Menu Smoothing  :  " + (Mods.IsSmoothMenuEnabled() ? "On" : "Off");
+
+        if (string.Equals(btnName, "Smooth Strength", StringComparison.OrdinalIgnoreCase))
+            return "Smooth Strength  :  " + Mods.GetSmoothingStrengthLabel();
+
+        if (string.Equals(btnName, "Menu Scale", StringComparison.OrdinalIgnoreCase))
+            return "Menu Scale  :  " + Mods.GetMenuScaleLabel();
+
+        if (string.Equals(btnName, "PC Distance", StringComparison.OrdinalIgnoreCase))
+            return "PC Distance  :  " + Mods.GetHeadDistanceLabel();
+
+        if (string.Equals(btnName, "Double Open", StringComparison.OrdinalIgnoreCase))
+            return "Double Open  :  " + (Mods.IsDoubleClickOpenEnabled() ? "On" : "Off");
+
+        if (string.Equals(btnName, "Open Bind", StringComparison.OrdinalIgnoreCase))
+            return "Open Bind  :  " + GetMenuOpenBindDisplayName(Mods.GetMenuOpenBindCode());
+
+        if (string.Equals(btnName, "Theme", StringComparison.OrdinalIgnoreCase))
+            return "Theme  :  " + Mods.GetThemeLabel();
+
+        if (string.Equals(btnName, "Diagnostics HUD", StringComparison.OrdinalIgnoreCase))
+            return "Diagnostics HUD  :  " + Mods.GetVrDiagnosticsHudLabel();
+
+        if (string.Equals(btnName, "FPS Counter", StringComparison.OrdinalIgnoreCase))
+            return "FPS Counter  :  " + Mods.GetVrFpsCounterLabel();
+
+        if (string.Equals(btnName, "Ping Display", StringComparison.OrdinalIgnoreCase))
+            return "Ping Display  :  " + Mods.GetVrPingDisplayLabel();
+
+        if (string.Equals(btnName, "Network Stats", StringComparison.OrdinalIgnoreCase))
+            return "Network Stats  :  " + Mods.GetVrNetworkStatsLabel();
+
+        if (string.Equals(btnName, "Average FPS", StringComparison.OrdinalIgnoreCase))
+            return "Average FPS  :  " + Mods.GetVrFpsAverageLabel();
+
+        if (string.Equals(btnName, "Slow FPS", StringComparison.OrdinalIgnoreCase))
+            return "Slow FPS  :  " + Mods.GetVrFpsSlowLabel();
+
+        if (string.Equals(btnName, "Frametime", StringComparison.OrdinalIgnoreCase))
+            return "Frametime  :  " + Mods.GetVrFrametimeLabel();
+
+        if (string.Equals(btnName, "HUD Move Bind", StringComparison.OrdinalIgnoreCase))
+            return "HUD Move Bind  :  " + Mods.GetHudMoveBindLabel();
+
+        if (string.Equals(btnName, "Aim Select Bind", StringComparison.OrdinalIgnoreCase))
+            return "Aim Select Bind  :  " + Mods.GetAimSelectBindLabel();
+
+        if (string.Equals(btnName, "Reset HUD Pos", StringComparison.OrdinalIgnoreCase))
+            return "Reset HUD Pos";
+
+        if (string.Equals(btnName, "Graphics Quality", StringComparison.OrdinalIgnoreCase))
+            return "Graphics Quality  :  " + Mods.GetGraphicsQualityLabel();
+
+        if (string.Equals(btnName, "Resolution Scale", StringComparison.OrdinalIgnoreCase))
+            return "Resolution Scale  :  " + Mods.GetResolutionScaleLabel();
+
+        if (string.Equals(btnName, "MSAA", StringComparison.OrdinalIgnoreCase))
+            return "MSAA  :  " + Mods.GetMsaaLabel();
+
+        if (string.Equals(btnName, "Shadow Quality", StringComparison.OrdinalIgnoreCase))
+            return "Shadow Quality  :  " + Mods.GetShadowQualityLabel();
+
+        if (string.Equals(btnName, "Render Distance", StringComparison.OrdinalIgnoreCase))
+            return "Render Distance  :  " + Mods.GetRenderDistanceLabel();
+
+        if (string.Equals(btnName, "Controller Haptics", StringComparison.OrdinalIgnoreCase))
+            return "Controller Haptics  :  " + Mods.GetControllerHapticsLabel();
+
+        if (string.Equals(btnName, "Comfort Mode", StringComparison.OrdinalIgnoreCase))
+            return "Comfort Mode  :  " + Mods.GetComfortModeLabel();
+
+        if (string.Equals(btnName, "Scan Mode", StringComparison.OrdinalIgnoreCase))
+            return "Scan Mode  :  " + Mods.GetScanModeLabel();
+
+        if (string.Equals(btnName, "Nametag Size", StringComparison.OrdinalIgnoreCase))
+            return "Nametag Size  :  " + Mods.GetNameTagSizeLabel();
+
+        if (string.Equals(btnName, "Fade Distance", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Nametag Fade Distance", StringComparison.OrdinalIgnoreCase))
+            return "Nametag Fade Distance  :  " + Mods.GetNameTagFadeDistanceLabel();
+
+        if (string.Equals(btnName, "Menu Settings", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Sound Settings", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "VR Settings", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Credits", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Exit Menu Settings", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Exit Sound Settings", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Exit VR Settings", StringComparison.OrdinalIgnoreCase))
+            return btnName;
+
+        if (string.Equals(btnName, "Equip Outfit", StringComparison.OrdinalIgnoreCase))
+            return "Equip Outfit";
+
+        if (btnName.StartsWith("Outfit #", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(btnName.Substring("Outfit #".Length), out int outfitNum))
+            return Mods.GetOutfitDisplayName(outfitNum);
+
         return btnName;
+    }
+
+    private static bool IsTextOnlySetting(string btnName)
+    {
+        if (string.IsNullOrEmpty(btnName))
+            return false;
+
+        return string.Equals(btnName, "Queue", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Mode", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Region", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Lobby Map", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Click Sound", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Smooth Strength", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Menu Scale", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "PC Distance", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Open Bind", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "HUD Move Bind", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Aim Select Bind", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Reset HUD Pos", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Theme", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Scan Mode", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Nametag Size", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Nametag Fade Distance", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Fade Distance", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Graphics Quality", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Resolution Scale", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "MSAA", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Shadow Quality", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Render Distance", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Master Volume", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string FormatLabelValue(string value)
@@ -396,29 +569,15 @@ public partial class Main
         if (target == null)
             return;
 
-        Transform walk = target;
-        for (int depth = 0; depth < 8 && walk != null; depth++)
-        {
-            Vector3 local = walk.localScale;
-            if (local.x < 0f || local.y < 0f || local.z < 0f)
-            {
-                walk.localScale = new Vector3(
-                    Mathf.Abs(local.x) < 0.0001f ? 1f : Mathf.Abs(local.x),
-                    Mathf.Abs(local.y) < 0.0001f ? 1f : Mathf.Abs(local.y),
-                    Mathf.Abs(local.z) < 0.0001f ? 1f : Mathf.Abs(local.z));
-            }
-            walk = walk.parent;
-        }
-
         Vector3 lossy = target.lossyScale;
-        if (lossy.x >= 0f && lossy.y >= 0f && lossy.z >= 0f)
-            return;
-
-        Vector3 ls = target.localScale;
-        target.localScale = new Vector3(
-            Mathf.Abs(ls.x) < 0.0001f ? 1f : Mathf.Abs(ls.x),
-            Mathf.Abs(ls.y) < 0.0001f ? 1f : Mathf.Abs(ls.y),
-            Mathf.Abs(ls.z) < 0.0001f ? 1f : Mathf.Abs(ls.z));
+        Vector3 local = target.localScale;
+        if (lossy.x < 0f) local.x = -local.x;
+        if (lossy.y < 0f) local.y = -local.y;
+        if (lossy.z < 0f) local.z = -local.z;
+        if (Mathf.Abs(local.x) < 0.0001f) local.x = 0.0001f;
+        if (Mathf.Abs(local.y) < 0.0001f) local.y = 0.0001f;
+        if (Mathf.Abs(local.z) < 0.0001f) local.z = 0.0001f;
+        target.localScale = local;
     }
 
     private static bool IsInputColliderObject(Component component)
@@ -558,7 +717,7 @@ public partial class Main
 
     public void RefreshSelectUserButtonStates()
     {
-        if (currentCategory != "SelectUser")
+        if (currentCategory != "SelectUser" && currentCategory != "Lobby")
             return;
 
         foreach (GameObject btnObj in buttons)
@@ -584,16 +743,21 @@ public partial class Main
     {
         const float gap = 0.094f;
 
+
         if (!Mods.Actions.TryGetValue(currentCategory, out var category))
             yield break;
 
         SetSpotifyPageOnOff();
         if (IsSpotifyHudPageSelected())
+        {
+            UpdatePageIndicators();
             yield break;
+        }
 
         var pageItems = BuildPageItems(category);
-        int start = currentPage * PageSize;
-        int end   = Math.Min(start + PageSize, pageItems.Count);
+        int pageSize = GetEffectivePageSize(currentCategory);
+        int start = currentPage * pageSize;
+        int end   = Math.Min(start + pageSize, pageItems.Count);
 
         int index = 0;
         for (int i = start; i < end; i++)
@@ -606,6 +770,13 @@ public partial class Main
         }
 
         InitCycleBtns();
+        if (currentCategory == "Cosmetics")
+        {
+            ApplyOutfitCarouselSideUi();
+            RefreshOutfitPreviewDelayed();
+        }
+        UpdatePageIndicators();
+        UpdatePageNavVisibility();
     }
     
     private readonly struct PageButtonItem
@@ -626,11 +797,14 @@ public partial class Main
 
     private List<PageButtonItem> BuildPageItems(ModCategory category)
     {
+        if (string.Equals(currentCategory, "Friends", StringComparison.OrdinalIgnoreCase))
+            return BuildFriendsPageItems();
+
         List<PageButtonItem> items = category.Actions
             .Select(action => new PageButtonItem(action.Key, action.Value.IsToggle, action.Value.Cooldown, null))
             .ToList();
 
-        if (currentCategory != "SelectUser")
+        if (currentCategory != "Lobby" && currentCategory != "SelectUser")
             return items;
 
         foreach (VRRig rig in Mods.GetSelectableRigs())
@@ -652,19 +826,151 @@ public partial class Main
 
         return items;
     }
+
+    private List<PageButtonItem> BuildFriendsPageItems()
+    {
+        var items = new List<PageButtonItem>();
+
+        if (Mods.HasSelectedFriend())
+        {
+            string name = Mods.GetSelectedFriendDisplayName();
+            items.Add(new PageButtonItem("Back to Friends", false, 0f, Mods.BackToFriendsList));
+            items.Add(new PageButtonItem(name, false, 0f, () => { }));
+            items.Add(new PageButtonItem("Join Their Room", false, 1f, Mods.JoinSelectedFriendRoom));
+            items.Add(new PageButtonItem("Invite Here", false, 1f, Mods.InviteSelectedFriendHere));
+            items.Add(new PageButtonItem("Make Private Code", false, 1f, Mods.MakePrivateCodeForFriend));
+            items.Add(new PageButtonItem("Refresh Friends", false, 0f, Mods.RefreshFriendsList));
+            return items;
+        }
+
+        items.Add(new PageButtonItem("Refresh Friends", false, 0f, Mods.RefreshFriendsList));
+
+        IReadOnlyList<Mods.PadFriendEntry> friends = Mods.GetCachedFriends();
+        for (int i = 0; i < friends.Count; i++)
+        {
+            Mods.PadFriendEntry entry = friends[i];
+            if (entry == null || string.IsNullOrWhiteSpace(entry.PlayFabId))
+                continue;
+
+            string id = entry.PlayFabId;
+            items.Add(new PageButtonItem(
+                Mods.FormatFriendButtonLabel(entry),
+                false,
+                0f,
+                () => Mods.OpenFriendActions(id)));
+        }
+
+        if (friends.Count == 0)
+            items.Add(new PageButtonItem("No friends loaded", false, 0f, Mods.RefreshFriendsList));
+
+        return items;
+    }
+
+    public void RefreshFriendsPageIfOpen()
+    {
+        if (!isMenuOpened)
+            return;
+        if (!string.Equals(currentCategory, "Friends", StringComparison.OrdinalIgnoreCase))
+            return;
+        RefreshCurrentPage();
+    }
     private void SwitchCategory(string categoryName)
     {
         Tools.StopCoroutine(ref buttonRoutine);
+        string previousCategory = currentCategory;
         currentCategory = categoryName;
         currentPage = 0;
 
         if (categoryName == "Cosmetics")
-            Mods.InitOutfitSlotActions();
+        {
+            Mods.InitOutfitSlotCaches();
+            EnterOutfitPreviewMode();
+        }
+        else if (previousCategory == "Cosmetics")
+        {
+            ExitOutfitPreviewMode();
+            SetCheckerPanelTitle(string.IsNullOrEmpty(checkerPanelTitleDefault)
+                ? "Player Checker"
+                : checkerPanelTitleDefault);
+            SetVolumeControlsVisible(true);
+            if (categoryName != "SelectUser" && categoryName != "Lobby")
+            {
+                Mods.ClearSelectedPlayerSilent();
+                SetMoreInfoVisible(false);
+            }
+            else if (!Mods.HasSelectedPlayer())
+            {
+                ClearCheckerSelectionUiKeepPreview(true);
+                SetMoreInfoVisible(false);
+            }
+        }
+
+        bool wasPlayerTab = previousCategory == "SelectUser" || previousCategory == "Lobby";
+        bool isPlayerTab = categoryName == "SelectUser" || categoryName == "Lobby";
+        if (wasPlayerTab && !isPlayerTab && categoryName != "Cosmetics")
+        {
+            Mods.ClearSelectedPlayerSilent();
+        }
+
+        if (previousCategory == "Search" && categoryName != "Search")
+            Mods.CloseRoomCodeSearchUiPublic();
+        if (previousCategory == "Friends" && categoryName != "Friends")
+            Mods.ClearSelectedFriend();
+        if (categoryName == "Friends")
+            Mods.EnsureFriendsWarm();
 
         DestroyButtons();
         SetSpotifyPageOnOff();
         buttonRoutine = StartCoroutine(CreateButtons());
+        UpdatePageIndicators();
+        UpdatePageNavVisibility();
+
         Mods.BroadcastPadNetworkState(force: true);
+    }
+
+    public void OpenSettingsCategory(string categoryName)
+    {
+        if (string.IsNullOrWhiteSpace(categoryName))
+            return;
+        if (!Mods.Actions.ContainsKey(categoryName))
+            return;
+
+        SwitchCategory(categoryName);
+    }
+
+    public void OpenNetworkingActionPage(string actionName)
+    {
+        if (string.IsNullOrWhiteSpace(actionName))
+            return;
+        if (!Mods.Actions.TryGetValue("Networking", out ModCategory category))
+            return;
+
+        int index = 0;
+        foreach (var kv in category.Actions)
+        {
+            if (string.Equals(kv.Key, actionName, StringComparison.OrdinalIgnoreCase))
+                break;
+            index++;
+        }
+
+        int pageSize = GetEffectivePageSize("Networking");
+        int targetPage = Mathf.Max(0, index / Mathf.Max(1, pageSize));
+
+
+        if (!string.Equals(currentCategory, "Networking", StringComparison.OrdinalIgnoreCase)
+            || currentPage != targetPage
+            || !isMenuOpened)
+        {
+            currentCategory = "Networking";
+            currentPage = targetPage;
+            if (isMenuOpened)
+            {
+                Tools.StopCoroutine(ref buttonRoutine);
+                DestroyButtons();
+                buttonRoutine = StartCoroutine(CreateButtons());
+                UpdatePageIndicators();
+}
+        }
     }
 
     private void InitPageButtons(GameObject menuObj)
@@ -676,50 +982,142 @@ public partial class Main
             "Room",
             "Cosmetics",
             "SelectUser",
+            "Lobby",
             "Settings",
+            "Friends",
             "Camera",
             "Anticheat",
             "Spotify"
         }.Where(category => Mods.Actions.ContainsKey(category) && Mods.Actions[category].ShowInMenu).ToList();
 
+        var foundButtons = new List<(int Index, Transform Button)>();
+        HashSet<int> wiredIndexes = new HashSet<int>();
         foreach (Transform child in menuObj.GetComponentsInChildren<Transform>(true))
         {
-            if (!child.name.Contains("SelectorBtn", StringComparison.OrdinalIgnoreCase))
+            if (child == null || !child.name.StartsWith("SelectorBtn", StringComparison.OrdinalIgnoreCase))
                 continue;
-            
+
+            string numberPart = child.name.Substring("SelectorBtn".Length);
+            if (!int.TryParse(numberPart, out int btnIndex) || btnIndex < 1)
+                continue;
+            if (!wiredIndexes.Add(btnIndex))
+                continue;
+
+            if (!tabButtonBaseLocalPositions.ContainsKey(btnIndex))
+                tabButtonBaseLocalPositions[btnIndex] = child.localPosition;
+
+            foundButtons.Add((btnIndex, child));
+        }
+
+        foundButtons.Sort((a, b) => a.Index.CompareTo(b.Index));
+
+        Transform gearSource = foundButtons.FirstOrDefault(b => b.Index == 5).Button;
+        if (gearSource != null && settingsTabIconSprite == null)
+            settingsTabIconSprite = CaptureTabIconSprite(gearSource);
+
+        for (int slot = 0; slot < foundButtons.Count; slot++)
+        {
+            Transform child = foundButtons[slot].Button;
+            int btnIndex = foundButtons[slot].Index;
+
             Transform selectorCollider = GetInteractiveCollider(child, "Collider");
             ButtonTrigger trigger = WireInteractive(child, child.name, null, selectorCollider);
             MenuTheme.ApplySelectorButton(child);
             WakeUpTabButton(child);
 
-            string numberPart = child.name.Replace("SelectorBtn", "");
-            if (!int.TryParse(numberPart, out int index))
-                continue;
-
-            index -= 1;
-            if (index < 0 || index >= categories.Count)
+            if (slot < 0 || slot >= categories.Count)
             {
                 child.gameObject.SetActive(false);
                 continue;
             }
 
-            string categoryName = categories[index];
+            string categoryName = categories[slot];
             string capturedCategory = categoryName;
             trigger.SkipSwitchAnimation = true;
             trigger.CustomAction = () => SwitchCategory(capturedCategory);
             ApplyCategoryTabIcon(child, categoryName);
-            
+
+            child.gameObject.SetActive(true);
             tabButtonObjs.Add(child.gameObject);
+        }
+
+        LayoutTabButtons(foundButtons, categories.Count);
+    }
+
+    private void LayoutTabButtons(List<(int Index, Transform Button)> foundButtons, int activeCount)
+    {
+        if (foundButtons == null || foundButtons.Count == 0 || activeCount <= 0)
+            return;
+
+        var active = foundButtons.Where(b => b.Button != null && b.Button.gameObject.activeSelf).Take(activeCount).ToList();
+        if (active.Count == 0)
+            return;
+
+        Vector3 first = tabButtonBaseLocalPositions.TryGetValue(1, out Vector3 p1)
+            ? p1
+            : active[0].Button.localPosition;
+        Vector3 last = tabButtonBaseLocalPositions.TryGetValue(Mathf.Min(6, active.Count), out Vector3 pLast)
+            ? pLast
+            : (tabButtonBaseLocalPositions.TryGetValue(5, out Vector3 p5) ? p5 : active[active.Count - 1].Button.localPosition);
+
+        if (active.Count >= 7 && tabButtonBaseLocalPositions.TryGetValue(7, out Vector3 p7))
+            last = p7;
+        else if (active.Count >= 7 && tabButtonBaseLocalPositions.TryGetValue(6, out Vector3 p6))
+        {
+            Vector3 prev = tabButtonBaseLocalPositions.TryGetValue(5, out Vector3 p5b) ? p5b : p6;
+            last = p6 + (p6 - prev);
+        }
+
+        for (int i = 0; i < active.Count; i++)
+        {
+            float t = active.Count == 1 ? 0f : i / (float)(active.Count - 1);
+            active[i].Button.localPosition = Vector3.Lerp(first, last, t);
         }
     }
 
-    private static void ApplyCategoryTabIcon(Transform selectorButton, string categoryName)
+    private static Sprite CaptureTabIconSprite(Transform selectorButton)
+    {
+        if (selectorButton == null)
+            return null;
+
+        foreach (Image image in selectorButton.GetComponentsInChildren<Image>(true))
+        {
+            if (image == null || image.sprite == null || image.gameObject == selectorButton.gameObject)
+                continue;
+            string name = image.gameObject.name;
+            if (name.IndexOf("outline", StringComparison.OrdinalIgnoreCase) >= 0)
+                continue;
+            if (name.IndexOf("bg", StringComparison.OrdinalIgnoreCase) >= 0)
+                continue;
+            if (name.IndexOf("background", StringComparison.OrdinalIgnoreCase) >= 0)
+                continue;
+            return image.sprite;
+        }
+
+        return null;
+    }
+
+    private void ApplyCategoryTabIcon(Transform selectorButton, string categoryName)
     {
         if (selectorButton == null || string.IsNullOrWhiteSpace(categoryName))
             return;
-        if (!string.Equals(categoryName, "Camera", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(categoryName, "Anticheat", StringComparison.OrdinalIgnoreCase))
+
+        bool needsOverride =
+            string.Equals(categoryName, "Lobby", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(categoryName, "Settings", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(categoryName, "Friends", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(categoryName, "Camera", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(categoryName, "Anticheat", StringComparison.OrdinalIgnoreCase);
+        if (!needsOverride)
             return;
+
+        if (string.Equals(categoryName, "Settings", StringComparison.OrdinalIgnoreCase)
+            && settingsTabIconSprite != null)
+        {
+            ApplySpriteToTab(selectorButton, settingsTabIconSprite);
+            return;
+        }
+
         if (!Mods.Actions.TryGetValue(categoryName, out ModCategory category) || string.IsNullOrWhiteSpace(category.ImageName))
             return;
 
@@ -733,10 +1131,18 @@ public partial class Main
             new Vector2(0.5f, 0.5f),
             100f);
 
+        ApplySpriteToTab(selectorButton, sprite, texture);
+    }
+
+    private static void ApplySpriteToTab(Transform selectorButton, Sprite sprite, Texture2D texture = null)
+    {
+        if (selectorButton == null || sprite == null)
+            return;
+
         bool applied = false;
         foreach (Image image in selectorButton.GetComponentsInChildren<Image>(true))
         {
-            if (image == null || image.gameObject == selectorButton.gameObject)
+            if (image == null)
                 continue;
             string name = image.gameObject.name;
             if (name.IndexOf("outline", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -745,39 +1151,52 @@ public partial class Main
                 continue;
             if (name.IndexOf("background", StringComparison.OrdinalIgnoreCase) >= 0)
                 continue;
+            if (image.gameObject == selectorButton.gameObject && image.type == Image.Type.Sliced)
+                continue;
 
             image.sprite = sprite;
             image.enabled = true;
             image.preserveAspect = true;
-            Color c = image.color;
-            c.a = 1f;
-            image.color = c;
+            image.color = Color.white;
+            applied = true;
+        }
+
+        foreach (RawImage image in selectorButton.GetComponentsInChildren<RawImage>(true))
+        {
+            if (image == null)
+                continue;
+            string name = image.gameObject.name;
+            if (name.IndexOf("outline", StringComparison.OrdinalIgnoreCase) >= 0)
+                continue;
+            if (name.IndexOf("bg", StringComparison.OrdinalIgnoreCase) >= 0)
+                continue;
+
+            if (texture != null)
+                image.texture = texture;
+            else if (sprite != null && sprite.texture != null)
+                image.texture = sprite.texture;
+            image.enabled = true;
+            image.color = Color.white;
+            applied = true;
+        }
+
+        foreach (SpriteRenderer renderer in selectorButton.GetComponentsInChildren<SpriteRenderer>(true))
+        {
+            if (renderer == null)
+                continue;
+            string name = renderer.gameObject.name;
+            if (name.IndexOf("outline", StringComparison.OrdinalIgnoreCase) >= 0)
+                continue;
+            if (name.IndexOf("bg", StringComparison.OrdinalIgnoreCase) >= 0)
+                continue;
+
+            renderer.sprite = sprite;
+            renderer.enabled = true;
+            renderer.color = Color.white;
             applied = true;
         }
 
         if (!applied)
-        {
-            foreach (RawImage image in selectorButton.GetComponentsInChildren<RawImage>(true))
-            {
-                if (image == null)
-                    continue;
-                string name = image.gameObject.name;
-                if (name.IndexOf("outline", StringComparison.OrdinalIgnoreCase) >= 0)
-                    continue;
-
-                image.texture = texture;
-                image.enabled = true;
-                Color c = image.color;
-                c.a = 1f;
-                image.color = c;
-                applied = true;
-                break;
-            }
-        }
-
-        if (!applied &&
-            (string.Equals(categoryName, "Camera", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(categoryName, "Anticheat", StringComparison.OrdinalIgnoreCase)))
         {
             Image fallback = selectorButton.GetComponentInChildren<Image>(true);
             if (fallback != null)
@@ -785,9 +1204,12 @@ public partial class Main
                 fallback.sprite = sprite;
                 fallback.enabled = true;
                 fallback.preserveAspect = true;
+                fallback.color = Color.white;
             }
         }
     }
+
+
 
     private static void WakeUpTabButton(Transform selectorButton)
     {
@@ -879,8 +1301,23 @@ public partial class Main
         return best;
     }
 
+    public void OnOutfitCarouselChanged()
+    {
+        if (!string.Equals(currentCategory, "Cosmetics", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        ApplyOutfitCarouselSideUi();
+        UpdatePageIndicators();
+    }
+
     private void ChangePage(int delta)
     {
+        if (string.Equals(currentCategory, "Cosmetics", StringComparison.OrdinalIgnoreCase))
+        {
+            Mods.BrowseOutfit(delta);
+            return;
+        }
+
         if (!Mods.Actions.TryGetValue(currentCategory, out var category))
             return;
 
@@ -891,7 +1328,174 @@ public partial class Main
         DestroyButtons();
         SetSpotifyPageOnOff();
         buttonRoutine = StartCoroutine(CreateButtons());
+        UpdatePageIndicators();
         Mods.BroadcastPadNetworkState(force: true);
+    }
+
+    private int GetEffectivePageSize(string categoryName)
+    {
+        return PageSize;
+    }
+
+    private int GetCategoryTotalPages(string categoryName, ModCategory category)
+    {
+        if (string.Equals(categoryName, "Cosmetics", StringComparison.OrdinalIgnoreCase))
+            return Mathf.Clamp(Mods.GetOutfitCount(), 1, 10);
+
+        int pageSize = GetEffectivePageSize(categoryName);
+        int itemCount;
+        if (string.Equals(categoryName, "Friends", StringComparison.OrdinalIgnoreCase))
+            itemCount = BuildFriendsPageItems().Count;
+        else
+        {
+            itemCount = category.Actions.Count
+                + ((categoryName == "Lobby" || categoryName == "SelectUser") ? Mods.GetSelectableRigs().Count : 0);
+        }
+
+        int normalPages = Mathf.Max(1, Mathf.CeilToInt((float)Mathf.Max(1, itemCount) / pageSize));
+        if (categoryName == "Spotify")
+            return Mathf.Max(1, normalPages + 1);
+
+        return normalPages;
+    }
+
+    private void CachePageVisDots(GameObject menu)
+    {
+        pageVisDots.Clear();
+        if (menu == null)
+            return;
+
+        var found = new List<(int Index, Transform Dot)>();
+        foreach (Transform child in menu.GetComponentsInChildren<Transform>(true))
+        {
+            if (child == null || !child.name.StartsWith("PageVis", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string numberPart = child.name.Substring("PageVis".Length);
+            if (!int.TryParse(numberPart, out int index) || index < 1)
+                continue;
+
+            string path = GetTransformPath(child);
+            if (path.IndexOf("SideHolder", StringComparison.OrdinalIgnoreCase) >= 0)
+                continue;
+
+            found.Add((index, child));
+        }
+
+        foreach ((int _, Transform dot) in found.OrderBy(f => f.Index).GroupBy(f => f.Index).Select(g => g.First()))
+            pageVisDots.Add(dot);
+    }
+
+    private void EnsurePageVisDotCount(int needed)
+    {
+        needed = Mathf.Clamp(needed, 1, 10);
+        if (pageVisDots.Count == 0 || needed <= pageVisDots.Count)
+            return;
+
+        Transform proto = pageVisDots[0];
+        Transform parent = proto.parent;
+        if (parent == null)
+            return;
+
+        Vector3 step = pageVisDots.Count >= 2
+            ? pageVisDots[1].localPosition - pageVisDots[0].localPosition
+            : new Vector3(0.012f, 0f, 0f);
+
+        while (pageVisDots.Count < needed)
+        {
+            Transform clone = Instantiate(proto.gameObject, parent).transform;
+            clone.name = "PageVis" + (pageVisDots.Count + 1);
+            clone.localRotation = proto.localRotation;
+            clone.localScale = proto.localScale;
+            clone.localPosition = pageVisDots[0].localPosition + step * pageVisDots.Count;
+            clone.gameObject.SetActive(true);
+            pageVisDots.Add(clone);
+        }
+    }
+
+    private void UpdatePageIndicators()
+    {
+        if (menuObj == null)
+            return;
+
+        if (pageVisDots.Count == 0)
+            CachePageVisDots(menuObj);
+
+        if (!Mods.Actions.TryGetValue(currentCategory, out ModCategory category))
+            return;
+
+        int totalPages = GetCategoryTotalPages(currentCategory, category);
+        int page = currentPage;
+
+        if (string.Equals(currentCategory, "Cosmetics", StringComparison.OrdinalIgnoreCase))
+            page = Mathf.Clamp(Mods.GetCurrentOutfitIndex(), 0, Mathf.Max(0, totalPages - 1));
+        else
+            page = Mathf.Clamp(page, 0, Mathf.Max(0, totalPages - 1));
+
+        if (!string.Equals(currentCategory, "Cosmetics", StringComparison.OrdinalIgnoreCase))
+            currentPage = page;
+
+        EnsurePageVisDotCount(totalPages);
+
+        Color32 active = MenuTheme.Current.Accent;
+        Color32 inactive = new Color32(
+            (byte)Mathf.Clamp(MenuTheme.Current.DarkAccent.r / 2, 20, 80),
+            (byte)Mathf.Clamp(MenuTheme.Current.DarkAccent.g / 2, 20, 80),
+            (byte)Mathf.Clamp(MenuTheme.Current.DarkAccent.b / 2, 20, 80),
+            255);
+
+        bool hideAllDots = totalPages <= 1;
+        for (int i = 0; i < pageVisDots.Count; i++)
+        {
+            Transform dot = pageVisDots[i];
+            if (dot == null)
+                continue;
+
+            bool visible = !hideAllDots && i < totalPages;
+            if (dot.gameObject.activeSelf != visible)
+                dot.gameObject.SetActive(visible);
+
+            if (!visible)
+                continue;
+
+            Color32 tint = i == page ? active : inactive;
+            MenuTheme.Tint(dot, tint);
+            foreach (Renderer renderer in dot.GetComponentsInChildren<Renderer>(true))
+            {
+                if (renderer != null)
+                    MenuTheme.Tint(renderer.transform, tint);
+            }
+
+            foreach (UnityEngine.UI.Image img in dot.GetComponentsInChildren<UnityEngine.UI.Image>(true))
+            {
+                if (img != null)
+                    img.color = tint;
+            }
+        }
+
+        UpdatePageNavVisibility(totalPages);
+    }
+
+    private void UpdatePageNavVisibility(int totalPages = -1)
+    {
+        if (menuObj == null)
+            return;
+
+        if (totalPages < 0)
+        {
+            if (!Mods.Actions.TryGetValue(currentCategory, out ModCategory cat))
+                return;
+            totalPages = GetCategoryTotalPages(currentCategory, cat);
+        }
+
+        bool multi = totalPages > 1;
+        string[] navNames = { "PageBack", "PageNext" };
+        for (int i = 0; i < navNames.Length; i++)
+        {
+            Transform nav = FindChildByName(menuObj.transform, navNames[i]);
+            if (nav != null && nav.gameObject.activeSelf != multi)
+                nav.gameObject.SetActive(multi);
+        }
     }
 
     public void RefreshCurrentPage()
@@ -900,6 +1504,7 @@ public partial class Main
         Tools.StopCoroutine(ref buttonRoutine);
         DestroyButtons();
         buttonRoutine = StartCoroutine(CreateButtons());
+        UpdatePageIndicators();
         Mods.BroadcastPadNetworkState(force: true);
     }
 
@@ -939,10 +1544,12 @@ public partial class Main
         }
         else
         {
-            btn = Instantiate(btnPrefab, menuObj.transform);
+            Transform parent = buttonShelf != null ? buttonShelf : menuObj.transform;
+            btn = Instantiate(btnPrefab, parent);
             btn.name = btnName;
             btn.transform.localPosition = buttonBasePosition + new Vector3(0.01f, yOffset, 0f);
-            btn.transform.localRotation = Quaternion.Euler(-90f, 0f, 0f);
+            btn.transform.localRotation = buttonBaseRotation;
+            btn.transform.localScale = buttonBaseScale;
         }
 
         Transform legacyClickCollider = FindButtonChild(btn.transform, "ClickCollider");
@@ -994,11 +1601,8 @@ public partial class Main
         trigger.CustomAction = customAction;
 
         trigger.Slider = slider;
-
         trigger.Knob = knob;
-
         trigger.IsToggle = isToggle;
-
         trigger.Cooldown = cooldown;
 
         MenuTheme.ApplyMenuButton(btn.transform, out Renderer renderer, out Renderer outlineRenderer);
@@ -1014,6 +1618,10 @@ public partial class Main
                 modeText = text;
             else if (string.Equals(btnName, "Region", StringComparison.OrdinalIgnoreCase))
                 regionText = text;
+            else if (string.Equals(btnName, "Lobby Map", StringComparison.OrdinalIgnoreCase))
+                lobbyMapText = text;
+            else if (string.Equals(btnName, "Search Room", StringComparison.OrdinalIgnoreCase))
+                roomCodeSearchText = text;
             else if (string.Equals(btnName, "Click Sound", StringComparison.OrdinalIgnoreCase))
                 clickSoundText = text;
             else if (string.Equals(btnName, "Startup Sound", StringComparison.OrdinalIgnoreCase))
@@ -1024,6 +1632,22 @@ public partial class Main
                 buttonPopSoundText = text;
             else if (string.Equals(btnName, "Notif Sound", StringComparison.OrdinalIgnoreCase))
                 notifSoundText = text;
+            else if (string.Equals(btnName, "Menu Smoothing", StringComparison.OrdinalIgnoreCase))
+                smoothingText = text;
+            else if (string.Equals(btnName, "Smooth Strength", StringComparison.OrdinalIgnoreCase))
+                smoothingStrengthText = text;
+            else if (string.Equals(btnName, "Menu Scale", StringComparison.OrdinalIgnoreCase))
+                menuScaleText = text;
+            else if (string.Equals(btnName, "PC Distance", StringComparison.OrdinalIgnoreCase))
+                headDistanceText = text;
+            else if (string.Equals(btnName, "Double Open", StringComparison.OrdinalIgnoreCase))
+                doubleOpenText = text;
+            else if (string.Equals(btnName, "Open Bind", StringComparison.OrdinalIgnoreCase))
+                openBindText = text;
+            else if (string.Equals(btnName, "Theme", StringComparison.OrdinalIgnoreCase))
+                themeText = text;
+            else if (string.Equals(btnName, "Scan Mode", StringComparison.OrdinalIgnoreCase))
+                scanModeText = text;
         }
         else
             Debug.LogError("[TUP] Text not found: " + btnName);
@@ -1035,12 +1659,14 @@ public partial class Main
             hoverBar.gameObject.SetActive(false);
             trigger.HoverBar = hoverBar;
         }
-        if (text != null)
+            if (text != null)
         {
             trigger.HoverTitle = text.transform;
             Vector3 titlePos = trigger.HoverTitle.localPosition;
             titlePos.x = 0.00943f;
             trigger.HoverTitle.localPosition = titlePos;
+            text.alignment = TextAlignmentOptions.Left;
+            text.margin = new Vector4(0f, 0f, 0.02f, 0f);
         }
 
         Transform hoverCollider = GetInteractiveCollider(btn.transform, "HoverCollider");
@@ -1065,13 +1691,16 @@ public partial class Main
         if (text != null)
         {
             if (btnName == "Nametag Size") { nameTagSizeText = text; text.text = "Nametag Size  :  " + Mods.GetNameTagSizeLabel(); }
-            else if (btnName == "Nametag Fade Distance") { nameTagFadeDistanceText = text; text.text = "Nametag Fade Distance  :  " + Mods.GetNameTagFadeDistanceLabel(); }
+            else if (btnName == "Nametag Fade Distance" || btnName == "Fade Distance")
+            {
+                nameTagFadeDistanceText = text;
+                text.text = "Nametag Fade Distance  :  " + Mods.GetNameTagFadeDistanceLabel();
+            }
         }
 
         if (isToggle)
         {
-
-            bool isStickyPlayerSelect = currentCategory == "SelectUser" && customAction != null;
+            bool isStickyPlayerSelect = currentCategory == "Lobby" && customAction != null;
             bool savedOn = isStickyPlayerSelect
                 ? Mods.IsSelectedPlayerButton(btnName)
                 : Mods.GetSavedToggle(btnName, false);
@@ -1094,22 +1723,31 @@ public partial class Main
                 MenuEffects.SnapDeactivated(knob, slider, trigger.BodyRenderer, trigger.OutlineRenderer);
         }
 
+        if (IsTextOnlySetting(btnName))
+            ApplyCycleSideControls(btn.transform);
+        else if (!isToggle)
+            HideButtonChrome(btn.transform);
+        else
+            HideCycleArrowOnly(btn.transform);
+
         if (btnName.StartsWith("Saved Outfit #") && int.TryParse(btnName.Substring("Saved Outfit #".Length), out int outfitN))
         {
             if (text != null)
                 text.text = Mods.GetOutfitDisplayName(outfitN);
 
             Transform renameSprite = FindButtonChild(btn.transform, "Rename");
-            if (renameSprite != null) renameSprite.gameObject.SetActive(true);
+            if (renameSprite != null)
+                renameSprite.gameObject.SetActive(false);
 
             Transform renameCollider = FindButtonChild(btn.transform, "Rename/RenameCollider");
             if (renameCollider != null)
-            {
-                renameCollider.gameObject.SetActive(true);
-                TMP_Text capturedLabel = text;
-                int capturedN = outfitN;
-                ButtonTrigger renameTrigger = WireInteractive(renameSprite != null ? renameSprite : btn.transform, btnName + "_Rename", () => Mods.StartRename(capturedN, capturedLabel, menuObj.transform.Find("Keyboard")?.gameObject), renameCollider);
-            }
+                renameCollider.gameObject.SetActive(false);
+        }
+
+        if (btnName.StartsWith("Outfit #") && int.TryParse(btnName.Substring("Outfit #".Length), out int outfitNum))
+        {
+            if (text != null)
+                text.text = Mods.GetOutfitDisplayName(outfitNum);
         }
 
         Vector3 targetScale = usingButtonSeed ? btn.transform.localScale : buttonBaseScale;
@@ -1150,8 +1788,9 @@ public partial class Main
 
         KillLeftKeyboardDot();
 
+        Camera activeCamera = GetActiveCamera();
         Transform parent = currentOpenType == MenuOpenType.Head
-            ? GetActiveCamera().transform
+            ? activeCamera != null ? activeCamera.transform : null
             : GetHandMenuTarget();
 
         if (parent == null)
@@ -1270,11 +1909,11 @@ public partial class Main
         if (!menuMadeAlready)
             InitMenu();
 
-        AssetBundle bundle = UseSakuraTheme ? menuReduxBundle : menuBundle;
+        AssetBundle bundle = menuReduxBundle != null ? menuReduxBundle : menuBundle;
         if (bundle == null)
             return null;
 
-        string prefabPath = UseSakuraTheme
+        string prefabPath = bundle == menuReduxBundle
             ? "assets/prefabs/TUP-overv18.prefab"
             : "assets/prefabs/tup-modelsmooth.prefab";
 
@@ -1410,7 +2049,25 @@ public partial class Main
 
     public void PlayBtnCickSound()
     {
+        if (!Mods.IsClickSoundEnabled())
+            return;
         PlayUiClip(currentClickSound);
+    }
+
+    public void RefreshNamedButtonTitle(string buttonName, string label)
+    {
+        if (menuObj == null || string.IsNullOrEmpty(buttonName) || string.IsNullOrEmpty(label))
+            return;
+
+        Transform button = FindChildByName(menuObj.transform, buttonName);
+        TMP_Text text = button != null ? GetButtonTitle(button) : null;
+        if (text != null)
+        {
+            text.text = label;
+            if (string.Equals(buttonName, "Fade Distance", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(buttonName, "Nametag Fade Distance", StringComparison.OrdinalIgnoreCase))
+                nameTagFadeDistanceText = text;
+        }
     }
 
     private void DestroyButtons()

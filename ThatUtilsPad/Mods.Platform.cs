@@ -24,14 +24,6 @@ public static partial class Mods
     private static readonly HashSet<string> pendingPlayerProfileLookups =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-    private static readonly string[] PcModHintTokens =
-    {
-        "bark", "grate", "blossom", "monkephone", "infowatch", "gorillashirts", "thatutilspad",
-        "kamecolor", "juul", "bigusnametags", "gorillabody", "monkstermod", "monkeye", "ii", "void",
-        "seralyth", "seralith", "haunted", "destiny", "crystal", "shiba", "mango", "nebula",
-        "pulsar", "cosmos", "hydra", "spectre", "viper", "eclipse", "phantom", "walksim", "bananaos"
-    };
-
     public static string GetPlatform(this VRRig rig)
     {
         Player player = null;
@@ -59,43 +51,55 @@ public static partial class Mods
 
         string userId = player != null ? player.UserId : null;
 
-        string fast = ResolveFastPlatform(rig, player);
-        if (fast == "Steam")
+        string hard = ResolveHardPlatformSignals(rig, player);
+        if (IsSupportPlatform(hard))
         {
-            if (!string.IsNullOrEmpty(userId))
-                supportPlatformByUserId[userId] = "Steam";
-            return "Steam";
+            CacheResolvedPlatform(userId, hard);
+            return hard;
         }
 
         if (!string.IsNullOrEmpty(userId) &&
             supportPlatformByUserId.TryGetValue(userId, out string cached) &&
             IsSupportPlatform(cached))
-        {
-            if (cached != "Steam")
-                RequestSupportPlatformFromPlayFab(userId);
             return cached;
+
+        string fromDate = ResolvePlatformFromCachedCreationDate(userId);
+        if (IsSupportPlatform(fromDate))
+        {
+            CacheResolvedPlatform(userId, fromDate);
+            return fromDate;
         }
 
-        if (IsSupportPlatform(fast))
+        string fromProps = ResolvePlatformFromPhotonProperties(player);
+        if (IsSupportPlatform(fromProps) && IsTrustedPhotonPlatform(fromProps, player))
         {
-            if (!string.IsNullOrEmpty(userId))
-            {
-                supportPlatformByUserId[userId] = fast;
-                RequestSupportPlatformFromPlayFab(userId);
-            }
-
-            return fast;
-        }
-
-        if (!string.IsNullOrEmpty(userId))
-        {
-            RequestSupportPlatformFromPlayFab(userId);
-            if (supportPlatformByUserId.TryGetValue(userId, out string resolved) && IsSupportPlatform(resolved))
-                return resolved;
-            return "Loading...";
+            CacheResolvedPlatform(userId, fromProps);
+            return fromProps;
         }
 
         return "Unknown";
+    }
+
+    private static bool IsTrustedPhotonPlatform(string platform, Player player)
+    {
+        if (!IsSupportPlatform(platform) || player == null)
+            return false;
+
+        string fromUserId = ResolvePlatformFromUserId(player.UserId);
+        if (IsSupportPlatform(fromUserId))
+            return string.Equals(fromUserId, platform, System.StringComparison.Ordinal);
+
+        if (platform == "Steam")
+            return LooksLikeSteam64(player.UserId) || TryFindSteam64InProperties(player);
+
+        return platform == "Quest" || platform == "Oculus PC" || platform == "PSVR" || platform == "Pico";
+    }
+
+    private static void CacheResolvedPlatform(string userId, string platform)
+    {
+        if (string.IsNullOrEmpty(userId) || !IsSupportPlatform(platform))
+            return;
+        supportPlatformByUserId[userId] = platform;
     }
 
     private static string ResolveLocalSupportPlatform()
@@ -112,11 +116,102 @@ public static partial class Mods
 
             return NormalizeSupportPlatformLabel(raw);
         }
-        catch (Exception ex)
+        catch
         {
-            Debug.LogWarning("[TUP] Support platform (local) failed: " + ex.Message);
             return "Unknown";
         }
+    }
+
+    private static string ResolveHardPlatformSignals(VRRig rig, Player player)
+    {
+        if (player != null)
+        {
+            string fromUserId = ResolvePlatformFromUserId(player.UserId);
+            if (IsSupportPlatform(fromUserId))
+                return fromUserId;
+
+            if (TryFindSteam64InProperties(player))
+                return "Steam";
+        }
+
+        string cosmetics = "";
+        try
+        {
+            if (rig != null)
+                cosmetics = rig.Cosmetics() ?? "";
+        }
+        catch { }
+
+        if (!string.IsNullOrEmpty(cosmetics))
+        {
+            string compact = cosmetics.Replace(" ", "").Replace(".", "").Replace("_", "").Replace("-", "");
+            if (cosmetics.IndexOf("S. FIRST LOGIN", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                compact.IndexOf("SFIRSTLOGIN", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                compact.IndexOf("STEAMFIRSTLOGIN", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "Steam";
+
+            if (cosmetics.IndexOf("FIRST LOGIN", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                cosmetics.IndexOf("GAME-PURCHASE", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                compact.IndexOf("FIRSTLOGIN", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                compact.IndexOf("GAMEPURCHASE", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "Oculus PC";
+        }
+
+        try
+        {
+            if (rig != null)
+            {
+                int questTier = RigBits.GetQuestTier(rig);
+                int pcTier = RigBits.GetPCTier(rig);
+                if (questTier > 0 && questTier >= pcTier)
+                    return "Quest";
+                if (pcTier > 0)
+                    return "Oculus PC";
+            }
+        }
+        catch { }
+
+        return "Unknown";
+    }
+
+    private static string ResolvePlatformFromUserId(string userId)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+            return "Unknown";
+
+        string lower = userId.Trim().ToLowerInvariant();
+        if (lower.StartsWith("steam_", StringComparison.Ordinal) || LooksLikeSteam64(userId))
+            return "Steam";
+        if (lower.StartsWith("oculus", StringComparison.Ordinal) || lower.Contains("meta_") ||
+            lower.Contains("quest") || lower.Contains("android"))
+            return "Quest";
+
+        return "Unknown";
+    }
+
+    private static bool TryFindSteam64InProperties(Player player)
+    {
+        if (player?.CustomProperties == null)
+            return false;
+
+        foreach (object key in player.CustomProperties.Keys)
+        {
+            string keyText = key != null ? key.ToString() : "";
+            object value = player.CustomProperties[key];
+            string valueText = value != null ? value.ToString() : "";
+
+            string keySquish = SquishPropertyText(keyText);
+            if (keySquish.Contains("steam64") || keySquish.Contains("steamid") || keySquish == "steam")
+            {
+                if (LooksLikeSteam64(valueText))
+                    return true;
+            }
+
+            if (LooksLikeSteam64(valueText))
+                return true;
+        }
+
+        return false;
     }
 
     private static string NormalizeSupportPlatformLabel(string raw)
@@ -130,14 +225,21 @@ public static partial class Mods
         while (upper.Contains("  "))
             upper = upper.Replace("  ", " ");
 
-        if (upper == "PC" || upper == "OCULUS PC" || upper == "OCULUSPC" || upper == "OCULUS" ||
-            upper == "RIFT" || upper.Contains("OCULUS PC") || upper.Contains("PLATFORM OCULUS"))
+        if (upper == "PC" || upper == "OCULUS PC" || upper == "OCULUSPC" ||
+            upper == "RIFT" || upper == "PCVR" || upper == "DESKTOP" || upper == "COMPUTER" ||
+            upper.Contains("OCULUS PC") || upper.Contains("PLATFORM OCULUS"))
             return "Oculus PC";
-        if (upper == "STEAM" || upper.Contains("STEAM") || upper.Contains("PLATFORM STEAM"))
+        if (upper == "OCULUS")
+            return "Quest";
+        if (upper == "STEAM" || upper == "STEAMVR" || upper == "PLATFORM STEAM" ||
+            upper.StartsWith("STEAM ", StringComparison.Ordinal) ||
+            upper.EndsWith(" STEAM", StringComparison.Ordinal) ||
+            upper.Contains("PLATFORM STEAM"))
             return "Steam";
         if (upper == "QUEST" || upper == "META" || upper == "STANDALONE" || upper == "STANDALONEVR" ||
             upper == "ANDROID" || upper.Contains("STANDALONE") || upper.Contains("QUEST") ||
-            upper.Contains("META") || upper.Contains("HORIZON") || upper.Contains("PLATFORM QUEST"))
+            upper.Contains("HORIZON") || upper.Contains("PLATFORM QUEST") ||
+            upper == "META QUEST" || upper.StartsWith("META ", StringComparison.Ordinal))
             return "Quest";
         if (upper == "PSVR" || upper == "PS5" || upper == "PLAYSTATION" || upper == "PSN" ||
             upper.Contains("PSVR") || upper.Contains("PLAYSTATION") || upper.Contains("PLATFORM PSVR"))
@@ -157,114 +259,6 @@ public static partial class Mods
                platform == "Pico";
     }
 
-    private static string ResolveFastPlatform(VRRig rig, Player player)
-    {
-        if (player != null && LooksLikeSteam64(player.UserId))
-            return "Steam";
-
-        if (player != null && TryFindSteam64InProperties(player))
-            return "Steam";
-
-        string fromPhoton = ResolvePlatformFromPhotonProperties(player);
-        if (fromPhoton == "Steam")
-            return "Steam";
-
-        string scored = ResolvePlatformSeralythStyle(rig, player);
-        if (IsSupportPlatform(scored))
-            return scored;
-
-        if (IsSupportPlatform(fromPhoton))
-            return fromPhoton;
-
-        string fromCreation = ResolvePlatformFromCachedCreationDate(player != null ? player.UserId : null);
-        if (fromCreation == "Oculus PC")
-            return fromCreation;
-
-        return "Unknown";
-    }
-
-    private static string ResolvePlatformSeralythStyle(VRRig rig, Player player)
-    {
-        int suspiciouslySteam = 0;
-        int suspiciouslyPC = 0;
-        int suspiciouslyQuest = 0;
-
-        string cosmetics = "";
-        try
-        {
-            if (rig != null)
-                cosmetics = rig.Cosmetics() ?? "";
-        }
-        catch { }
-
-        string cosmeticsCompact = cosmetics.Replace(" ", "").Replace(".", "").Replace("_", "").Replace("-", "");
-
-        bool hasSteamFirstLogin =
-            cosmetics.IndexOf("S. FIRST LOGIN", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            cosmeticsCompact.IndexOf("SFIRSTLOGIN", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            cosmeticsCompact.IndexOf("STEAMFIRSTLOGIN", StringComparison.OrdinalIgnoreCase) >= 0;
-
-        bool hasOculusFirstLogin =
-            !hasSteamFirstLogin &&
-            (cosmetics.IndexOf("FIRST LOGIN", StringComparison.OrdinalIgnoreCase) >= 0 ||
-             cosmetics.IndexOf("GAME-PURCHASE", StringComparison.OrdinalIgnoreCase) >= 0 ||
-             cosmeticsCompact.IndexOf("FIRSTLOGIN", StringComparison.OrdinalIgnoreCase) >= 0 ||
-             cosmeticsCompact.IndexOf("GAMEPURCHASE", StringComparison.OrdinalIgnoreCase) >= 0);
-
-        if (hasSteamFirstLogin)
-            suspiciouslySteam += 3;
-
-        if (hasOculusFirstLogin)
-            suspiciouslyPC += 2;
-
-        int pcTier = 0;
-        int questTier = 0;
-        try
-        {
-            if (rig != null)
-            {
-                pcTier = RigBits.GetPCTier(rig);
-                questTier = RigBits.GetQuestTier(rig);
-            }
-        }
-        catch { }
-
-        if (pcTier > 0)
-            suspiciouslySteam += 2;
-        else if (questTier > 0)
-            suspiciouslyQuest += 2;
-
-        if (player != null && LooksLikeSteam64(player.UserId))
-            suspiciouslySteam += 3;
-        if (player != null && TryFindSteam64InProperties(player))
-            suspiciouslySteam += 3;
-
-        if (player != null && PlayerHasPcModSignature(player))
-            suspiciouslySteam += 2;
-
-        if (player?.CustomProperties != null && player.CustomProperties.Count >= 2 &&
-            suspiciouslySteam == 0 && suspiciouslyQuest == 0 && suspiciouslyPC == 0)
-        {
-            suspiciouslySteam += 1;
-        }
-
-        if (suspiciouslySteam > suspiciouslyPC && suspiciouslySteam > suspiciouslyQuest)
-            return "Steam";
-        if (suspiciouslyPC > suspiciouslySteam && suspiciouslyPC > suspiciouslyQuest)
-            return "Oculus PC";
-        if (suspiciouslyQuest > suspiciouslySteam && suspiciouslyQuest > suspiciouslyPC)
-            return "Quest";
-
-        if (suspiciouslySteam > 0)
-            return "Steam";
-        if (suspiciouslyPC > 0)
-            return "Oculus PC";
-        if (suspiciouslyQuest > 0)
-            return "Quest";
-
-        return "Unknown";
-    }
-
     private static string ResolvePlatformFromPhotonProperties(Player player)
     {
         if (player?.CustomProperties == null || player.CustomProperties.Count == 0)
@@ -273,63 +267,83 @@ public static partial class Mods
         foreach (object key in player.CustomProperties.Keys)
         {
             string keyText = key != null ? key.ToString() : "";
-            object value = player.CustomProperties[key];
-            string valueText = value != null ? value.ToString() : "";
+            if (string.IsNullOrEmpty(keyText))
+                continue;
 
             string keyUpper = keyText.Trim().ToUpperInvariant();
-            if (keyUpper == "PLATFORM" || keyUpper == "PLAT" || keyUpper.Contains("PLATFORM"))
-            {
-                string normalized = NormalizeSupportPlatformLabel(valueText);
-                if (IsSupportPlatform(normalized))
-                    return normalized;
-            }
+            bool looksLikePlatformKey =
+                keyUpper == "PLATFORM" ||
+                keyUpper == "PLAT" ||
+                keyUpper == "PLAYERPLATFORM" ||
+                keyUpper == "CURRENTPLATFORM" ||
+                keyUpper == "STORENAME" ||
+                keyUpper == "STORE" ||
+                (keyUpper.Contains("PLATFORM") && !keyUpper.Contains("TRANSFORM"));
 
-            string combined = SquishPropertyText(keyText + " " + valueText);
-            if (combined.Contains("steam64") || combined.Contains("steamid") ||
-                (combined.Contains("steam") && !combined.Contains("steamdeck")))
+            if (!looksLikePlatformKey)
+                continue;
+
+            object value = player.CustomProperties[key];
+            if (value == null)
+                continue;
+
+            string trimmed;
+            if (value is byte || value is sbyte || value is short || value is ushort ||
+                value is int || value is uint || value is long || value is ulong)
+                trimmed = Convert.ToInt64(value).ToString();
+            else
+                trimmed = value.ToString().Trim();
+
+            if (trimmed.Length == 0)
+                continue;
+
+            string lower = trimmed.ToLowerInvariant();
+
+            if (trimmed == "2" || lower == "steam" || lower == "steamvr")
+                return "Steam";
+            if (trimmed == "1" || lower == "quest" || lower == "standalone" ||
+                lower == "android")
+                return "Quest";
+            if (trimmed == "0" || lower == "pc" || lower == "pcvr" || lower == "desktop" ||
+                lower == "computer" || lower == "oculuspc" || lower == "rift")
+                return "Oculus PC";
+            if (lower == "oculus")
+                return "Quest";
+            if (lower == "meta")
+                return "Quest";
+
+            if (lower == "psvr" || lower == "playstation" || lower == "psn")
+                return "PSVR";
+            if (lower == "pico")
+                return "Pico";
+
+            string normalized = NormalizeSupportPlatformLabel(trimmed);
+            if (IsSupportPlatform(normalized))
+                return normalized;
+        }
+
+        foreach (object key in player.CustomProperties.Keys)
+        {
+            string keyText = key != null ? key.ToString() : "";
+            if (string.IsNullOrEmpty(keyText))
+                continue;
+
+            string keySquish = SquishPropertyText(keyText);
+            bool steamKey =
+                keySquish.Contains("steam64") ||
+                keySquish.Contains("steamid") ||
+                keySquish == "steam";
+
+            if (!steamKey)
+                continue;
+
+            object value = player.CustomProperties[key];
+            string valueText = value != null ? value.ToString().Trim() : "";
+            if (LooksLikeSteam64(valueText))
                 return "Steam";
         }
 
         return "Unknown";
-    }
-
-    private static bool PlayerHasPcModSignature(Player player)
-    {
-        if (player?.CustomProperties == null || player.CustomProperties.Count == 0)
-            return false;
-
-        foreach (object key in player.CustomProperties.Keys)
-        {
-            string keyText = SquishPropertyText(key != null ? key.ToString() : "");
-            object value = player.CustomProperties[key];
-            string valueText = SquishPropertyText(value != null ? value.ToString() : "");
-
-            for (int i = 0; i < PcModHintTokens.Length; i++)
-            {
-                string token = PcModHintTokens[i];
-                if (keyText.Contains(token) || valueText.Contains(token))
-                    return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool TryFindSteam64InProperties(Player player)
-    {
-        if (player?.CustomProperties == null)
-            return false;
-
-        foreach (object key in player.CustomProperties.Keys)
-        {
-            if (LooksLikeSteam64(key != null ? key.ToString() : null))
-                return true;
-            object value = player.CustomProperties[key];
-            if (LooksLikeSteam64(value != null ? value.ToString() : null))
-                return true;
-        }
-
-        return false;
     }
 
     private static string ResolvePlatformFromCachedCreationDate(string userId)
@@ -360,7 +374,9 @@ public static partial class Mods
         if (string.IsNullOrEmpty(userId) || pendingSupportPlatformLookups.Contains(userId))
             return;
 
-        if (supportPlatformByUserId.TryGetValue(userId, out string existing) && existing == "Steam")
+        if (supportPlatformByUserId.TryGetValue(userId, out string existing) &&
+            existing == "Steam" &&
+            LooksLikeSteam64(userId))
             return;
 
         if (creationDates.TryGetValue(userId, out string existingDate) &&
@@ -415,15 +431,7 @@ public static partial class Mods
                 pendingPlayerProfileLookups.Remove(userId);
                 string platform = GetPlatformFromPlayerProfile(result != null ? result.PlayerProfile : null);
                 if (IsSupportPlatform(platform))
-                {
-                    if (!supportPlatformByUserId.TryGetValue(userId, out string existing) ||
-                        !IsSupportPlatform(existing) ||
-                        platform == "Steam" ||
-                        (existing == "Quest" && platform != "Quest"))
-                    {
-                        supportPlatformByUserId[userId] = platform;
-                    }
-                }
+                    TryStoreSupportPlatform(userId, platform, fromPlayFab: true);
 
             },
             error =>
@@ -733,8 +741,10 @@ public static partial class Mods
 
         string normalized = SquishPropertyText(modName);
         if (normalized.Contains("seralyth") || normalized.Contains("seralith") ||
-            normalized.Contains("org.seralyth") || normalized.Contains("menuseralyth") ||
-            normalized.Contains("confirmusing") || normalized == "isusing")
+            normalized.Contains("org.seralyth") || normalized.Contains("menuseralyth"))
+            return "SERALYTH MOD MENU";
+        if ((normalized.Contains("confirmusing") || normalized == "isusing") &&
+            (normalized.Contains("seralyth") || normalized.Contains("goldentrophy") || normalized.Contains("console")))
             return "SERALYTH MOD MENU";
         if (normalized.Contains("goldentrophy") && normalized.Contains("console"))
             return "Seralyth Console";
@@ -745,47 +755,49 @@ public static partial class Mods
             return "II's Stupid Menu";
         if (normalized.Contains("void") && (normalized.Contains("menu") || normalized.Contains("client") || normalized.Contains("open")))
             return "Void";
-        if (normalized.Contains("haunted"))
+        if (normalized.Contains("haunted") && normalized.Contains("menu"))
             return "Haunted Mod Menu";
-        if (normalized.Contains("monkemodmenu") || normalized.Contains("monkemod"))
+        if (normalized.Contains("monkemodmenu") || (normalized.Contains("monkemod") && normalized.Contains("menu")))
             return "Monke Mod Menu";
-        if (normalized.Contains("destiny"))
+        if (normalized.Contains("destinymenu") || (normalized.Contains("destiny") && normalized.Contains("menu")))
             return "Destiny Menu";
-        if (normalized.Contains("crystal"))
+        if (normalized.Contains("crystalmenu") || (normalized.Contains("crystal") && normalized.Contains("menu")))
             return "Crystal Menu";
-        if (normalized.Contains("shiba") || normalized == "dark")
+        if (normalized.Contains("shibagt") || normalized.Contains("shibagtdark") ||
+            (normalized.Contains("shiba") && (normalized.Contains("dark") || normalized.Contains("menu"))))
             return "Shiba GT Dark";
-        if (normalized.Contains("mango"))
+        if (normalized.Contains("mangomenu") || (normalized.Contains("mango") && normalized.Contains("menu")))
             return "Mango";
-        if (normalized.Contains("nebula"))
+        if (normalized.Contains("nebulamenu") || (normalized.Contains("nebula") && normalized.Contains("menu")))
             return "Nebula";
-        if (normalized.Contains("pulsar"))
+        if (normalized.Contains("pulsarmenu") || (normalized.Contains("pulsar") && normalized.Contains("menu")))
             return "Pulsar";
-        if (normalized.Contains("cosmos"))
+        if (normalized.Contains("cosmosmenu") || (normalized.Contains("cosmos") && normalized.Contains("menu")))
             return "Cosmos";
-        if (normalized.Contains("hydra"))
+        if (normalized.Contains("hydramenu") || (normalized.Contains("hydra") && normalized.Contains("menu")))
             return "Hydra";
-        if (normalized.Contains("spectre"))
+        if (normalized.Contains("spectremenu") || (normalized.Contains("spectre") && normalized.Contains("menu")))
             return "Spectre";
-        if (normalized.Contains("viper"))
+        if (normalized.Contains("vipermenu") || (normalized.Contains("viper") && normalized.Contains("menu")))
             return "Viper";
-        if (normalized.Contains("eclipse"))
+        if (normalized.Contains("eclipsemenu") || (normalized.Contains("eclipse") && normalized.Contains("menu")))
             return "Eclipse";
-        if (normalized.Contains("phantom"))
+        if (normalized.Contains("phantommenu") || (normalized.Contains("phantom") && normalized.Contains("menu")))
             return "Phantom";
         if (normalized.Contains("violetpaid"))
             return "Violet Paid";
-        if (normalized.Contains("violetfree") || normalized.Contains("violetontop") || normalized == "violet")
+        if (normalized.Contains("violetfree") || normalized.Contains("violetontop") ||
+            (normalized.Contains("violet") && (normalized.Contains("menu") || normalized.Contains("user"))))
             return "Violet";
-        if (normalized.Contains("obsidian"))
+        if (normalized.Contains("obsidian") && (normalized.Contains("menu") || normalized.Contains("mc")))
             return "Obsidian";
-        if (normalized.Contains("oblivion"))
+        if (normalized.Contains("oblivion") && normalized.Contains("menu"))
             return "Oblivion";
         if (normalized.Contains("asteroid"))
             return "Asteroid Lite";
-        if (normalized.Contains("elux"))
+        if (normalized.Contains("elux") && (normalized.Contains("menu") || normalized.Length >= 6))
             return "Elux";
-        if (normalized.Contains("atlas"))
+        if (normalized.Contains("atlasmenu") || (normalized.Contains("atlas") && normalized.Contains("menu")))
             return "Atlas";
         if (normalized.Contains("fusioned"))
             return "Fusioned";
@@ -795,9 +807,10 @@ public static partial class Mods
             return "GorillaShop";
         if (normalized.Contains("emotewheel"))
             return "Fortnite Emote Wheel";
-        if (normalized.Contains("untitled"))
+        if (normalized.Contains("untitled") && normalized.Contains("menu"))
             return "Untitled";
-        if (normalized.Contains("orbit") || normalized.Contains("øƦɓƖƬ"))
+        if ((normalized.Contains("orbit") || normalized.Contains("øƦɓƖƬ")) &&
+            (normalized.Contains("menu") || normalized.Contains("mod") || normalized == "orbit"))
             return "Orbit";
         if (normalized.Contains("blossom") || normalized.Contains("monkster") || normalized.Contains("monkeye"))
             return "BlossomChecker";
@@ -805,25 +818,33 @@ public static partial class Mods
             return "Kitty Info";
         if (normalized.Contains("cosmeticx") || normalized.Contains("cosmeitcx") || normalized.Contains("cokecosmetics"))
             return "CosmeticX";
-        if (normalized.Contains("fpsnametag") || normalized.Contains("zlothy"))
+        if (normalized.Contains("fpsnametag") || (normalized.Contains("zlothy") && normalized.Contains("nametag")))
             return "FPS Nametags / Untrusted";
         if (normalized.Contains("yulookininhereweirdo") || normalized.Contains("1yulookininhereweirdo"))
             return "Malachi Menu Reborn";
         if (normalized.Contains("dtasloi") || normalized == "dtaoi")
             return "Pepsi Dee Mod Checker";
+        if (normalized.Contains("polkadotted"))
+            return "PolkaDottedPlayer";
+        if (normalized.Contains("hansolo") || normalized.Contains("1000falcon"))
+            return "HanSolo1000Falcon";
+        if (normalized.Contains("thatutilspad") || normalized.Contains("thatusepad"))
+            return "ThatUtilsPad Free";
         if (normalized.Contains("walksimulator") || normalized.Contains("walksim"))
             return "WalkSimulator";
         if (normalized.Contains("bananaos"))
             return "Banana OS";
-        if (normalized.Contains("elixir"))
+        if (normalized.Contains("elixir") && (normalized.Contains("menu") || normalized.Length >= 8))
             return "Elixir";
-        if (normalized.Contains("genesis"))
+        if (normalized.Contains("genesis") && (normalized.Contains("menu") || normalized.Length >= 8))
             return "Genesis";
         if (normalized.Contains("recroomrig") || normalized.Contains("ilikecheese"))
             return "Rec Room Rig";
         if (normalized.Contains("grateversion") || normalized == "grate")
             return "Grate";
-        if (normalized.Contains("bark") || normalized.Contains("kame"))
+        if (normalized.Contains("barkversion") || normalized.Contains("barkenabled") ||
+            normalized.Contains("barkplayersize") || normalized.Contains("kamecolor") ||
+            normalized.Contains("kamestate") || normalized == "bark")
             return "Bark";
         if (normalized.Contains("za5fih") || normalized.Contains("lbjubzwl9") || normalized.Contains("jsqls2jev") ||
             normalized.Contains("vjx0hkty") || normalized.Contains("lfae3j") || normalized.Contains("va7blsu") ||
@@ -835,26 +856,51 @@ public static partial class Mods
 
     private static void CachePlatformFromPlayFab(string userId, UserAccountInfo accountInfo)
     {
-        if (string.IsNullOrEmpty(userId) || accountInfo == null)
+    }
+
+    private static void TryStoreSupportPlatform(string userId, string platform, bool fromPlayFab)
+    {
+        if (string.IsNullOrEmpty(userId) || !IsSupportPlatform(platform))
             return;
 
-        string platform = GetPlatformFromPlayFabAccountInfo(accountInfo);
-        if (IsSupportPlatform(platform))
+        if (!supportPlatformByUserId.TryGetValue(userId, out string existing) || !IsSupportPlatform(existing))
         {
-            if (!supportPlatformByUserId.TryGetValue(userId, out string existing) ||
-                !IsSupportPlatform(existing) ||
-                platform == "Steam" ||
-                (existing == "Quest" && platform != "Quest"))
-            {
-                supportPlatformByUserId[userId] = platform;
-            }
-
-            pendingSupportPlatformLookups.Remove(userId);
-            if (platform != "Steam")
-                RequestPlayerProfilePlatform(userId);
+            supportPlatformByUserId[userId] = platform;
             return;
         }
 
-        RequestPlayerProfilePlatform(userId);
+        if (existing == platform)
+            return;
+
+        if (fromPlayFab)
+        {
+            int incomingRank = PlatformConfidenceRank(platform, hard: true);
+            int existingRank = PlatformConfidenceRank(existing, hard: LooksLikeSteam64(userId));
+            if (incomingRank >= existingRank || existing == "Steam")
+                supportPlatformByUserId[userId] = platform;
+            return;
+        }
+
+        if (PlatformConfidenceRank(platform, hard: false) > PlatformConfidenceRank(existing, hard: false))
+            supportPlatformByUserId[userId] = platform;
+    }
+
+    private static int PlatformConfidenceRank(string platform, bool hard)
+    {
+        switch (platform)
+        {
+            case "Steam":
+                return hard ? 5 : 1;
+            case "PSVR":
+                return 4;
+            case "Quest":
+                return 3;
+            case "Oculus PC":
+                return 3;
+            case "Pico":
+                return 3;
+            default:
+                return 0;
+        }
     }
 }

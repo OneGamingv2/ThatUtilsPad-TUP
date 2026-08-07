@@ -380,15 +380,6 @@ private static Transform FindAlbumHome(Transform root)
         return Mathf.Max(0, normalPages);
     }
 
-    private int GetCategoryTotalPages(string categoryName, ModCategory category)
-    {
-        int itemCount = category.Actions.Count + (categoryName == "SelectUser" ? Mods.GetSelectableRigs().Count : 0);
-        int normalPages = Mathf.CeilToInt((float)itemCount / PageSize);
-        if (categoryName == "Spotify")
-            return Mathf.Max(1, normalPages + 1);
-        return Mathf.Max(1, normalPages);
-    }
-
     private void SetSpotifyPageOnOff()
     {
         if (spotifyPage == null) return;

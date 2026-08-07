@@ -1,4 +1,4 @@
-﻿using CameraMod.Camera;
+using CameraMod.Camera;
 using UnityEngine;
 
 namespace CameraMod.Button.Buttons

@@ -21,9 +21,31 @@ public static partial class Mods
         public void Set(string value)
         {
             if (Tmp != null)
+            {
+                Tmp.richText = true;
                 Tmp.text = value;
+            }
             else if (UiText != null)
+            {
                 UiText.text = value;
+            }
+        }
+
+        public void SetModLabel(string value, float fontSize)
+        {
+            if (Tmp != null)
+            {
+                Tmp.richText = true;
+                Tmp.fontStyle = FontStyles.Bold;
+                if (fontSize > 0f)
+                    Tmp.fontSize = fontSize;
+                Tmp.text = value;
+            }
+            else if (UiText != null)
+            {
+                UiText.fontStyle = FontStyle.Bold;
+                UiText.text = value;
+            }
         }
     }
 
@@ -62,7 +84,16 @@ public static partial class Mods
         public bool HasFpsColor;
         public bool HasPingColor;
         public bool HasModsColor;
+        public float CachedHeightOffset = NameTagBaseHeight;
+        public float NextHeightSampleTime;
     }
+
+    private const float NameTagBaseHeight = 0.42f;
+    private const float NameTagHatBoost = 0.20f;
+    private const float NameTagFaceBoost = 0.10f;
+    private const float NameTagClearance = 0.08f;
+    private const float NameTagMaxHeight = 1.20f;
+    private const float NameTagHeightSampleSeconds = 0.35f;
 
     private static bool nameTagsEnabled;
     private static readonly Dictionary<VRRig, NameTagView> nametags = new Dictionary<VRRig, NameTagView>();
@@ -132,7 +163,15 @@ public static partial class Mods
 
             Transform anchor = view.Anchor != null ? view.Anchor : rig.transform;
             Vector3 anchorPosition = anchor.position;
-            view.RootTransform.position = anchorPosition + Vector3.up * 0.45f;
+
+            if (Time.time >= view.NextHeightSampleTime)
+            {
+                view.CachedHeightOffset = ComputeNameTagHeightOffset(rig, anchor);
+                view.NextHeightSampleTime =
+                    Time.time + NameTagHeightSampleSeconds + (Mathf.Abs(rig.GetInstanceID() % 7) * 0.02f);
+            }
+
+            view.RootTransform.position = anchorPosition + Vector3.up * view.CachedHeightOffset;
 
             if (cameraTransform != null)
             {
@@ -168,6 +207,160 @@ public static partial class Mods
         }
     }
 
+    private static float ComputeNameTagHeightOffset(VRRig rig, Transform head)
+    {
+        float height = NameTagBaseHeight;
+        if (rig == null || head == null)
+            return height;
+
+        bool hasHat = false;
+        bool hasFace = false;
+        TryDetectHeadCosmetics(rig, out hasHat, out hasFace);
+
+        if (hasHat)
+            height = Mathf.Max(height, NameTagBaseHeight + NameTagHatBoost);
+        else if (hasFace)
+            height = Mathf.Max(height, NameTagBaseHeight + NameTagFaceBoost);
+
+        float measured = MeasureHeadCosmeticTopOffset(rig, head);
+        if (measured > 0.05f)
+            height = Mathf.Max(height, measured + NameTagClearance);
+
+        return Mathf.Clamp(height, NameTagBaseHeight, NameTagMaxHeight);
+    }
+
+    private static void TryDetectHeadCosmetics(VRRig rig, out bool hasHat, out bool hasFace)
+    {
+        hasHat = false;
+        hasFace = false;
+        if (rig == null)
+            return;
+
+        try
+        {
+            if (rig.cosmeticSet != null && rig.cosmeticSet.items != null)
+            {
+                for (int i = 0; i < rig.cosmeticSet.items.Length; i++)
+                {
+                    object itemObj = rig.cosmeticSet.items[i];
+                    if (itemObj == null)
+                        continue;
+
+                    Type itemType = itemObj.GetType();
+                    System.Reflection.FieldInfo nullField = itemType.GetField("isNullItem");
+                    if (nullField != null && nullField.GetValue(itemObj) is bool isNull && isNull)
+                        continue;
+
+                    string categoryText = "";
+                    System.Reflection.FieldInfo categoryField =
+                        itemType.GetField("itemCategory") ?? itemType.GetField("category");
+                    if (categoryField != null)
+                    {
+                        object cat = categoryField.GetValue(itemObj);
+                        categoryText = cat != null ? cat.ToString() : "";
+                    }
+
+                    string nameText = "";
+                    System.Reflection.FieldInfo nameField =
+                        itemType.GetField("itemName") ?? itemType.GetField("displayName");
+                    if (nameField != null)
+                    {
+                        object nameVal = nameField.GetValue(itemObj);
+                        nameText = nameVal != null ? nameVal.ToString() : "";
+                    }
+
+                    string combined = (categoryText + " " + nameText).ToUpperInvariant();
+                    if (combined.IndexOf("HAT", StringComparison.Ordinal) >= 0 ||
+                        combined.IndexOf("HEAD", StringComparison.Ordinal) >= 0 ||
+                        combined.IndexOf("CROWN", StringComparison.Ordinal) >= 0 ||
+                        combined.IndexOf("HELMET", StringComparison.Ordinal) >= 0 ||
+                        combined.IndexOf("HOOD", StringComparison.Ordinal) >= 0 ||
+                        combined.IndexOf("CAP", StringComparison.Ordinal) >= 0)
+                        hasHat = true;
+                    if (combined.IndexOf("FACE", StringComparison.Ordinal) >= 0 ||
+                        combined.IndexOf("MASK", StringComparison.Ordinal) >= 0 ||
+                        combined.IndexOf("GLASS", StringComparison.Ordinal) >= 0 ||
+                        combined.IndexOf("NOSE", StringComparison.Ordinal) >= 0)
+                        hasFace = true;
+
+                    if (hasHat && hasFace)
+                        return;
+                }
+            }
+        }
+        catch { }
+
+        if (hasHat || hasFace)
+            return;
+
+        try
+        {
+            string cosmetics = rig.Cosmetics() ?? "";
+            if (string.IsNullOrEmpty(cosmetics))
+                return;
+
+            string upper = cosmetics.ToUpperInvariant();
+            if (upper.IndexOf("HAT", StringComparison.Ordinal) >= 0 ||
+                upper.IndexOf("CROWN", StringComparison.Ordinal) >= 0 ||
+                upper.IndexOf("HELMET", StringComparison.Ordinal) >= 0 ||
+                upper.IndexOf("HOOD", StringComparison.Ordinal) >= 0)
+                hasHat = true;
+            if (upper.IndexOf("FACE", StringComparison.Ordinal) >= 0 ||
+                upper.IndexOf("MASK", StringComparison.Ordinal) >= 0 ||
+                upper.IndexOf("GLASS", StringComparison.Ordinal) >= 0)
+                hasFace = true;
+        }
+        catch { }
+    }
+
+    private static float MeasureHeadCosmeticTopOffset(VRRig rig, Transform head)
+    {
+        if (rig == null || head == null)
+            return 0f;
+
+        Vector3 headPos = head.position;
+        float maxY = headPos.y;
+        bool found = false;
+
+        Renderer[] renderers = rig.GetComponentsInChildren<Renderer>(false);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null || !renderer.enabled || !renderer.gameObject.activeInHierarchy)
+                continue;
+
+            string name = renderer.gameObject.name ?? "";
+            if (name.IndexOf("nametag", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("NameTag", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.StartsWith("TUP_", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            Bounds bounds = renderer.bounds;
+            Vector3 center = bounds.center;
+
+            float dx = center.x - headPos.x;
+            float dz = center.z - headPos.z;
+            float horizontalSqr = dx * dx + dz * dz;
+            if (horizontalSqr > 0.55f * 0.55f)
+                continue;
+            if (bounds.max.y < headPos.y - 0.05f)
+                continue;
+            if (center.y < headPos.y - 0.25f)
+                continue;
+
+            if (bounds.max.y > maxY)
+            {
+                maxY = bounds.max.y;
+                found = true;
+            }
+        }
+
+        if (!found)
+            return 0f;
+
+        return maxY - headPos.y;
+    }
+
     private static NameTagView CreateNameTagView(VRRig rig, GameObject prefab)
     {
         GameObject root = Object.Instantiate(prefab, rig.transform, true);
@@ -197,9 +390,11 @@ public static partial class Mods
             PingColors = CreateColorBinding(transforms, graphics, sprites, renderers, ping, "Ping"),
             ModsColors = CreateColorBinding(transforms, graphics, sprites, renderers, mods, "Mods"),
             IconMeta = FindPlatformIcon(transforms, "IconMeta", "Meta", "Quest", "Standalone"),
-            IconPc = FindPlatformIcon(transforms, "IconPC", "IconPc", "PC", "Oculus"),
-            IconUnknown = FindPlatformIcon(transforms, "IconUnknown", "Unknown"),
-            IconSteam = FindPlatformIcon(transforms, "IconSteam", "Steam", "Icon_Steam", "SteamIcon")
+            IconPc = FindPlatformIcon(transforms, "IconPC", "IconPc", "IconOculus", "OculusPC", "Oculus"),
+            IconUnknown = FindPlatformIcon(transforms, "IconUnknown", "Unknown", "IconQuestion"),
+            IconSteam = FindPlatformIcon(transforms, "IconSteam", "Icon_Steam", "SteamIcon", "SteamVR", "Steam"),
+            CachedHeightOffset = NameTagBaseHeight,
+            NextHeightSampleTime = 0f
         };
     }
 
@@ -339,11 +534,14 @@ public static partial class Mods
         if (!view.HasModStatus ||
             view.LastModStatus.LegalCount != modStatus.LegalCount ||
             view.LastModStatus.IllegalCount != modStatus.IllegalCount ||
+            view.LastModStatus.UntrustedCount != modStatus.UntrustedCount ||
             !string.Equals(view.LastModStatus.PrimaryLabel, modStatus.PrimaryLabel, StringComparison.Ordinal))
         {
             view.HasModStatus = true;
             view.LastModStatus = modStatus;
-            view.Mods.Set(FormatNameTagModStatus(modStatus));
+            view.Mods.SetModLabel(FormatNameTagModStatus(modStatus), 0f);
+            if (view.Mods.Tmp != null && view.Mods.Tmp.fontSize < 2.4f)
+                view.Mods.Tmp.fontSize = Mathf.Max(view.Mods.Tmp.fontSize * 1.25f, 2.4f);
         }
         SetMetricColorIfChanged(view.ModsColors, GetModStatusColor(modStatus), ref view.LastModsColor, ref view.HasModsColor);
 
@@ -417,10 +615,10 @@ public static partial class Mods
         switch (platform)
         {
             case "Steam":
-                if (!SetPlatformIconActive(view.IconSteam, true) && view.IconPc != null)
-                    SetPlatformIconActive(view.IconPc, true);
-                else if (view.IconSteam == null)
-                    SetPlatformIconActive(view.IconUnknown, true);
+                if (SetPlatformIconActive(view.IconSteam, true))
+                    break;
+                if (SetPlatformIconActive(view.IconPc, true))
+                    break;
                 break;
             case "PC":
             case "Oculus PC":
@@ -434,10 +632,11 @@ public static partial class Mods
             case "Quest":
             case "PSVR":
             case "Pico":
-                SetPlatformIconActive(view.IconMeta, true);
+                if (!SetPlatformIconActive(view.IconMeta, true))
+                    SetPlatformIconActive(view.IconPc, true);
                 break;
             default:
-                SetPlatformIconActive(view.IconUnknown, true);
+                SetPlatformIconActive(view.IconUnknown, false);
                 break;
         }
     }
@@ -549,35 +748,48 @@ public static partial class Mods
             Player player = rig.GetPhotonPlayer();
             if (player != null)
             {
-                Dictionary<string, List<string>> hits = FindPropertySignatureHits(player);
+                PlayerPropScanResult scan = ScanPlayerCustomProperties(player);
                 List<string> illegalNames = new List<string>();
+                List<string> untrustedNames = new List<string>();
                 List<string> legalNames = new List<string>();
 
-                foreach (string key in hits.Keys)
+                if (scan.IllegalMods != null)
                 {
-                    if (!propertySignatures.TryGetValue(key, out PropertySignature signature))
-                        continue;
-
-                    string display = FormatDetectedModName(signature.Name);
-                    if (string.IsNullOrWhiteSpace(display) || display == "Unknown")
-                        display = signature.Name;
-
-                    if (signature.IsLegal)
+                    for (int i = 0; i < scan.IllegalMods.Count; i++)
                     {
-                        status.LegalCount++;
-                        if (!legalNames.Contains(display))
-                            legalNames.Add(display);
-                    }
-                    else
-                    {
+                        string display = scan.IllegalMods[i];
                         status.IllegalCount++;
                         if (!illegalNames.Contains(display))
                             illegalNames.Add(display);
                     }
                 }
 
+                if (scan.UntrustedMods != null)
+                {
+                    for (int i = 0; i < scan.UntrustedMods.Count; i++)
+                    {
+                        string display = scan.UntrustedMods[i];
+                        status.UntrustedCount++;
+                        if (!untrustedNames.Contains(display))
+                            untrustedNames.Add(display);
+                    }
+                }
+
+                if (scan.LegalMods != null)
+                {
+                    for (int i = 0; i < scan.LegalMods.Count; i++)
+                    {
+                        string display = scan.LegalMods[i];
+                        status.LegalCount++;
+                        if (!legalNames.Contains(display))
+                            legalNames.Add(display);
+                    }
+                }
+
                 if (illegalNames.Count > 0)
                     status.PrimaryLabel = PreferCustomMenuLabel(illegalNames);
+                else if (untrustedNames.Count > 0)
+                    status.PrimaryLabel = PreferCustomMenuLabel(untrustedNames);
                 else if (legalNames.Count > 0)
                     status.PrimaryLabel = PreferCustomMenuLabel(legalNames);
             }
@@ -623,19 +835,34 @@ public static partial class Mods
 
     private static string FormatNameTagModStatus(NameTagModStatus status)
     {
+        string hex = status.IllegalCount > 0
+            ? "#FF5555"
+            : status.UntrustedCount > 0
+                ? "#FF9F43"
+                : status.LegalCount > 0
+                    ? "#55FF88"
+                    : "#DDDDDD";
+
         if (!string.IsNullOrWhiteSpace(status.PrimaryLabel))
         {
-            int total = status.LegalCount + status.IllegalCount;
-            if (total > 1)
-                return status.PrimaryLabel + " +" + (total - 1);
-            return status.PrimaryLabel;
+            int total = status.LegalCount + status.IllegalCount + status.UntrustedCount;
+            string label = total > 1
+                ? status.PrimaryLabel + " +" + (total - 1)
+                : status.PrimaryLabel;
+            return "<color=" + hex + "><b>" + label + "</b></color>";
         }
 
+        string text;
         if (status.IllegalCount > 0)
-            return status.IllegalCount == 1 ? "1 Illegal Mod" : status.IllegalCount + " Illegal Mods";
-        if (status.LegalCount > 0)
-            return status.LegalCount == 1 ? "1 Mod" : status.LegalCount + " Mods";
-        return "0 Mods";
+            text = status.IllegalCount == 1 ? "1 Illegal Mod" : status.IllegalCount + " Illegal Mods";
+        else if (status.UntrustedCount > 0)
+            text = status.UntrustedCount == 1 ? "1 Untrusted Mod" : status.UntrustedCount + " Untrusted Mods";
+        else if (status.LegalCount > 0)
+            text = status.LegalCount == 1 ? "1 Mod" : status.LegalCount + " Mods";
+        else
+            text = "0 Mods";
+
+        return "<color=" + hex + "><b>" + text + "</b></color>";
     }
 
     private static Color GetFpsStatusColor(int fps)
@@ -655,6 +882,7 @@ public static partial class Mods
     private static Color GetModStatusColor(NameTagModStatus status)
     {
         if (status.IllegalCount > 0) return NameTagBadColor;
+        if (status.UntrustedCount > 0) return NameTagWarnColor;
         if (status.LegalCount > 0) return NameTagGoodColor;
         return NameTagNeutralColor;
     }
@@ -694,6 +922,7 @@ public static partial class Mods
     {
         public int LegalCount;
         public int IllegalCount;
+        public int UntrustedCount;
         public string PrimaryLabel;
     }
 
@@ -725,8 +954,13 @@ public static partial class Mods
     {
         nameTagFadeDistanceIndex = (nameTagFadeDistanceIndex + 1) % nameTagFadeDistanceValues.Length;
         SaveButtonStates();
+
+        string label = "Nametag Fade Distance  :  " + GetNameTagFadeDistanceLabel();
         if (Main.nameTagFadeDistanceText != null)
-            Main.nameTagFadeDistanceText.text = "Nametag Fade Distance  :  " + GetNameTagFadeDistanceLabel();
+            Main.nameTagFadeDistanceText.text = label;
+
+        Main.Instance?.RefreshNamedButtonTitle("Fade Distance", label);
+        Main.Instance?.RefreshNamedButtonTitle("Nametag Fade Distance", label);
     }
 
     public static void ToggleNameTags()
@@ -757,7 +991,6 @@ public static partial class Mods
         ClearPingCaches();
         ClearPropertyScanCaches();
         voiceComponentsByRig.Clear();
-        ClearAllBoneHighlights();
         nameTagPrefab = null;
         nameTagPrefabLookupAttempted = false;
         loggedMissingNameTagPrefab = false;

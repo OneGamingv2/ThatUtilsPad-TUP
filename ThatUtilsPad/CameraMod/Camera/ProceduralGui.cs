@@ -1,6 +1,9 @@
 using ThatUtilsPad;
+using ThatUtilsPad.MenuComponents;
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.Rendering;
 
 namespace CameraMod.Camera
 {
@@ -9,20 +12,22 @@ namespace CameraMod.Camera
         private static Material baseMat;
         private static TMP_FontAsset cachedFont;
 
-        private static readonly Color Body = new Color(0.08f, 0.09f, 0.11f);
-        private static readonly Color Bezel = new Color(0.14f, 0.15f, 0.18f);
-        private static readonly Color Accent = new Color(0.25f, 0.78f, 0.82f);
-        private static readonly Color ModeBtn = new Color(0.17f, 0.22f, 0.30f);
-        private static readonly Color Plus = new Color(0.20f, 0.58f, 0.38f);
-        private static readonly Color Minus = new Color(0.62f, 0.26f, 0.28f);
-        private static readonly Color Danger = new Color(0.58f, 0.28f, 0.30f);
-        private static readonly Color Mute = new Color(0.26f, 0.27f, 0.32f);
-        private static readonly Color Label = new Color(0.78f, 0.82f, 0.88f);
-        private static readonly Color Value = new Color(1f, 1f, 1f);
+        private static Color Body => ToColor(MenuTheme.Current.Main);
+        private static Color Bezel => ToColor(MenuTheme.Current.LightMain);
+        private static Color Accent => ToColor(MenuTheme.Current.Accent);
+        private static Color Row => ToColor(MenuTheme.Current.Button);
+        private static Color Btn => ToColor(MenuTheme.Current.ButtonLight);
+        private static Color Danger => new Color(0.72f, 0.28f, 0.38f);
+        private static Color Plus => new Color(0.32f, 0.62f, 0.42f);
+        private static Color Minus => new Color(0.68f, 0.30f, 0.36f);
+        private static Color Muted => ToColor(MenuTheme.Current.DarkAccent);
+        private static readonly Color Label = new Color(0.86f, 0.84f, 0.92f);
+        private static readonly Color Value = Color.white;
 
-        private const float BodyW = 0.34f;
-        private const float BodyH = 0.48f;
-        private const float BodyD = 0.024f;
+        private const float BodyW = 0.36f;
+        private const float BodyH = 0.50f;
+        private const float BodyD = 0.026f;
+        private const float FaceZ = -0.015f;
 
         public static GameObject BuildCameraTablet()
         {
@@ -39,33 +44,39 @@ namespace CameraMod.Camera
                 Bezel, false);
 
             CreateBox(root.transform, "AccentRail",
-                new Vector3(0f, BodyH * 0.445f, -(BodyD * 0.56f)),
-                new Vector3(BodyW * 0.78f, 0.0035f, 0.002f),
+                new Vector3(0f, BodyH * 0.455f, -(BodyD * 0.58f)),
+                new Vector3(BodyW * 0.72f, 0.003f, 0.002f),
                 Accent, false);
 
             GameObject camGo = new GameObject("Camera");
             camGo.transform.SetParent(root.transform, false);
-            camGo.transform.localPosition = new Vector3(0f, 0.08f, -0.02f);
+            // Sit just behind the faceplate, looking out the tablet front (-Z).
+            camGo.transform.localPosition = new Vector3(0f, 0.09f, -0.06f);
             camGo.transform.localRotation = Quaternion.identity;
             UnityEngine.Camera cam = camGo.AddComponent<UnityEngine.Camera>();
             cam.fieldOfView = 90f;
             cam.nearClipPlane = 0.05f;
             cam.farClipPlane = 400f;
-            cam.depth = 25f;
+            cam.depth = -50f;
             cam.enabled = true;
             cam.allowHDR = false;
             cam.allowMSAA = false;
+            cam.stereoTargetEye = StereoTargetEyeMask.None;
+            cam.clearFlags = CameraClearFlags.Skybox;
+            cam.backgroundColor = new Color(0.08f, 0.09f, 0.12f, 1f);
+            cam.useOcclusionCulling = false;
 
-            RenderTexture rt = new RenderTexture(960, 720, 16, RenderTextureFormat.ARGB32)
+            RenderTexture rt = new RenderTexture(960, 720, 24, RenderTextureFormat.ARGB32)
             {
                 antiAliasing = 1,
-                filterMode = FilterMode.Bilinear
+                filterMode = FilterMode.Bilinear,
+                name = "TUP_CameraPreview"
             };
             rt.Create();
             cam.targetTexture = rt;
 
-            CreateHandle(root.transform, "LeftGrabCol", new Vector3(-(BodyW * 0.5f + 0.055f), 0f, 0f));
-            CreateHandle(root.transform, "RightGrabCol", new Vector3(BodyW * 0.5f + 0.055f, 0f, 0f));
+            CreateHandle(root.transform, "LeftGrabCol", new Vector3(-(BodyW * 0.5f + 0.052f), 0f, 0f));
+            CreateHandle(root.transform, "RightGrabCol", new Vector3(BodyW * 0.5f + 0.052f, 0f, 0f));
 
             Transform mainPage = CreatePage(root.transform, "MainPage", true);
             Transform miscPage = CreatePage(root.transform, "MiscPage", false);
@@ -110,15 +121,15 @@ namespace CameraMod.Camera
                 new Vector3(BodyW + 0.014f, BodyH + 0.014f, BodyD + 0.008f),
                 bodyColor, false);
 
-            CreateHandle(offset, "Handle", new Vector3(-(BodyW * 0.5f + 0.055f), 0f, 0f), bodyColor * 0.65f, keepCollider: false);
-            CreateHandle(offset, "Handle2", new Vector3(BodyW * 0.5f + 0.055f, 0f, 0f), bodyColor * 0.65f, keepCollider: false);
+            CreateHandle(offset, "Handle", new Vector3(-(BodyW * 0.5f + 0.052f), 0f, 0f), bodyColor * 0.65f, keepCollider: false);
+            CreateHandle(offset, "Handle2", new Vector3(BodyW * 0.5f + 0.052f, 0f, 0f), bodyColor * 0.65f, keepCollider: false);
 
             Transform owner = new GameObject("IsOwner").transform;
             owner.SetParent(offset, false);
             owner.localPosition = new Vector3(0f, BodyH * 0.52f, -0.02f);
             owner.gameObject.SetActive(false);
-            CreateBox(owner, "AdminLabelBg", Vector3.zero, new Vector3(0.12f, 0.03f, 0.006f), new Color(0.9f, 0.75f, 0.2f), false);
-            CreateWorldLabel(owner, "Text", "OWNER", Vector3.zero, 0.028f, Color.black, TextAlignmentOptions.Center);
+            CreateBox(owner, "AdminLabelBg", Vector3.zero, new Vector3(0.12f, 0.03f, 0.006f), Accent, false);
+            CreateFlatLabel(owner, "Text", "OWNER", Vector3.zero, 0.022f, Color.black, TextAlignmentOptions.Center);
 
             return root;
         }
@@ -128,27 +139,23 @@ namespace CameraMod.Camera
             Transform canvas = CreatePage(page, "Canvas", true);
 
             CreateBox(page, "ViewfinderFrame",
-                new Vector3(0f, 0.145f, -0.0155f),
-                new Vector3(0.292f, 0.178f, 0.002f),
-                new Color(0.04f, 0.04f, 0.05f), false);
+                new Vector3(0f, 0.155f, FaceZ + 0.001f),
+                new Vector3(0.300f, 0.168f, 0.002f),
+                new Color(0.04f, 0.04f, 0.06f), false);
 
-            GameObject screen = CreateBox(page, "CameraScreen",
-                new Vector3(0f, 0.145f, -0.0165f),
-                new Vector3(0.274f, 0.162f, 0.0015f),
-                Color.white, false);
-            ApplyPreviewMaterial(screen, preview);
+            CreatePreviewScreen(page, preview);
 
             CreateBox(page, "RecDot",
-                new Vector3(-0.118f, 0.210f, -0.017f),
-                new Vector3(0.012f, 0.012f, 0.002f),
-                new Color(0.92f, 0.18f, 0.20f), false);
+                new Vector3(-0.122f, 0.214f, FaceZ - 0.001f),
+                new Vector3(0.010f, 0.010f, 0.002f),
+                new Color(0.92f, 0.22f, 0.28f), false);
 
-            CreateWorldLabel(canvas, "Title", "CAMERA", new Vector3(0f, 0.232f, -0.018f), 0.032f, Color.white, TextAlignmentOptions.Center);
-            CreateWorldLabel(canvas, "ModeHint", "Hold side grips  ·  A to summon", new Vector3(0f, 0.040f, -0.018f), 0.016f, Label, TextAlignmentOptions.Center);
+            CreateFlatLabel(canvas, "Title", "CAMERA", new Vector3(0f, 0.238f, FaceZ - 0.002f), 0.026f, Color.white, TextAlignmentOptions.Center);
+            CreateFlatLabel(canvas, "ModeHint", "Grip sides  ·  A to recall", new Vector3(0f, 0.055f, FaceZ - 0.002f), 0.013f, Label, TextAlignmentOptions.Center);
 
-            BuildValueRow(page, canvas, "Fov", "FOV", "90", -0.005f);
-            BuildValueRow(page, canvas, "Smoothing", "SMOOTH", "0.07", -0.048f);
-            BuildValueRow(page, canvas, "NearClip", "NEAR CLIP", "0.05", -0.091f);
+            BuildValueRow(page, canvas, "Fov", "FOV", "90", 0.018f);
+            BuildValueRow(page, canvas, "Smoothing", "SMOOTH", "0.07", -0.022f);
+            BuildValueRow(page, canvas, "NearClip", "NEAR", "0.05", -0.062f);
 
             RenameChild(canvas, "FovValue", "FovValueText");
             RenameChild(canvas, "SmoothingValue", "SmoothingValueText");
@@ -157,21 +164,26 @@ namespace CameraMod.Camera
             RenameChild(canvas, "SmoothingLabel", "SmoothingText");
             RenameChild(canvas, "NearClipLabel", "NearClipText");
 
-            CreateFaceButton(page, "FPVButton", new Vector3(-0.100f, -0.140f, -0.017f), new Vector2(0.096f, 0.042f), "FPV", ModeBtn);
-            CreateFaceButton(page, "TPVButton", new Vector3(0f, -0.140f, -0.017f), new Vector2(0.096f, 0.042f), "3RD", ModeBtn);
-            CreateFaceButton(page, "FPButton", new Vector3(0.100f, -0.140f, -0.017f), new Vector2(0.096f, 0.042f), "FOLLOW", ModeBtn);
+            CreateFaceButton(page, "FPVButton", new Vector3(-0.098f, -0.112f, FaceZ), new Vector2(0.092f, 0.038f), "FPV", Btn);
+            CreateFaceButton(page, "TPVButton", new Vector3(0f, -0.112f, FaceZ), new Vector2(0.092f, 0.038f), "3RD", Btn);
+            CreateFaceButton(page, "FPButton", new Vector3(0.098f, -0.112f, FaceZ), new Vector2(0.092f, 0.038f), "FOLLOW", Btn);
 
-            CreateFaceButton(page, "FlipCamButton", new Vector3(-0.100f, -0.188f, -0.017f), new Vector2(0.096f, 0.038f), "FLIP", Danger);
-            CreateFaceButton(page, "RollLock", new Vector3(0f, -0.188f, -0.017f), new Vector2(0.096f, 0.038f), "ROLL", new Color(0.42f, 0.42f, 0.28f));
-            CreateFaceButton(page, "HideHeadCosmetics", new Vector3(0.100f, -0.188f, -0.017f), new Vector2(0.096f, 0.038f), "HIDE HAT", new Color(0.44f, 0.30f, 0.54f));
+            CreateFaceButton(page, "FlipCamButton", new Vector3(-0.098f, -0.160f, FaceZ), new Vector2(0.092f, 0.036f), "FLIP", Danger);
+            CreateFaceButton(page, "RollLock", new Vector3(0f, -0.160f, FaceZ), new Vector2(0.092f, 0.036f), "ROLL", Muted);
+            CreateFaceButton(page, "HideHeadCosmetics", new Vector3(0.098f, -0.160f, FaceZ), new Vector2(0.092f, 0.036f), "HIDE", Muted);
 
-            CreateFaceButton(page, "MiscButton", new Vector3(0f, -0.232f, -0.017f), new Vector2(0.220f, 0.036f), "SETTINGS", Mute);
+            CreateFaceButton(page, "MiscButton", new Vector3(0f, -0.210f, FaceZ), new Vector2(0.220f, 0.036f), "SETTINGS", Accent * 0.55f + Btn * 0.45f);
         }
 
         private static void BuildValueRow(Transform page, Transform canvas, string id, string label, string value, float y)
         {
-            CreateWorldLabel(canvas, id + "Label", label, new Vector3(-0.132f, y, -0.018f), 0.018f, Label, TextAlignmentOptions.Left);
-            CreateWorldLabel(canvas, id + "Value", value, new Vector3(-0.018f, y, -0.018f), 0.020f, Value, TextAlignmentOptions.Left);
+            CreateBox(page, id + "RowBg",
+                new Vector3(0f, y, FaceZ + 0.0015f),
+                new Vector3(0.300f, 0.034f, 0.0015f),
+                Row, false);
+
+            CreateFlatLabel(canvas, id + "Label", label, new Vector3(-0.122f, y, FaceZ - 0.002f), 0.014f, Label, TextAlignmentOptions.Left);
+            CreateFlatLabel(canvas, id + "Value", value, new Vector3(-0.018f, y, FaceZ - 0.002f), 0.015f, Value, TextAlignmentOptions.Left);
 
             string upName = id == "Fov" ? "FovUP"
                 : id == "Smoothing" ? "SmoothingUpButton"
@@ -180,58 +192,90 @@ namespace CameraMod.Camera
                 : id == "Smoothing" ? "SmoothingDownButton"
                 : "NearClipDown";
 
-            CreateFaceButton(page, upName, new Vector3(0.078f, y, -0.017f), new Vector2(0.048f, 0.032f), "+", Plus);
-            CreateFaceButton(page, downName, new Vector3(0.132f, y, -0.017f), new Vector2(0.048f, 0.032f), "-", Minus);
+            CreateFaceButton(page, downName, new Vector3(0.072f, y, FaceZ), new Vector2(0.040f, 0.028f), "-", Minus);
+            CreateFaceButton(page, upName, new Vector3(0.120f, y, FaceZ), new Vector2(0.040f, 0.028f), "+", Plus);
         }
 
         private static void BuildMiscPage(Transform page)
         {
             Transform canvas = CreatePage(page, "Canvas", true);
 
-            CreateWorldLabel(canvas, "FPSettingsText", "FOLLOW SETTINGS", new Vector3(0f, 0.210f, -0.018f), 0.026f, Color.white, TextAlignmentOptions.Center);
-            CreateWorldLabel(canvas, "MinDistText", "MIN DIST", new Vector3(-0.132f, 0.145f, -0.018f), 0.017f, Label, TextAlignmentOptions.Left);
-            CreateWorldLabel(canvas, "MinDistValueText", "2", new Vector3(-0.010f, 0.145f, -0.018f), 0.020f, Value, TextAlignmentOptions.Left);
-            CreateWorldLabel(canvas, "SpeedText", "SPEED", new Vector3(-0.132f, 0.095f, -0.018f), 0.017f, Label, TextAlignmentOptions.Left);
-            CreateWorldLabel(canvas, "SpeedValueText", "0.01", new Vector3(-0.010f, 0.095f, -0.018f), 0.020f, Value, TextAlignmentOptions.Left);
+            CreateFlatLabel(canvas, "FPSettingsText", "FOLLOW", new Vector3(0f, 0.215f, FaceZ - 0.002f), 0.022f, Color.white, TextAlignmentOptions.Center);
 
-            CreateWorldLabel(canvas, "TPSettingsText", "THIRD PERSON", new Vector3(0f, 0.035f, -0.018f), 0.024f, Color.white, TextAlignmentOptions.Center);
-            CreateWorldLabel(canvas, "TPposition", "SIDE", new Vector3(-0.132f, -0.020f, -0.018f), 0.017f, Label, TextAlignmentOptions.Left);
-            CreateWorldLabel(canvas, "TPText", "Back", new Vector3(-0.010f, -0.020f, -0.018f), 0.020f, Value, TextAlignmentOptions.Left);
-            CreateWorldLabel(canvas, "TPRot", "HEAD ROT", new Vector3(-0.132f, -0.070f, -0.018f), 0.017f, Label, TextAlignmentOptions.Left);
-            CreateWorldLabel(canvas, "TPRotText", "TRUE", new Vector3(0.020f, -0.070f, -0.018f), 0.020f, Value, TextAlignmentOptions.Left);
+            CreateBox(page, "FollowRowBg",
+                new Vector3(0f, 0.145f, FaceZ + 0.0015f),
+                new Vector3(0.300f, 0.078f, 0.0015f),
+                Row, false);
 
-            CreateFaceButton(page, "MinDistUpButton", new Vector3(0.078f, 0.145f, -0.017f), new Vector2(0.048f, 0.032f), "+", Plus);
-            CreateFaceButton(page, "MinDistDownButton", new Vector3(0.132f, 0.145f, -0.017f), new Vector2(0.048f, 0.032f), "-", Minus);
-            CreateFaceButton(page, "SpeedUpButton", new Vector3(0.078f, 0.095f, -0.017f), new Vector2(0.048f, 0.032f), "+", Plus);
-            CreateFaceButton(page, "SpeedDownButton", new Vector3(0.132f, 0.095f, -0.017f), new Vector2(0.048f, 0.032f), "-", Minus);
-            CreateFaceButton(page, "TPModeUpButton", new Vector3(0.078f, -0.020f, -0.017f), new Vector2(0.048f, 0.032f), "+", Plus);
-            CreateFaceButton(page, "TPModeDownButton", new Vector3(0.132f, -0.020f, -0.017f), new Vector2(0.048f, 0.032f), "-", Minus);
-            CreateFaceButton(page, "TPRotButton", new Vector3(0.105f, -0.070f, -0.017f), new Vector2(0.078f, 0.032f), "TOGGLE", new Color(0.42f, 0.42f, 0.28f));
+            CreateFlatLabel(canvas, "MinDistText", "MIN DIST", new Vector3(-0.122f, 0.165f, FaceZ - 0.002f), 0.013f, Label, TextAlignmentOptions.Left);
+            CreateFlatLabel(canvas, "MinDistValueText", "2", new Vector3(-0.010f, 0.165f, FaceZ - 0.002f), 0.015f, Value, TextAlignmentOptions.Left);
+            CreateFlatLabel(canvas, "SpeedText", "SPEED", new Vector3(-0.122f, 0.125f, FaceZ - 0.002f), 0.013f, Label, TextAlignmentOptions.Left);
+            CreateFlatLabel(canvas, "SpeedValueText", "0.01", new Vector3(-0.010f, 0.125f, FaceZ - 0.002f), 0.015f, Value, TextAlignmentOptions.Left);
 
-            CreateFaceButton(page, "GreenScreenButton", new Vector3(-0.078f, -0.145f, -0.017f), new Vector2(0.128f, 0.040f), "GREEN SCREEN", new Color(0.16f, 0.55f, 0.28f));
-            CreateFaceButton(page, "BackButton", new Vector3(0.078f, -0.145f, -0.017f), new Vector2(0.128f, 0.040f), "BACK", Danger);
+            CreateFaceButton(page, "MinDistDownButton", new Vector3(0.072f, 0.165f, FaceZ), new Vector2(0.040f, 0.028f), "-", Minus);
+            CreateFaceButton(page, "MinDistUpButton", new Vector3(0.120f, 0.165f, FaceZ), new Vector2(0.040f, 0.028f), "+", Plus);
+            CreateFaceButton(page, "SpeedDownButton", new Vector3(0.072f, 0.125f, FaceZ), new Vector2(0.040f, 0.028f), "-", Minus);
+            CreateFaceButton(page, "SpeedUpButton", new Vector3(0.120f, 0.125f, FaceZ), new Vector2(0.040f, 0.028f), "+", Plus);
+
+            CreateFlatLabel(canvas, "TPSettingsText", "THIRD PERSON", new Vector3(0f, 0.055f, FaceZ - 0.002f), 0.020f, Color.white, TextAlignmentOptions.Center);
+
+            CreateBox(page, "TpRowBg",
+                new Vector3(0f, -0.010f, FaceZ + 0.0015f),
+                new Vector3(0.300f, 0.078f, 0.0015f),
+                Row, false);
+
+            CreateFlatLabel(canvas, "TPposition", "SIDE", new Vector3(-0.122f, 0.010f, FaceZ - 0.002f), 0.013f, Label, TextAlignmentOptions.Left);
+            CreateFlatLabel(canvas, "TPText", "Back", new Vector3(-0.010f, 0.010f, FaceZ - 0.002f), 0.015f, Value, TextAlignmentOptions.Left);
+            CreateFlatLabel(canvas, "TPRot", "HEAD ROT", new Vector3(-0.122f, -0.030f, FaceZ - 0.002f), 0.013f, Label, TextAlignmentOptions.Left);
+            CreateFlatLabel(canvas, "TPRotText", "TRUE", new Vector3(0.010f, -0.030f, FaceZ - 0.002f), 0.015f, Value, TextAlignmentOptions.Left);
+
+            CreateFaceButton(page, "TPModeDownButton", new Vector3(0.072f, 0.010f, FaceZ), new Vector2(0.040f, 0.028f), "-", Minus);
+            CreateFaceButton(page, "TPModeUpButton", new Vector3(0.120f, 0.010f, FaceZ), new Vector2(0.040f, 0.028f), "+", Plus);
+            CreateFaceButton(page, "TPRotButton", new Vector3(0.096f, -0.030f, FaceZ), new Vector2(0.072f, 0.028f), "TOGGLE", Muted);
+
+            CreateFaceButton(page, "GreenScreenButton", new Vector3(-0.078f, -0.120f, FaceZ), new Vector2(0.128f, 0.038f), "GREEN SCREEN", Plus);
+            CreateFaceButton(page, "BackButton", new Vector3(0.078f, -0.120f, FaceZ), new Vector2(0.128f, 0.038f), "BACK", Danger);
 
             Transform skins = new GameObject("Skins").transform;
             skins.SetParent(page, false);
-            CreateFaceButton(skins, "Default", new Vector3(-0.078f, -0.200f, -0.017f), new Vector2(0.128f, 0.038f), "DARK", Mute);
-            CreateFaceButton(skins, "Purple", new Vector3(0.078f, -0.200f, -0.017f), new Vector2(0.128f, 0.038f), "TEAL", Accent);
+            CreateFaceButton(skins, "Default", new Vector3(-0.078f, -0.175f, FaceZ), new Vector2(0.128f, 0.034f), "DARK", Btn);
+            CreateFaceButton(skins, "Purple", new Vector3(0.078f, -0.175f, FaceZ), new Vector2(0.128f, 0.034f), "ACCENT", Accent * 0.65f + Btn * 0.35f);
         }
 
-        private static void ApplyPreviewMaterial(GameObject screen, RenderTexture preview)
+        private static void CreatePreviewScreen(Transform page, RenderTexture preview)
         {
-            Material screenMat = CreateUniqueMat(Color.white);
-            Shader texShader = Shader.Find("Unlit/Texture")
-                               ?? Shader.Find("Universal Render Pipeline/Unlit")
-                               ?? Shader.Find("GUI/Text Shader")
-                               ?? (baseMat != null ? baseMat.shader : Shader.Find("Sprites/Default"));
-            screenMat.shader = texShader;
-            if (screenMat.HasProperty("_MainTex"))
-                screenMat.mainTexture = preview;
-            if (screenMat.HasProperty("_BaseMap"))
-                screenMat.SetTexture("_BaseMap", preview);
-            MeshRenderer rend = screen.GetComponent<MeshRenderer>();
-            if (rend != null)
-                rend.sharedMaterial = screenMat;
+            GameObject canvasGo = new GameObject("CameraScreen");
+            canvasGo.transform.SetParent(page, false);
+            // Face the player on the tablet front (-Z).
+            canvasGo.transform.localPosition = new Vector3(0f, 0.155f, FaceZ - 0.001f);
+            canvasGo.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
+            canvasGo.transform.localScale = Vector3.one;
+
+            Canvas canvas = canvasGo.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.WorldSpace;
+            canvas.sortingOrder = 80;
+
+            CanvasScaler scaler = canvasGo.AddComponent<CanvasScaler>();
+            scaler.dynamicPixelsPerUnit = 10f;
+
+            RectTransform canvasRect = canvasGo.GetComponent<RectTransform>();
+            canvasRect.sizeDelta = new Vector2(284f, 152f);
+            // Negative Y corrects the common URP RenderTexture upside-down preview.
+            canvasRect.localScale = new Vector3(0.001f, -0.001f, 0.001f);
+
+            GameObject imageGo = new GameObject("Preview");
+            imageGo.transform.SetParent(canvasGo.transform, false);
+            RawImage raw = imageGo.AddComponent<RawImage>();
+            raw.texture = preview;
+            raw.color = Color.white;
+            raw.raycastTarget = false;
+            raw.uvRect = new Rect(0f, 0f, 1f, 1f);
+
+            RectTransform imageRect = imageGo.GetComponent<RectTransform>();
+            imageRect.anchorMin = Vector2.zero;
+            imageRect.anchorMax = Vector2.one;
+            imageRect.offsetMin = Vector2.zero;
+            imageRect.offsetMax = Vector2.zero;
         }
 
         private static void RenameChild(Transform parent, string from, string to)
@@ -259,7 +303,7 @@ namespace CameraMod.Camera
             go.transform.SetParent(parent, false);
             go.transform.localPosition = pos;
             go.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
-            go.transform.localScale = new Vector3(0.060f, 0.095f, 0.060f);
+            go.transform.localScale = new Vector3(0.052f, 0.090f, 0.052f);
 
             Collider[] cols = go.GetComponents<Collider>();
             for (int i = 0; i < cols.Length; i++)
@@ -270,8 +314,8 @@ namespace CameraMod.Camera
                 CapsuleCollider cap = go.AddComponent<CapsuleCollider>();
                 cap.isTrigger = true;
                 cap.direction = 1;
-                cap.height = 2.6f;
-                cap.radius = 0.75f;
+                cap.height = 2.5f;
+                cap.radius = 0.7f;
                 cap.center = Vector3.zero;
 
                 Rigidbody rb = go.AddComponent<Rigidbody>();
@@ -283,20 +327,20 @@ namespace CameraMod.Camera
 
             MeshRenderer rend = go.GetComponent<MeshRenderer>();
             if (rend != null)
-                rend.sharedMaterial = CreateUniqueMat(color ?? new Color(0.22f, 0.55f, 0.58f, 0.95f));
+                rend.sharedMaterial = CreateUniqueMat(color ?? (Accent * 0.55f + Btn * 0.45f));
         }
 
         private static GameObject CreateFaceButton(Transform parent, string name, Vector3 pos, Vector2 size, string label, Color color)
         {
-            GameObject go = CreateBox(parent, name, pos, new Vector3(size.x, size.y, 0.018f), color, true);
+            GameObject go = CreateBox(parent, name, pos, new Vector3(size.x, size.y, 0.016f), color, true);
             go.layer = 18;
 
             BoxCollider box = go.GetComponent<BoxCollider>();
             if (box == null)
                 box = go.AddComponent<BoxCollider>();
             box.isTrigger = true;
-            box.size = new Vector3(1.35f, 1.45f, 4.5f);
-            box.center = new Vector3(0f, 0f, -1.2f);
+            box.size = new Vector3(1.4f, 1.5f, 5.0f);
+            box.center = new Vector3(0f, 0f, -1.4f);
 
             Rigidbody rb = go.GetComponent<Rigidbody>();
             if (rb == null)
@@ -306,12 +350,21 @@ namespace CameraMod.Camera
 
             if (!string.IsNullOrEmpty(label))
             {
-                float worldText = label.Length > 8 ? 0.016f : 0.020f;
-                TextMeshPro tmp = CreateWorldLabel(go.transform, "Text", label, new Vector3(0f, 0f, -0.62f), worldText, Color.white, TextAlignmentOptions.Center);
-                tmp.transform.localScale = new Vector3(
-                    worldText / Mathf.Max(0.001f, size.x),
-                    worldText / Mathf.Max(0.001f, size.y),
-                    worldText / Mathf.Max(0.001f, 0.018f));
+                TextMeshPro tmp = CreateFlatLabel(
+                    go.transform,
+                    "Text",
+                    label,
+                    new Vector3(0f, 0f, -0.65f),
+                    1f,
+                    Color.white,
+                    TextAlignmentOptions.Center);
+
+                float sx = Mathf.Max(0.001f, size.x);
+                float sy = Mathf.Max(0.001f, size.y);
+                float target = label.Length >= 10 ? 0.0135f : 0.0165f;
+                tmp.transform.localScale = new Vector3(target / sx, target / sy, target / 0.016f);
+                tmp.fontSize = 10f;
+                tmp.rectTransform.sizeDelta = new Vector2(20f, 3f);
             }
 
             return go;
@@ -345,24 +398,24 @@ namespace CameraMod.Camera
             return go;
         }
 
-        private static TextMeshPro CreateWorldLabel(Transform parent, string name, string text, Vector3 pos, float worldSize, Color color, TextAlignmentOptions align)
+        private static TextMeshPro CreateFlatLabel(Transform parent, string name, string text, Vector3 pos, float worldSize, Color color, TextAlignmentOptions align)
         {
             GameObject go = new GameObject(name);
             go.transform.SetParent(parent, false);
             go.transform.localPosition = pos;
             go.transform.localRotation = Quaternion.identity;
-            go.transform.localScale = Vector3.one * Mathf.Max(0.01f, worldSize);
+            go.transform.localScale = Vector3.one * Mathf.Max(0.008f, worldSize);
 
             TextMeshPro tmp = go.AddComponent<TextMeshPro>();
             tmp.text = text;
-            tmp.fontSize = 8f;
+            tmp.fontSize = 7.5f;
             tmp.alignment = align;
             tmp.color = color;
             tmp.enableWordWrapping = false;
             tmp.overflowMode = TextOverflowModes.Overflow;
             tmp.fontStyle = FontStyles.Bold;
-            tmp.rectTransform.sizeDelta = new Vector2(18f, 2.4f);
-            tmp.sortingOrder = 20;
+            tmp.rectTransform.sizeDelta = new Vector2(16f, 2.2f);
+            tmp.sortingOrder = 40;
             ApplyFigtree(tmp);
             return tmp;
         }
@@ -404,5 +457,7 @@ namespace CameraMod.Camera
                 mat.SetColor("_BaseColor", color);
             return mat;
         }
+
+        private static Color ToColor(Color32 c) => new Color(c.r / 255f, c.g / 255f, c.b / 255f, c.a / 255f);
     }
 }

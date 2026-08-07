@@ -1,30 +1,47 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace CameraMod.Camera {
-    public abstract class FromCameraHider : MonoBehaviour {
+namespace CameraMod.Camera
+{
+    public abstract class FromCameraHider : MonoBehaviour
+    {
         public UnityEngine.Camera cam;
 
-        public void Start() {
+        public void Start()
+        {
             cam = GetComponent<UnityEngine.Camera>();
         }
 
-        public void OnEnable() {
-            RenderPipelineManager.endCameraRendering += endCameraRendering;
-            RenderPipelineManager.beginCameraRendering += beginCameraRendering;
+        public void OnEnable()
+        {
+            RenderPipelineManager.endCameraRendering += EndCameraRendering;
+            RenderPipelineManager.beginCameraRendering += BeginCameraRendering;
         }
 
-        public void OnDisable() {
-            RenderPipelineManager.endCameraRendering -= endCameraRendering;
-            RenderPipelineManager.beginCameraRendering -= beginCameraRendering;
+        public void OnDisable()
+        {
+            RenderPipelineManager.endCameraRendering -= EndCameraRendering;
+            RenderPipelineManager.beginCameraRendering -= BeginCameraRendering;
         }
 
-        private void endCameraRendering(ScriptableRenderContext context, UnityEngine.Camera camera) {
-            if (cam == camera) Show();
+        private void EndCameraRendering(ScriptableRenderContext context, UnityEngine.Camera camera)
+        {
+            if (cam == null)
+                cam = GetComponent<UnityEngine.Camera>();
+            if (cam == null || cam != camera)
+                return;
+            try { Show(); }
+            catch (System.Exception) { }
         }
 
-        private void beginCameraRendering(ScriptableRenderContext context, UnityEngine.Camera camera) {
-            if (cam == camera) Hide();
+        private void BeginCameraRendering(ScriptableRenderContext context, UnityEngine.Camera camera)
+        {
+            if (cam == null)
+                cam = GetComponent<UnityEngine.Camera>();
+            if (cam == null || cam != camera)
+                return;
+            try { Hide(); }
+            catch (System.Exception) { }
         }
 
         public abstract void Hide();

@@ -324,7 +324,10 @@ private static void MuteElse()
     private static bool SnapHeld()
     {
         if (XRSettings.isDeviceActive)
-            return ControllerInputPoller.instance.rightControllerGripFloat > 0.75f;
+        {
+            object poller = GameTypeCloak.PollerInstance();
+            return poller != null && GameTypeCloak.RightGrip(poller) > 0.75f;
+        }
 
         return Mouse.current != null && Mouse.current.rightButton.isPressed;
     }
@@ -332,7 +335,7 @@ private static void MuteElse()
     private static bool SelectPressed()
     {
         if (XRSettings.isDeviceActive)
-            return ControllerInputPoller.instance.rightControllerIndexFloat > 0.75f;
+            return Main.IsMenuOpenBindPressed(GetAimSelectBindCode());
 
         return Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame;
     }
@@ -383,7 +386,8 @@ private static void MuteElse()
 
     private static void ToggleChecker()
     {
-        checkerEnabled = GetSavedToggle("Select User", checkerEnabled);
+        checkerEnabled = GetSavedToggle("Aim Select", GetSavedToggle("Select User", checkerEnabled));
+        SavedToggleStates["Aim Select"] = checkerEnabled;
         SavedToggleStates["Select User"] = checkerEnabled;
         SaveButtonStates();
 
@@ -391,12 +395,53 @@ private static void MuteElse()
         {
             if (checkerCoroutine == null && CoroutineHandler.Instance != null)
                 checkerCoroutine = CoroutineHandler.Instance.StartCoroutine(CheckerLoop());
+            ShowNotification("Aim at a player, then click to select", 2f);
         }
         else
         {
-            CleanupCheckerVisuals(false);
+            CleanupCheckerVisuals(true);
         }
     }
+
+    public static void ClearSelectedPlayerSilent()
+    {
+        ClearSelectedPlayer(true);
+        Main.Instance?.RefreshSelectUserButtonStates();
+    }
+
+    public static void ClearPlayerSelection()
+    {
+        if (!HasSelectedPlayer())
+        {
+            ShowNotification("Nothing selected", 1.2f);
+            Main.Instance?.ClearCheckerSelectionUi();
+            return;
+        }
+
+        string name = GetRigDisplayName(selectedRig);
+        ClearSelectedPlayer(true);
+        ShowNotification("Cleared " + name, 1.5f);
+        Main.Instance?.RefreshSelectUserButtonStates();
+    }
+
+    public static void WatchSelectionLifecycle()
+    {
+        bool inRoom = PhotonNetwork.InRoom;
+        if (wasInRoomForSelection && !inRoom)
+        {
+            if (HasSelectedPlayer() || selectedRig != null || !string.IsNullOrEmpty(selectedUserId))
+                ClearSelectedPlayer(true);
+        }
+        wasInRoomForSelection = inRoom;
+
+        if (!HasSelectedPlayer())
+            return;
+
+        if (!TryResolveSelectedRig())
+            ClearSelectedPlayer(true);
+    }
+
+    public static bool HasSelectedPlayer() => IsRigValid(selectedRig);
 
     private static bool SelectJustPressed(bool selectHeld)
     {
@@ -591,8 +636,9 @@ public static void UpdateChecker()
 
     if (XRSettings.isDeviceActive)
     {
-        snapHeld = ControllerInputPoller.instance.rightControllerGripFloat > 0.75f;
-        selectHeld = ControllerInputPoller.instance.rightControllerIndexFloat > 0.75f;
+        object poller = GameTypeCloak.PollerInstance();
+        snapHeld = poller != null && GameTypeCloak.RightGrip(poller) > 0.75f;
+        selectHeld = Main.IsMenuOpenBindPressed(GetAimSelectBindCode());
     }
     else
     {
@@ -1111,8 +1157,25 @@ private static void ClearAllBoneHighlights()
                 if (scan.LegalMods != null && scan.LegalMods.Count > 0)
                     legalText = string.Join(", ", scan.LegalMods);
 
+                List<string> flagged = new List<string>();
                 if (scan.IllegalMods != null && scan.IllegalMods.Count > 0)
-                    illegalText = string.Join(", ", scan.IllegalMods);
+                    flagged.AddRange(scan.IllegalMods);
+                if (scan.UntrustedMods != null)
+                {
+                    for (int i = 0; i < scan.UntrustedMods.Count; i++)
+                    {
+                        string u = scan.UntrustedMods[i];
+                        if (string.IsNullOrWhiteSpace(u))
+                            continue;
+                        string labeled = u.StartsWith("Untrusted:", StringComparison.OrdinalIgnoreCase)
+                            ? u
+                            : "Untrusted: " + u;
+                        if (!flagged.Contains(labeled))
+                            flagged.Add(labeled);
+                    }
+                }
+                if (flagged.Count > 0)
+                    illegalText = string.Join(", ", flagged);
 
                 if (scan.UnknownProps != null && scan.UnknownProps.Count > 0)
                     unknownProps.AddRange(scan.UnknownProps);

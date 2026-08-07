@@ -48,6 +48,12 @@
         <None Remove="Assets\Icons\settings.png" />
         <None Remove="Assets\Icons\camera.png" />
         <EmbeddedResource Include="Assets\Icons\camera.png" />
+        <None Remove="Assets\Icons\lobby.png" />
+        <EmbeddedResource Include="Assets\Icons\lobby.png" />
+        <None Remove="Assets\Icons\search.png" />
+        <EmbeddedResource Include="Assets\Icons\search.png" />
+        <None Remove="Assets\Icons\friends.png" />
+        <EmbeddedResource Include="Assets\Icons\friends.png" />
         <None Remove="Assets\Icons\shield.png" />
         <EmbeddedResource Include="Assets\Icons\shield.png" />
         <None Remove="Assets\Models\tup-redux" />

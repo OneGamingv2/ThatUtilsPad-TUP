@@ -26,7 +26,6 @@ namespace CameraMod.Camera.Comps {
         public bool freecam;
         private float freecamsens = 1f;
         private float freecamspeed = 0.1f;
-        private bool keyp;
         private float posY;
 
         private float rotX;
@@ -87,18 +86,15 @@ namespace CameraMod.Camera.Comps {
             if (watermarkEnabled)
                 WaterMark();
 
-            if (Keyboard.current.tabKey.isPressed) {
-                if (!keyp) uiopen = !uiopen;
-                keyp = true;
-            } else {
-                keyp = false;
-            }
+            if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame)
+                uiopen = !uiopen;
 
             if (!uiopen)
                 return;
             
-            GUI.backgroundColor = Color.black;
-            mainWindowRect = GUILayout.Window(1000, mainWindowRect, DrawMainWindow, "Menu");
+            GUI.backgroundColor = new Color(0.12f, 0.10f, 0.16f, 0.95f);
+            GUI.contentColor = Color.white;
+            mainWindowRect = GUILayout.Window(1000, mainWindowRect, DrawMainWindow, "TUP Camera");
 
             if (PhotonNetwork.InRoom && specui)
                 specWindowRect = GUILayout.Window(1001, specWindowRect, DrawSpectatorWindow, "Spectate");
@@ -117,7 +113,7 @@ namespace CameraMod.Camera.Comps {
                 fontStyle = FontStyle.Bold
             };
 
-            GUILayout.Label("Pokruk's Camera Mod", titleStyle);
+            GUILayout.Label("TUP Camera", titleStyle);
             GUILayout.Space(10);
 
             if (GUILayout.Button(freecam ? "FirstPersonView" : "FreeCam")) {
@@ -136,9 +132,25 @@ namespace CameraMod.Camera.Comps {
                     SpecMode();
                     freecam = true;
                 } else {
+                    freecam = false;
                     CameraController.Instance.EnableFPV();
                 }
             }
+
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("3rd Person")) {
+                freecam = false;
+                spectating = false;
+                followobject = null;
+                CameraController.Instance?.EnableTPV();
+            }
+            if (GUILayout.Button("Follow")) {
+                freecam = false;
+                spectating = false;
+                followobject = null;
+                CameraController.Instance?.EnableFollow();
+            }
+            GUILayout.EndHorizontal();
 
             GUILayout.BeginHorizontal();
             if (GUILayout.Button("Spectator")) {
@@ -246,7 +258,7 @@ namespace CameraMod.Camera.Comps {
                 fontStyle = FontStyle.Bold
             };
 
-            GUILayout.Label("Players", titleStyle);
+            GUILayout.Label("Spectate", titleStyle);
             GUILayout.Space(5);
             
             foreach (var player in PhotonNetwork.PlayerListOthers) {

@@ -276,6 +276,7 @@ namespace CameraMod.Camera
             if (tabletCameraT == null)
                 throw new Exception("Procedural tablet missing Camera child");
             tabletCamera = tabletCameraT.GetComponent<UnityEngine.Camera>();
+            ConfigureTabletPreviewCamera();
 
             Transform leftGrab = cameraTabletT.Find("LeftGrabCol");
             Transform rightGrab = cameraTabletT.Find("RightGrabCol");
@@ -297,6 +298,19 @@ namespace CameraMod.Camera
                 thirdPersonCameraT.SetParent(cameraTabletT, true);
                 thirdPersonCameraT.localPosition = tabletCamera.transform.localPosition;
                 thirdPersonCameraT.localRotation = tabletCamera.transform.localRotation;
+
+                // Never steal the game / PC view into the preview RT.
+                if (thirdPersonCamera != null && thirdPersonCamera.targetTexture != null &&
+                    tabletCamera.targetTexture != null &&
+                    thirdPersonCamera.targetTexture == tabletCamera.targetTexture)
+                {
+                    thirdPersonCamera.targetTexture = null;
+                }
+
+                if (tabletCamera.targetTexture != null)
+                    tabletCamera.enabled = true;
+
+                SyncPreviewCameraFromThirdPerson();
             }
 
             SetupColorScreen();
@@ -319,6 +333,86 @@ namespace CameraMod.Camera
             Binds.Init();
             BringTabletToPlayer();
             Debug.Log("[TUP Camera] Ready. Buttons=" + buttons.Count);
+        }
+
+        private void ConfigureTabletPreviewCamera()
+        {
+            if (tabletCamera == null)
+                return;
+
+            tabletCamera.stereoTargetEye = StereoTargetEyeMask.None;
+            tabletCamera.allowHDR = false;
+            tabletCamera.allowMSAA = false;
+            tabletCamera.depth = -50f;
+            tabletCamera.enabled = true;
+
+            if (tabletCamera.targetTexture == null)
+            {
+                RenderTexture rt = new RenderTexture(960, 720, 24, RenderTextureFormat.ARGB32)
+                {
+                    antiAliasing = 1,
+                    filterMode = FilterMode.Bilinear,
+                    name = "TUP_CameraPreview"
+                };
+                rt.Create();
+                tabletCamera.targetTexture = rt;
+                BindPreviewTexture(rt);
+            }
+            else
+            {
+                BindPreviewTexture(tabletCamera.targetTexture);
+            }
+        }
+
+        private void SyncPreviewCameraFromThirdPerson()
+        {
+            if (tabletCamera == null || thirdPersonCamera == null)
+                return;
+
+            tabletCamera.cullingMask = thirdPersonCamera.cullingMask;
+            tabletCamera.clearFlags = thirdPersonCamera.clearFlags;
+            tabletCamera.backgroundColor = thirdPersonCamera.backgroundColor;
+            tabletCamera.farClipPlane = thirdPersonCamera.farClipPlane;
+            tabletCamera.stereoTargetEye = StereoTargetEyeMask.None;
+
+            // Keep PC / shoulder camera rendering to the game view, not the tablet RT.
+            if (thirdPersonCamera.targetTexture != null &&
+                tabletCamera.targetTexture != null &&
+                ReferenceEquals(thirdPersonCamera.targetTexture, tabletCamera.targetTexture))
+            {
+                thirdPersonCamera.targetTexture = null;
+            }
+        }
+
+        private void BindPreviewTexture(Texture texture)
+        {
+            if (cameraTabletT == null || texture == null)
+                return;
+
+            Transform screen = cameraTabletT.Find("MainPage/CameraScreen/Preview");
+            if (screen == null)
+                screen = cameraTabletT.Find("MainPage/CameraScreen");
+            if (screen == null)
+                return;
+
+            UnityEngine.UI.RawImage raw = screen.GetComponent<UnityEngine.UI.RawImage>()
+                                         ?? screen.GetComponentInChildren<UnityEngine.UI.RawImage>(true);
+            if (raw != null)
+            {
+                raw.texture = texture;
+                raw.color = Color.white;
+            }
+
+            MeshRenderer mesh = screen.GetComponent<MeshRenderer>()
+                                ?? screen.GetComponentInChildren<MeshRenderer>(true);
+            if (mesh != null && mesh.sharedMaterial != null)
+            {
+                Material mat = mesh.material;
+                if (mat.HasProperty("_MainTex"))
+                    mat.mainTexture = texture;
+                if (mat.HasProperty("_BaseMap"))
+                    mat.SetTexture("_BaseMap", texture);
+            }
         }
 
         private void SetupColorScreen()
@@ -437,6 +531,7 @@ namespace CameraMod.Camera
             isFaceCamera = !isFaceCamera;
             thirdPersonCameraT.Rotate(0f, 180f, 0f);
             tabletCameraT.Rotate(0f, 180f, 0f);
+            AlignLensCameras();
         }
 
         public void InitCosmeticsHider()
@@ -447,6 +542,7 @@ namespace CameraMod.Camera
             isCosmeticsHiderInited = true;
             HeadCosmeticsHider = thirdPersonCameraT.gameObject.GetComponent<HeadCosmeticsHider>()
                                  ?? thirdPersonCameraT.gameObject.AddComponent<HeadCosmeticsHider>();
+            HeadCosmeticsHider.enabled = false;
 
             Transform hideBtn = cameraTabletT.Find("MainPage/HideHeadCosmetics");
             if (hideBtn == null)
@@ -454,7 +550,15 @@ namespace CameraMod.Camera
 
             ToggleButton toggle = hideBtn.gameObject.GetComponent<ToggleButton>()
                                   ?? hideBtn.gameObject.AddComponent<ToggleButton>();
-            toggle.InitToggleButton(b => HeadCosmeticsHider.enabled = b, () => HeadCosmeticsHider.enabled);
+            toggle.InitToggleButton(
+                b =>
+                {
+                    if (HeadCosmeticsHider != null)
+                        HeadCosmeticsHider.enabled = b;
+                },
+                () => HeadCosmeticsHider != null && HeadCosmeticsHider.enabled,
+                savable: true,
+                overrideSaveName: "TUP_CameraHideHats");
             if (!buttons.Contains(toggle))
                 buttons.Add(toggle);
         }
@@ -468,31 +572,64 @@ namespace CameraMod.Camera
             cameraMode = CameraMode.FirstPersonView;
             if (UI.Instance != null)
                 UI.Instance.freecam = false;
+            AlignLensCameras();
         }
 
         public void EnableTPV()
         {
             if (!init)
                 return;
+
+            if (UI.Instance != null)
+                UI.Instance.freecam = false;
+
             if (tpvMode == TpvModes.Back)
             {
-                if (isFaceCamera) Flip();
+                if (isFaceCamera)
+                    Flip();
             }
             else if (tpvMode == TpvModes.Front)
             {
-                if (!isFaceCamera) Flip();
+                if (!isFaceCamera)
+                    Flip();
             }
 
             cameraMode = CameraMode.ThirdPerson;
+            AlignLensCameras();
         }
 
         public void EnableFollow()
         {
             if (!init)
                 return;
+
+            if (UI.Instance != null)
+                UI.Instance.freecam = false;
+
             cameraMode = cameraMode == CameraMode.FollowPlayer ? CameraMode.None : CameraMode.FollowPlayer;
             if (cameraMode == CameraMode.None)
                 BringTabletToPlayer();
+            else
+                AlignLensCameras();
+        }
+
+        private void AlignLensCameras()
+        {
+            if (tabletCameraT == null)
+                return;
+
+            if (thirdPersonCameraT != null)
+            {
+                thirdPersonCameraT.localPosition = tabletCameraT.localPosition;
+                thirdPersonCameraT.localRotation = tabletCameraT.localRotation;
+            }
+
+            if (tabletCamera != null)
+            {
+                tabletCamera.enabled = true;
+                if (tabletCamera.targetTexture != null)
+                    BindPreviewTexture(tabletCamera.targetTexture);
+            }
         }
 
         public void BringTabletToPlayer()
@@ -560,7 +697,7 @@ namespace CameraMod.Camera
             if (roll != null)
             {
                 buttons.Add(roll.gameObject.AddComponent<ToggleButton>()
-                    .InitToggleButton(b => RollLock = b, () => RollLock));
+                    .InitToggleButton(b => RollLock = b, () => RollLock, savable: true, overrideSaveName: "TUP_CameraRollLock"));
             }
 
             AddTabletButton("MainPage/TPVButton", EnableTPV);
@@ -612,7 +749,11 @@ namespace CameraMod.Camera
             if (gs != null && colorScreenGo != null)
             {
                 buttons.Add(gs.gameObject.AddComponent<ToggleButton>()
-                    .InitToggleButton(b => colorScreenGo.SetActive(b), () => colorScreenGo.activeSelf));
+                    .InitToggleButton(
+                        b => colorScreenGo.SetActive(b),
+                        () => colorScreenGo.activeSelf,
+                        savable: true,
+                        overrideSaveName: "TUP_CameraGreenScreen"));
             }
 
             Transform skins = cameraTabletT.Find("MiscPage/Skins");
@@ -696,7 +837,7 @@ namespace CameraMod.Camera
             if (left == null && right == null)
                 return;
 
-            const float pokeRadius = 0.095f;
+            const float pokeRadius = 0.11f;
             BaseButton best = null;
             float bestDist = pokeRadius;
             bool bestLeft = false;
@@ -772,16 +913,7 @@ namespace CameraMod.Camera
                 if (cameraFollowerT == null)
                     return;
 
-                Transform camera = cameraTabletT;
-                Transform follower = cameraFollowerT;
-                camera.position = follower.TransformPoint(FirstPersonOffset);
-                if (AngleClamping && Quaternion.Angle(camera.rotation, follower.rotation) > maxAngle)
-                    camera.rotation = Quaternion.RotateTowards(follower.rotation, camera.rotation, maxAngle);
-
-                Quaternion newRotation = camera.rotation.Lerped(follower.rotation, smoothing);
-                if (RollLock)
-                    newRotation = newRotation.eulerAngles.Scaled(new Vector3(1, 1, 0)).ToQuaternion();
-                camera.rotation = newRotation;
+                ApplyStableHeadFollow(cameraTabletT, cameraFollowerT, FirstPersonOffset, smoothing, RollLock);
             }
 
             if (BindEnabled && Binds.Tablet() && cameraTabletT.parent == null)
@@ -789,18 +921,22 @@ namespace CameraMod.Camera
 
             if (cameraMode == CameraMode.FollowPlayer && cameraFollowerT != null)
             {
-                cameraTabletT.LookAt(2f * cameraTabletT.position - cameraFollowerT.position);
                 if (!isFaceCamera)
                     Flip();
 
                 float dist = Vector3.Distance(cameraFollowerT.position, cameraTabletT.position);
                 if (dist > minDist)
                 {
+                    float t = StableFollowT(fpspeed * 40f);
                     cameraTabletT.position = Vector3.Lerp(
                         cameraTabletT.position,
                         cameraFollowerT.position,
-                        fpspeed);
+                        t);
                 }
+
+                Vector3 away = cameraTabletT.position - cameraFollowerT.position;
+                if (away.sqrMagnitude > 0.0001f)
+                    cameraTabletT.rotation = Quaternion.LookRotation(away.normalized, Vector3.up);
             }
 
             if (cameraMode == CameraMode.ThirdPerson)
@@ -821,15 +957,17 @@ namespace CameraMod.Camera
                         targetPosition = followheadrot
                             ? cameraFollowerT.TransformPoint(new Vector3(0.3f, 0.1f, -1.5f))
                             : tpvBodyFollowerT.TransformPoint(new Vector3(0.3f, 0.1f, -1.5f));
-                        cameraTabletT.position = Vector3.SmoothDamp(cameraTabletT.position, targetPosition, ref velocity, 0.1f);
-                        cameraTabletT.LookAt(cameraFollowerT.position);
+                        cameraTabletT.position = Vector3.SmoothDamp(
+                            cameraTabletT.position, targetPosition, ref velocity, 0.08f, Mathf.Infinity, Time.deltaTime);
+                        SetLookAtStable(cameraTabletT, cameraFollowerT.position);
                         break;
                     case TpvModes.Front:
                         targetPosition = followheadrot
                             ? cameraFollowerT.TransformPoint(new Vector3(0.1f, 0.3f, 2.5f))
                             : tpvBodyFollowerT.TransformPoint(new Vector3(0.1f, 0.3f, 2.5f));
-                        cameraTabletT.position = Vector3.SmoothDamp(cameraTabletT.position, targetPosition, ref velocity, 0.1f);
-                        cameraTabletT.LookAt(2f * cameraTabletT.position - cameraFollowerT.position);
+                        cameraTabletT.position = Vector3.SmoothDamp(
+                            cameraTabletT.position, targetPosition, ref velocity, 0.08f, Mathf.Infinity, Time.deltaTime);
+                        SetLookAtStable(cameraTabletT, 2f * cameraTabletT.position - cameraFollowerT.position);
                         break;
                 }
 
@@ -839,6 +977,56 @@ namespace CameraMod.Camera
                     BringTabletToPlayer();
                 }
             }
+        }
+
+        private static void ApplyStableHeadFollow(
+            Transform camera,
+            Transform head,
+            Vector3 localOffset,
+            float smooth,
+            bool lockRoll)
+        {
+            Vector3 targetPos = head.TransformPoint(localOffset);
+            Quaternion targetRot = head.rotation;
+
+            if (lockRoll)
+            {
+                Vector3 forward = head.forward;
+                if (forward.sqrMagnitude < 0.0001f)
+                    forward = Vector3.forward;
+                // World-up look: no roll, no Euler gimbal rebuild (old path caused incremental shake).
+                targetRot = Quaternion.LookRotation(forward, Vector3.up);
+            }
+
+            if (AngleClamping)
+            {
+                float angle = Quaternion.Angle(camera.rotation, targetRot);
+                if (angle > maxAngle)
+                    camera.rotation = Quaternion.RotateTowards(targetRot, camera.rotation, maxAngle);
+            }
+
+            // Map smoothing 0.01..1 to follow rate. Higher = snappier, still frame-rate safe.
+            float followRate = Mathf.Lerp(6f, 55f, Mathf.InverseLerp(MIN_SMOOTHING, MAX_SMOOTHING, smooth));
+            float t = StableFollowT(followRate);
+
+            camera.position = Vector3.Lerp(camera.position, targetPos, t);
+            camera.rotation = Quaternion.Slerp(camera.rotation, targetRot, t);
+        }
+
+        private static float StableFollowT(float followRate)
+        {
+            float dt = Time.deltaTime;
+            if (dt <= 0f)
+                return 1f;
+            return 1f - Mathf.Exp(-Mathf.Max(0.01f, followRate) * dt);
+        }
+
+        private static void SetLookAtStable(Transform camera, Vector3 worldPoint)
+        {
+            Vector3 dir = worldPoint - camera.position;
+            if (dir.sqrMagnitude < 0.0001f)
+                return;
+            camera.rotation = Quaternion.LookRotation(dir.normalized, Vector3.up);
         }
     }
 }

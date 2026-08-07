@@ -411,7 +411,8 @@ public class ButtonCollider : MonoBehaviour
         if (trigger != null)
         {
             ButtonTrigger.PcPress(trigger);
-            GorillaTagger.Instance.StartVibration(presser.isLeft, 0.1f, 0.1f);
+            if (Mods.IsControllerHapticsEnabled())
+                GorillaTagger.Instance.StartVibration(presser.isLeft, 0.1f, 0.1f);
         }
 
         lastGlobalTime = Time.time;
@@ -579,15 +580,46 @@ public static class Tools
 {
     public static Texture2D LoadEmbeddedImage(string name)
     {
-        using Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("ThatUtilsPad.Assets.Icons." + name);
+        if (string.IsNullOrWhiteSpace(name))
+            return null;
 
-        if (stream == null) return null;
-        byte[] imageData = new byte[stream.Length];
-        stream.Read(imageData, 0, imageData.Length);
-        Texture2D texture = new(2, 2);
-        texture.LoadImage(imageData);
+        string[] candidates =
+        {
+            "ThatUtilsPad.Assets.Icons." + name,
+            "ThatUtilsPad.Assets." + name,
+            name
+        };
 
-        return texture;
+        foreach (string resourceName in candidates)
+        {
+            using Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName);
+            if (stream == null)
+                continue;
+
+            byte[] imageData = new byte[stream.Length];
+            int read = 0;
+            while (read < imageData.Length)
+            {
+                int n = stream.Read(imageData, read, imageData.Length - read);
+                if (n <= 0)
+                    break;
+                read += n;
+            }
+            if (read != imageData.Length)
+                continue;
+
+            Texture2D texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            if (!texture.LoadImage(imageData))
+            {
+                UnityEngine.Object.Destroy(texture);
+                continue;
+            }
+
+            texture.name = name;
+            return texture;
+        }
+
+        return null;
     }
     
     public static void StopCoroutine(ref Coroutine routine)
@@ -670,9 +702,22 @@ public static class Tools
             Transform t = FindCheckerPart(sideHolder, part);
             if (t == null)
                 continue;
-            
+
+            Vector3 scale = t.localScale;
+            float maxAbs = Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z));
+            if (maxAbs >= 0.45f)
+            {
+                if (originalScales.TryGetValue(t, out Vector3 existing))
+                {
+                    float existingMax = Mathf.Max(Mathf.Abs(existing.x), Mathf.Abs(existing.y), Mathf.Abs(existing.z));
+                    if (existingMax > 0.0001f && existingMax < 0.45f)
+                        t.localScale = existing;
+                }
+                continue;
+            }
+
             if (!originalScales.ContainsKey(t))
-                originalScales[t] = t.localScale;
+                originalScales[t] = scale;
         }
     }
 
@@ -693,7 +738,15 @@ public static class Tools
         if (t != null && originalScales.TryGetValue(t, out Vector3 scale))
             return scale;
 
-        return Vector3.one;
+        return t != null ? t.localScale : Vector3.one;
+    }
+
+    public static bool TryGetRememberedSize(Transform t, out Vector3 scale)
+    {
+        if (t != null && originalScales.TryGetValue(t, out scale))
+            return true;
+        scale = t != null ? t.localScale : Vector3.one;
+        return false;
     }
 }
 
@@ -905,13 +958,13 @@ public static class MenuEffects
 
     public static void SnapDeactivated(Transform knob, Transform slider, Renderer bodyRenderer = null, Renderer outlineRenderer = null)
     {
-        if (knob != null) knob.localPosition = Vector3.zero;
+        if (knob != null) knob.localPosition = new Vector3(-0.00235f, 0f, 0f);
         SpriteRenderer sr = slider?.GetComponent<SpriteRenderer>();
         UIImage sliderImage = slider?.GetComponent<UIImage>();
         if (sr != null) sr.color = MenuTheme.Current.ButtonBase;
         SafeSetImageColor(sliderImage, MenuTheme.Current.ButtonBase);
-        SafeSetRendererColor(bodyRenderer, MenuTheme.Current.Main);
-        SafeSetRendererColor(outlineRenderer, MenuTheme.Current.Button);
+        SafeSetRendererColor(bodyRenderer, MenuTheme.Current.Button);
+        SafeSetRendererColor(outlineRenderer, MenuTheme.Current.ButtonLight);
     }
 
     public static IEnumerator ActivateSwitch(Transform knob, Transform slider, Renderer bodyRenderer = null, Renderer outlineRenderer = null)
@@ -933,13 +986,13 @@ public static class MenuEffects
         if (!hasRenderers && !hasImages)
             yield break;
 
-        Color bodyStart = MenuTheme.Current.Main;
-        Color outlineStart = MenuTheme.Current.Button;
-        Color bodyPressed = MenuTheme.Current.Button;
-        Color outlinePressed = MenuTheme.Current.ButtonLight;
-        Color imagePressed = MenuTheme.Current.ButtonLight;
+        Color bodyStart = MenuTheme.Current.Button;
+        Color outlineStart = MenuTheme.Current.ButtonLight;
+        Color bodyPressed = MenuTheme.Current.ButtonLight;
+        Color outlinePressed = MenuTheme.Current.Accent;
+        Color imagePressed = MenuTheme.Current.Accent;
         Color[] imageStartColors = uiImages != null
-            ? uiImages.Select(image => SafeGetImageColor(image, MenuTheme.Current.Main)).ToArray()
+            ? uiImages.Select(image => SafeGetImageColor(image, MenuTheme.Current.Button)).ToArray()
             : Array.Empty<Color>();
 
         SafeSetRendererColor(bodyRenderer, bodyStart);
@@ -1441,6 +1494,156 @@ public static class MenuTheme
             LightMain = new Color32(30, 14, 18, 255),
             SakuraParts = true
         };
+
+        public static readonly MenuThemePalette Violet = new()
+        {
+            Main = new Color32(14, 10, 22, 255),
+            Border = new Color32(9, 6, 15, 255),
+            Button = new Color32(42, 24, 72, 255),
+            ButtonLight = new Color32(92, 56, 148, 255),
+            ButtonBase = new Color32(18, 12, 30, 255),
+            Accent = new Color32(186, 120, 255, 255),
+            Mid = new Color32(12, 8, 18, 255),
+            MidDark = new Color32(8, 5, 13, 255),
+            DarkAccent = new Color32(64, 34, 110, 255),
+            LightMain = new Color32(28, 18, 42, 255),
+            SakuraParts = true
+        };
+
+        public static readonly MenuThemePalette Ice = new()
+        {
+            Main = new Color32(10, 16, 22, 255),
+            Border = new Color32(6, 11, 16, 255),
+            Button = new Color32(36, 58, 78, 255),
+            ButtonLight = new Color32(120, 180, 220, 255),
+            ButtonBase = new Color32(14, 22, 30, 255),
+            Accent = new Color32(160, 230, 255, 255),
+            Mid = new Color32(8, 13, 18, 255),
+            MidDark = new Color32(5, 9, 13, 255),
+            DarkAccent = new Color32(40, 78, 110, 255),
+            LightMain = new Color32(22, 34, 46, 255),
+            SakuraParts = true
+        };
+
+        public static readonly MenuThemePalette Toxic = new()
+        {
+            Main = new Color32(10, 16, 8, 255),
+            Border = new Color32(6, 11, 5, 255),
+            Button = new Color32(28, 52, 18, 255),
+            ButtonLight = new Color32(96, 180, 42, 255),
+            ButtonBase = new Color32(12, 20, 8, 255),
+            Accent = new Color32(168, 255, 64, 255),
+            Mid = new Color32(8, 14, 6, 255),
+            MidDark = new Color32(5, 10, 4, 255),
+            DarkAccent = new Color32(48, 96, 22, 255),
+            LightMain = new Color32(20, 34, 14, 255),
+            SakuraParts = true
+        };
+
+        public static readonly MenuThemePalette Rose = new()
+        {
+            Main = new Color32(18, 10, 14, 255),
+            Border = new Color32(12, 6, 9, 255),
+            Button = new Color32(72, 28, 48, 255),
+            ButtonLight = new Color32(180, 72, 118, 255),
+            ButtonBase = new Color32(22, 12, 16, 255),
+            Accent = new Color32(255, 120, 170, 255),
+            Mid = new Color32(14, 8, 11, 255),
+            MidDark = new Color32(10, 5, 8, 255),
+            DarkAccent = new Color32(110, 36, 68, 255),
+            LightMain = new Color32(34, 18, 26, 255),
+            SakuraParts = true
+        };
+
+        public static readonly MenuThemePalette Solar = new()
+        {
+            Main = new Color32(18, 14, 6, 255),
+            Border = new Color32(12, 9, 4, 255),
+            Button = new Color32(78, 48, 12, 255),
+            ButtonLight = new Color32(220, 150, 36, 255),
+            ButtonBase = new Color32(24, 16, 6, 255),
+            Accent = new Color32(255, 210, 64, 255),
+            Mid = new Color32(14, 11, 5, 255),
+            MidDark = new Color32(10, 7, 3, 255),
+            DarkAccent = new Color32(120, 70, 16, 255),
+            LightMain = new Color32(34, 24, 10, 255),
+            SakuraParts = true
+        };
+
+        public static readonly MenuThemePalette Slate = new()
+        {
+            Main = new Color32(12, 14, 16, 255),
+            Border = new Color32(8, 9, 11, 255),
+            Button = new Color32(48, 54, 62, 255),
+            ButtonLight = new Color32(120, 132, 148, 255),
+            ButtonBase = new Color32(18, 20, 24, 255),
+            Accent = new Color32(180, 196, 214, 255),
+            Mid = new Color32(10, 11, 13, 255),
+            MidDark = new Color32(7, 8, 9, 255),
+            DarkAccent = new Color32(58, 66, 78, 255),
+            LightMain = new Color32(26, 30, 36, 255),
+            SakuraParts = true
+        };
+
+        public static readonly MenuThemePalette Neon = new()
+        {
+            Main = new Color32(8, 8, 14, 255),
+            Border = new Color32(4, 4, 9, 255),
+            Button = new Color32(24, 14, 48, 255),
+            ButtonLight = new Color32(255, 48, 180, 255),
+            ButtonBase = new Color32(12, 8, 22, 255),
+            Accent = new Color32(64, 255, 220, 255),
+            Mid = new Color32(6, 6, 12, 255),
+            MidDark = new Color32(4, 4, 8, 255),
+            DarkAccent = new Color32(90, 24, 120, 255),
+            LightMain = new Color32(18, 14, 32, 255),
+            SakuraParts = true
+        };
+
+        public static readonly MenuThemePalette Grove = new()
+        {
+            Main = new Color32(10, 14, 10, 255),
+            Border = new Color32(6, 10, 6, 255),
+            Button = new Color32(34, 58, 32, 255),
+            ButtonLight = new Color32(96, 148, 78, 255),
+            ButtonBase = new Color32(14, 20, 12, 255),
+            Accent = new Color32(146, 210, 110, 255),
+            Mid = new Color32(8, 12, 8, 255),
+            MidDark = new Color32(5, 8, 5, 255),
+            DarkAccent = new Color32(42, 78, 36, 255),
+            LightMain = new Color32(22, 32, 20, 255),
+            SakuraParts = true
+        };
+
+        public static readonly MenuThemePalette Candy = new()
+        {
+            Main = new Color32(18, 12, 18, 255),
+            Border = new Color32(12, 7, 12, 255),
+            Button = new Color32(78, 36, 92, 255),
+            ButtonLight = new Color32(255, 120, 210, 255),
+            ButtonBase = new Color32(24, 14, 26, 255),
+            Accent = new Color32(120, 220, 255, 255),
+            Mid = new Color32(14, 9, 14, 255),
+            MidDark = new Color32(10, 6, 10, 255),
+            DarkAccent = new Color32(110, 48, 130, 255),
+            LightMain = new Color32(34, 22, 36, 255),
+            SakuraParts = true
+        };
+
+        public static readonly MenuThemePalette Copper = new()
+        {
+            Main = new Color32(16, 12, 10, 255),
+            Border = new Color32(11, 8, 6, 255),
+            Button = new Color32(78, 42, 28, 255),
+            ButtonLight = new Color32(196, 110, 64, 255),
+            ButtonBase = new Color32(22, 14, 10, 255),
+            Accent = new Color32(255, 168, 96, 255),
+            Mid = new Color32(13, 10, 8, 255),
+            MidDark = new Color32(9, 7, 5, 255),
+            DarkAccent = new Color32(110, 54, 32, 255),
+            LightMain = new Color32(30, 22, 16, 255),
+            SakuraParts = true
+        };
     }
     public static MenuThemePalette Current { get; private set; } = Themes.Default;
 
@@ -1515,17 +1718,21 @@ public static class MenuTheme
         Apply(root, DarkAccentParts, theme.DarkAccent);
         Apply(root, AccentParts, theme.Accent);
 
-        ApplyOutlines(root, "SelectorBtn", 9, theme.Button);
-        ApplyOutlines(root, "PageNext", theme.Button);
-        ApplyOutlines(root, "PageBack", theme.Button);
-        ApplyOutlines(root, "VolumeUp", theme.Button);
-        ApplyOutlines(root, "VolumeDown", theme.Button);
-        ApplyOutlines(root, "Mute", theme.Button);
-        ApplyOutlines(root, "MuteElse", theme.Button);
-        ApplyOutlines(root, "AddToSaved", theme.Button);
+        ApplyOutlines(root, "SelectorBtn", 9, theme.ButtonLight);
+        ApplyOutlines(root, "PageNext", theme.ButtonLight);
+        ApplyOutlines(root, "PageBack", theme.ButtonLight);
+        ApplyOutlines(root, "VolumeUp", theme.ButtonLight);
+        ApplyOutlines(root, "VolumeDown", theme.ButtonLight);
+        ApplyOutlines(root, "Mute", theme.ButtonLight);
+        ApplyOutlines(root, "MuteElse", theme.ButtonLight);
+        ApplyOutlines(root, "AddToSaved", theme.ButtonLight);
 
-        if (!theme.SakuraParts) return;
+        if (!theme.SakuraParts)
+            return;
 
+        ShowParts(root, SakuraMainParts);
+        ShowParts(root, SakuraBorderParts);
+        ShowParts(root, SakuraAccentParts);
         Apply(root, SakuraMainParts, theme.Main);
         Apply(root, SakuraBorderParts, theme.Border);
         Apply(root, SakuraAccentParts, theme.Accent);
@@ -1533,20 +1740,20 @@ public static class MenuTheme
 
     public static void ApplySelectorButton(Transform selectorButton)
     {
-        ApplyRenderer(selectorButton, Current.Main);
-        ApplyChild(selectorButton, "Outline", Current.Button);
+        ApplyRenderer(selectorButton, Current.Button);
+        ApplyChild(selectorButton, "Outline", Current.ButtonLight);
     }
 
     public static void ApplyNavButton(Transform navButton)
     {
-        ApplyRenderer(navButton, Current.Main);
-        ApplyChild(navButton, "Outline", Current.Button);
+        ApplyRenderer(navButton, Current.Button);
+        ApplyChild(navButton, "Outline", Current.Accent);
     }
 
     public static void ApplyMenuButton(Transform button, out Renderer bodyRenderer, out Renderer outlineRenderer)
     {
-        bodyRenderer = ApplyRenderer(button, Current.Main);
-        outlineRenderer = ApplyChild(button, "Outline", Current.Button);
+        bodyRenderer = ApplyRenderer(button, Current.Button);
+        outlineRenderer = ApplyChild(button, "Outline", Current.ButtonLight);
     }
 
     public static void ApplyKeyboard(Transform keyboard)
@@ -1633,6 +1840,36 @@ public static class MenuTheme
             Apply(root, name, color);
     }
 
+    private static void HideParts(Transform root, IEnumerable<string> names)
+    {
+        if (root == null || names == null)
+            return;
+
+        foreach (string name in names)
+        {
+            foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
+            {
+                if (child != null && child.name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                    child.gameObject.SetActive(false);
+            }
+        }
+    }
+
+    private static void ShowParts(Transform root, IEnumerable<string> names)
+    {
+        if (root == null || names == null)
+            return;
+
+        foreach (string name in names)
+        {
+            foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
+            {
+                if (child != null && child.name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                    child.gameObject.SetActive(true);
+            }
+        }
+    }
+
     private static void Apply(Transform root, string name, Color32 color)
     {
         if (root == null) return;
@@ -1708,6 +1945,8 @@ public static class MenuTheme
 
         return null;
     }
+
+    public static void Tint(Transform target, Color32 color) => ApplyRenderer(target, color);
 
     private static Renderer ApplyRenderer(Transform target, Color32 color)
     {

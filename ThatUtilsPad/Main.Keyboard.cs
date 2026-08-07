@@ -409,6 +409,9 @@ public partial class Main
     }
     private void HandleKeyInput(string key)
     {
+        if (Mods.HandleTypedInput(key))
+            return;
+
         switch (key)
         {
             case "Enter":  Mods.ConfirmRename(); break;
