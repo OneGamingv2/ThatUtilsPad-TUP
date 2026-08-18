@@ -1,0 +1,221 @@
+ThatUtilsPad (TUP) — Feature List
+Version context: 1.0.2 plugin / TUPshaders 1.0.0
+Generated for overview of shipped capabilities.
+
+================================================================================
+CORE PAD / MENU
+================================================================================
+- In-game VR utility pad (ThatUtilsPad)
+- Category tabs with icons (Networking, Room, Cosmetics, Select User, Lobby,
+  Settings, Friends, Camera, Anticheat, Spotify, etc.)
+- Procedural / asset menu UI, paging, carousel where used
+- Menu themes (Default, Sakura, Ocean, Ember, Mint, Midnight, Amber, Crimson,
+  Violet, Ice, Toxic, Rose, Solar, Slate, Neon, Grove, Candy, Copper)
+- Menu smoothing (on/off + Soft / Normal / Sharp)
+- Menu scale (Compact / Normal / Large)
+- PC head distance for pad (Close / Normal / Far)
+- Double-open toggle + customizable open bind
+- Startup / menu open / button pop / notification sounds + click sound cycle
+- Master volume cycle
+- Persistent button / toggle states (saved under Plugins/ThatUtilsPad)
+- On-screen notification stack (animated width, fade, stacking)
+- Credits / version readout
+- Pad networking presence broadcast (who else has TUP pad in lobby)
+
+================================================================================
+NETWORKING
+================================================================================
+- Disconnect
+- Join Random
+- Lobby Hop
+- Copy Room Code
+- Room code Search UI
+- Cycle Photon region
+- Region player counts (auto refresh toggle)
+- Queue toggle
+- Game mode toggle
+- Lobby map cycle
+
+================================================================================
+ROOM / PLAYERS
+================================================================================
+- Nametags (toggle)
+- Nametag size cycle
+- Nametag distance fade toggle
+- Nametag fade distance cycle
+- Player aim / select (checker beam + bind)
+- Clear selected player
+- Auto scan custom properties
+- Scan all players’ Photon custom properties
+- Scan mode cycle
+- Per-player volume up / down / mute / mute everyone else
+- Saved volume levels per user
+- More Info / checker panels (tiles, mod detection display, creation date, etc.)
+- Mod / property legality catalog + classified mod name formatting
+- Platform / detected-mod helpers
+
+================================================================================
+COSMETICS / OUTFITS
+================================================================================
+- Outfit carousel (Previous / Next)
+- Equip browsing outfit
+- Multiple saved outfit slots with rename support
+- Outfit preview mode on Cosmetics tab
+
+================================================================================
+FRIENDS
+================================================================================
+- Refresh friends list (PlayFab / Photon friend info)
+- Select friend → actions
+- Join selected friend’s room
+- Invite selected friend here (copy room code)
+- Make private code for friend
+- Online / room status labels on friend buttons
+
+================================================================================
+SELECT USER / ANTICHEAT
+================================================================================
+- Aim Select + customizable aim-select bind
+- Clear selection
+- Auto Scan lobby properties
+- Scan All
+- Scan Mode
+- Anticheat HUD panel (Open Panel)
+- Lobby property scanning shared with Select User
+- Property signature legal / illegal classification
+
+================================================================================
+VR SETTINGS
+================================================================================
+- Diagnostics HUD toggle
+- FPS counter
+- Ping display
+- Network stats
+- Average FPS / Slow FPS / Frametime toggles
+- HUD move bind + reset HUD position
+- Graphics quality cycle
+- Resolution scale cycle
+- MSAA cycle
+- Shadow quality cycle
+- Render distance cycle
+- Controller haptics toggle
+- Comfort mode toggle
+
+================================================================================
+CAMERA (PAD + FULL CAMERA MOD)
+================================================================================
+Pad Camera tab:
+- Spawn / toggle camera tablet
+- First Person
+- Third Person
+- Follow Player
+- Flip Camera
+- FOV + / FOV -
+- Smooth + / Smooth -
+
+Full Camera Mod (desktop Tab GUI + VR tablet):
+- POV / 3RD / Follow / FreeCam modes
+- Detached lens: tablet GUI stays put, only lens moves
+- Keep GUI in POV / 3RD
+- Disable smoothing / snap
+- Freecam WASD / arrows (keyboard) + speed / sens
+- Spectator / stare / offsets
+- Summon tablet bind (cycle)
+- Angle clamping (+ visualizer)
+- PC / Shoulder camera sync from live lens
+- Near clip / FOV / smooth controls
+- Head cosmetics hider for camera view
+- Hide other tablets option
+- Procedural tablet + preview UI (no GT asset bundles required for core GUI)
+
+================================================================================
+SPOTIFY / MEDIA
+================================================================================
+- Spotify HUD page on pad
+- Play / Pause, Next, Previous
+- Track / artist / status / progress display
+- Album artwork when available
+- Windows media session provider (media keys style control path)
+- Refresh / forget Spotify info helpers
+
+================================================================================
+DISCORD RPC
+================================================================================
+- Discord Rich Presence (pipe-based SET_ACTIVITY)
+- Toggle Discord RPC from Settings
+- Shows ThatUtilsPad presence / version-style state
+- Configurable application id support
+
+================================================================================
+TUPSHADERS / GRAPHICS (F = desktop GUI)
+================================================================================
+Master:
+- Master enable / disable
+- Adaptive quality / performance budgets
+- PC Shader GUI (desktop IMGUI, press F by default)
+- Cycle preset from pad Shader Settings
+- TUPshaders master toggle from pad
+- Sync builtin presets to Plugins/.../TUPshaders/Presets on launch
+- User preset save / load / import / export JSON
+
+Builtin presets:
+- Competitive
+- Balanced
+- Cinematic
+- Ultra
+- GEffects Style
+- Neon Psychedelic
+- ReShade Style
+- Natural
+- Realistic (IRL-style filmic grade)
+- Vibrant
+- Low-End PC
+
+Effect categories / knobs:
+- Color grading (vibrance, saturation, contrast, gamma, temperature, tint,
+  lift, gain, tonemap, LUT strength)
+- Bloom (threshold, soft knee, radius, dirt, downsample)
+- CAS sharpening (adaptive)
+- Ambient lighting + shadow boost
+- Sky improvements
+- Fog (distance / height density)
+- Lens effects (vignette, grain, dirt, flare, chromatic aberration)
+- Ray Look: SSAO (contact shadows), SSR (screen reflections), god rays
+- Neon / GEffects: neon magenta look + intensity + pixel dither controls
+- IRL look flag (Realistic)
+- Shadows / lighting / performance / debug readouts
+
+Runtime paths:
+- URP Volume driver (Bloom, Color Adjustments, Tonemapping, White Balance,
+  Vignette, Chromatic Aberration)
+- CodeLookComposer (RenderSettings ambient / fog / reflections / shadows)
+- ScreenGradeOverlay (PC fallback soft grade when native bridge inactive)
+- RenderAgent camera discovery + URP post force on Main / Shoulder / VR cams
+- ThatUtilsPad.RenderBridge.dll — native D3D11 Present hook (ReShade-class
+  IRL pack: aerial/height fog, grass revive, underside bump, micro-detail,
+  denoise vs lost/blocky pixels, full D3D state restore, quality tiers)
+  + "ReShade Bridge" GUI; Realistic preset enables fx.look.irl + grass/bump
+  Soft Unity material color polish on grass/leaf/tree names (not texture dump)
+
+NOTES / LIMITS:
+- Hardware DXR ray tracing is NOT available — Gorilla Tag uses D3D11.
+  Public URP “ray tracing” / ReShade RTGI-style work is screen-space marching.
+- Build native bridge with VS 2022 C++ (see ThatUtilsPad.RenderBridge/README.md)
+  or run build.bat (builds C# + native when MSBuild is present).
+- Place ThatUtilsPad.RenderBridge.dll next to ThatUtilsPad.dll in plugins.
+
+================================================================================
+MISC / TECH
+================================================================================
+- BepInEx plugin (netstandard2.1)
+- Embedded TUPshaders (no separate shader AssetBundle required for current path)
+- Property list / scanning assets
+- Anti-dump helper
+- Click sound library (including Wii, etc.)
+- Build: .\build.bat  (C# + native RenderBridge when MSBuild is present)
+  Or: dotnet build ThatUtilsPad\ThatUtilsPad.csproj -c Release
+  Outputs: ThatUtilsPad.dll + ThatUtilsPad.RenderBridge.dll (side-by-side)
+
+================================================================================
+END
+================================================================================

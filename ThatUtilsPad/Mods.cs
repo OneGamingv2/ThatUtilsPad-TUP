@@ -183,10 +183,36 @@ public static partial class Mods
         return false;
     }
 
-    private static void OpenSettingsHubPage() => Main.Instance?.OpenSettingsCategory("Settings");
-    private static void OpenMenuSettingsPage() => Main.Instance?.OpenSettingsCategory("Menu Settings");
-    private static void OpenSoundSettingsPage() => Main.Instance?.OpenSettingsCategory("Sound Settings");
-    private static void OpenVrSettingsPage() => Main.Instance?.OpenSettingsCategory("VR Settings");
+        private static void OpenSettingsHubPage() => Main.Instance?.OpenSettingsCategory("Settings");
+        private static void OpenMenuSettingsPage() => Main.Instance?.OpenSettingsCategory("Menu Settings");
+        private static void OpenSoundSettingsPage() => Main.Instance?.OpenSettingsCategory("Sound Settings");
+        private static void OpenVrSettingsPage() => Main.Instance?.OpenSettingsCategory("VR Settings");
+        private static void OpenShaderSettingsPage() => Main.Instance?.OpenSettingsCategory("Shader Settings");
+
+        private static void ToggleTupShadersMaster()
+        {
+            bool next = !TUPshaders.Plugin.GetEffectsEnabled();
+            TUPshaders.Plugin.SetEffectsEnabled(next);
+            ShowNotification(next ? "TUPshaders ON" : "TUPshaders OFF");
+        }
+
+        private static void OpenTupShadersDesktopGui()
+        {
+            TUPshaders.Plugin.ToggleDesktopGui();
+            ShowNotification("TUPshaders PC GUI (F)");
+        }
+
+        private static void CycleTupShaderPreset()
+        {
+            TUPshaders.Plugin.CyclePreset();
+            ShowNotification("Cycled TUPshaders preset");
+        }
+
+        private static void ToggleDiscordRpc()
+        {
+            TupDiscordRpc.Enabled = !TupDiscordRpc.Enabled;
+            ShowNotification(TupDiscordRpc.Enabled ? "Discord RPC ON" : "Discord RPC OFF");
+        }
 
 public static void Init()
 {
@@ -262,7 +288,22 @@ public static void Init()
                     { "Menu Settings", new ModAction(OpenMenuSettingsPage, false) },
                     { "Sound Settings", new ModAction(OpenSoundSettingsPage, false) },
                     { "VR Settings", new ModAction(OpenVrSettingsPage, false) },
+                    { "Shader Settings", new ModAction(OpenShaderSettingsPage, false) },
+                    { "Discord RPC", new ModAction(ToggleDiscordRpc, true) },
                     { "Credits", new ModAction(ShowCredits, false) },
+                }
+            }
+        },
+        {
+            "Shader Settings",
+            new ModCategory("settings.png", false)
+            {
+                Actions =
+                {
+                    { "Exit Shader Settings", new ModAction(OpenSettingsHubPage, false) },
+                    { "TUPshaders", new ModAction(ToggleTupShadersMaster, true) },
+                    { "PC Shader GUI", new ModAction(OpenTupShadersDesktopGui, false) },
+                    { "Cycle Preset", new ModAction(CycleTupShaderPreset, false) },
                 }
             }
         },

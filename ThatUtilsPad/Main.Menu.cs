@@ -404,10 +404,16 @@ public partial class Main
         if (string.Equals(btnName, "Menu Settings", StringComparison.OrdinalIgnoreCase)
             || string.Equals(btnName, "Sound Settings", StringComparison.OrdinalIgnoreCase)
             || string.Equals(btnName, "VR Settings", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Shader Settings", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Discord RPC", StringComparison.OrdinalIgnoreCase)
             || string.Equals(btnName, "Credits", StringComparison.OrdinalIgnoreCase)
             || string.Equals(btnName, "Exit Menu Settings", StringComparison.OrdinalIgnoreCase)
             || string.Equals(btnName, "Exit Sound Settings", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(btnName, "Exit VR Settings", StringComparison.OrdinalIgnoreCase))
+            || string.Equals(btnName, "Exit VR Settings", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Exit Shader Settings", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "TUPshaders", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "PC Shader GUI", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(btnName, "Cycle Preset", StringComparison.OrdinalIgnoreCase))
             return btnName;
 
         if (string.Equals(btnName, "Equip Outfit", StringComparison.OrdinalIgnoreCase))

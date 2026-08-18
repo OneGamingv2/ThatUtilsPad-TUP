@@ -442,13 +442,18 @@ public partial class Main
                 if (group.Texts[i] != null)
                 {
                     group.Texts[i].richText = true;
-                    group.Texts[i].text = ShortTileName(group.Values[valueIndex]);
+                    bool modsTitle = string.Equals(group.TitleName, "ModsTitle", StringComparison.OrdinalIgnoreCase);
+                    group.Texts[i].text = modsTitle
+                        ? group.Values[valueIndex]
+                        : ShortTileName(group.Values[valueIndex]);
                     group.Texts[i].alpha = 1f;
-                    if (string.Equals(group.TitleName, "ModsTitle", StringComparison.OrdinalIgnoreCase))
+                    if (modsTitle)
                     {
                         group.Texts[i].fontSize = 2.55f;
                         group.Texts[i].fontStyle = FontStyles.Bold;
                         group.Texts[i].color = Color.white;
+                        group.Texts[i].enableWordWrapping = false;
+                        group.Texts[i].overflowMode = TextOverflowModes.Ellipsis;
                     }
                 }
             }
@@ -1267,17 +1272,9 @@ public partial class Main
         EnsureMoreInfoPageArrows(font);
         WireMoreInfoOpenButton();
 
-        if (modsTileGroup != null)
-        {
-            for (int i = 0; i < modsTileGroup.Tiles.Length; i++)
-            {
-                if (modsTileGroup.Tiles[i] != null)
-                    modsTileGroup.Tiles[i].SetActive(false);
-            }
-
-            if (modsTileGroup.NoneTitle != null)
-                modsTileGroup.NoneTitle.SetActive(false);
-        }
+        // Prefab tiles stay available — RefreshCheckerModsInfo fills them when a player is selected.
+        if (modsTileGroup != null && modsTileGroup.NoneTitle != null)
+            modsTileGroup.NoneTitle.SetActive(false);
     }
 
     private void SanitizeModsTitleScale()
@@ -1406,9 +1403,9 @@ public partial class Main
         {
             if (existing.parent != main)
                 existing.SetParent(main, false);
-            existing.localPosition = new Vector3(0.002f, 0.012f, 0f);
+            existing.localPosition = new Vector3(0.002f, 0.048f, -0.002f);
             existing.localRotation = Quaternion.identity;
-            existing.localScale = Vector3.one * 0.0085f;
+            existing.localScale = Vector3.one * 0.0105f;
 
             moreInfoBodyText = existing.GetComponent<TMP_Text>() ?? existing.GetComponentInChildren<TMP_Text>(true);
             if (moreInfoBodyText != null)
@@ -1418,22 +1415,24 @@ public partial class Main
                 moreInfoBodyText.richText = true;
                 moreInfoBodyText.overflowMode = TextOverflowModes.Overflow;
                 moreInfoBodyText.alignment = TextAlignmentOptions.TopLeft;
-                moreInfoBodyText.fontSize = 1.55f;
+                moreInfoBodyText.fontSize = 1.85f;
+                moreInfoBodyText.color = Color.white;
                 moreInfoBodyText.text = "";
+                moreInfoBodyText.gameObject.SetActive(true);
                 return;
             }
         }
 
         GameObject bodyObj = new GameObject("MoreInfoBody");
         bodyObj.transform.SetParent(main, false);
-        bodyObj.transform.localPosition = new Vector3(0.002f, 0.012f, 0f);
+        bodyObj.transform.localPosition = new Vector3(0.002f, 0.048f, -0.002f);
         bodyObj.transform.localRotation = Quaternion.identity;
-        bodyObj.transform.localScale = Vector3.one * 0.0085f;
-        bodyObj.layer = 2;
+        bodyObj.transform.localScale = Vector3.one * 0.0105f;
+        bodyObj.layer = 0;
 
         TextMeshPro tmp = bodyObj.AddComponent<TextMeshPro>();
         tmp.alignment = TextAlignmentOptions.TopLeft;
-        tmp.fontSize = 1.55f;
+        tmp.fontSize = 1.85f;
         tmp.color = Color.white;
         tmp.enableWordWrapping = true;
         tmp.richText = true;
@@ -1445,7 +1444,7 @@ public partial class Main
         RectTransform rect = bodyObj.GetComponent<RectTransform>();
         if (rect != null)
         {
-            rect.sizeDelta = new Vector2(22f, 14f);
+            rect.sizeDelta = new Vector2(26f, 16f);
             rect.pivot = new Vector2(0f, 1f);
         }
 
@@ -1580,6 +1579,15 @@ public partial class Main
 
     private void ShiftMoreInfoModsPage(int delta)
     {
+        if (modsTileGroup != null && modsTileGroup.Values != null && modsTileGroup.Values.Length > 0)
+        {
+            ShiftCheckerPage(modsTileGroup, delta);
+            moreInfoModsPage = modsTileGroup.PageIndex;
+            if (moreInfoModsExpanded)
+                UpdateMoreInfoBodyOnly();
+            return;
+        }
+
         if (!moreInfoModsExpanded)
             return;
 
@@ -1598,51 +1606,54 @@ public partial class Main
     {
         if (moreInfoModList == null || moreInfoModList.Length == 0)
             return 1;
-        return (moreInfoModList.Length + MoreInfoModsPerPage - 1) / MoreInfoModsPerPage;
+        int pageSize = modsTileGroup != null ? GetCheckerPageSize(modsTileGroup) : MoreInfoModsPerPage;
+        return (moreInfoModList.Length + pageSize - 1) / pageSize;
     }
 
-    private void UpdateMoreInfoBodyAndChrome()
+    private void UpdateMoreInfoBodyOnly()
     {
+        if (moreInfoBodyText == null)
+            return;
+
+        moreInfoBodyText.richText = true;
+        moreInfoBodyText.gameObject.SetActive(true);
+
         string dateValue = string.IsNullOrWhiteSpace(lastCheckerDate) ? "--/--/----" : lastCheckerDate.Replace("Date: ", "");
         string platformValue = string.IsNullOrWhiteSpace(lastCheckerPlatform) ? "Unknown" : lastCheckerPlatform;
         string colorValue = string.IsNullOrWhiteSpace(lastCheckerColorStr) ? "--" : lastCheckerColorStr;
         string fpsValue = string.IsNullOrWhiteSpace(lastCheckerFpsPing) ? "--Hz \u2022 --Ms" : lastCheckerFpsPing;
-
         int pageCount = GetMoreInfoModsPageCount();
-        moreInfoModsPage = Mathf.Clamp(moreInfoModsPage, 0, pageCount - 1);
+        moreInfoModsPage = Mathf.Clamp(
+            modsTileGroup != null ? modsTileGroup.PageIndex : moreInfoModsPage,
+            0,
+            pageCount - 1);
 
-        if (moreInfoBodyText != null)
+        if (!moreInfoModsExpanded)
         {
-            moreInfoBodyText.richText = true;
-            moreInfoBodyText.gameObject.SetActive(true);
-
-            if (!moreInfoModsExpanded)
-            {
-                int total = moreInfoModList != null ? moreInfoModList.Length : 0;
-                string platformColored = FormatMoreInfoPlatformLine(platformValue);
-                moreInfoBodyText.text =
-                    platformColored + "\n" +
-                    "Creation Date: " + dateValue + "\n" +
-                    "Color: " + colorValue + "\n" +
-                    fpsValue + "\n\n" +
-                    (total == 0
-                        ? "No props / mods detected\n<color=#BDBDBD>Tap MORE INFO</color>"
-                        : total + " signal" + (total == 1 ? "" : "s") + " detected\n" +
-                          "<color=#CBA6F7>Tap MORE INFO to open list</color>");
-                UpdateMoreInfoPlatformIcon(platformValue);
-            }
-            else
-            {
-                moreInfoBodyText.text = BuildExpandedModsPageText(pageCount);
-                if (moreInfoPlatformIconImage != null)
-                    moreInfoPlatformIconImage.enabled = false;
-            }
+            int total = moreInfoModList != null ? moreInfoModList.Length : 0;
+            string platformColored = FormatMoreInfoPlatformLine(platformValue);
+            moreInfoBodyText.text =
+                platformColored + "\n" +
+                "Creation Date: " + dateValue + "\n" +
+                "Color: " + colorValue + "\n" +
+                fpsValue + "\n\n" +
+                (total == 0
+                    ? "<color=#BDBDBD>No props / mods detected</color>"
+                    : "<color=#CBA6F7>" + total + " mod" + (total == 1 ? "" : "s") + " listed below</color>\n" +
+                      "<color=#9AD7FF>Tap MORE INFO for full list</color>");
+            UpdateMoreInfoPlatformIcon(platformValue);
         }
-        else if (moreInfoModsExpanded && moreInfoPlatformIconImage != null)
+        else
         {
-            moreInfoPlatformIconImage.enabled = false;
+            moreInfoBodyText.text = BuildExpandedModsPageText(pageCount);
+            if (moreInfoPlatformIconImage != null)
+                moreInfoPlatformIconImage.enabled = false;
         }
+    }
 
+    private void UpdateMoreInfoBodyAndChrome()
+    {
+        UpdateMoreInfoBodyOnly();
         UpdateMoreInfoHeaderLabels();
         ApplyMoreInfoModsTiles();
 
@@ -1655,44 +1666,57 @@ public partial class Main
         if (modsTileGroup == null)
             return;
 
-        if (!moreInfoModsExpanded)
+        // Build colored tile labels from the mod list — this is the main visible mods UI.
+        string[] values;
+        if (moreInfoModList == null || moreInfoModList.Length == 0)
         {
-            for (int i = 0; i < modsTileGroup.Tiles.Length; i++)
-            {
-                if (modsTileGroup.Tiles[i] != null)
-                    modsTileGroup.Tiles[i].SetActive(false);
-            }
-
-            if (modsTileGroup.NoneTitle != null)
-                modsTileGroup.NoneTitle.SetActive(false);
-
-            if (moreInfoBackArrow != null)
-                moreInfoBackArrow.gameObject.SetActive(false);
-            if (moreInfoNextArrow != null)
-                moreInfoNextArrow.gameObject.SetActive(false);
-            if (moreInfoPageText != null)
-                moreInfoPageText.gameObject.SetActive(false);
-            return;
+            values = Array.Empty<string>();
+        }
+        else
+        {
+            values = new string[moreInfoModList.Length];
+            for (int i = 0; i < moreInfoModList.Length; i++)
+                values[i] = FormatMoreInfoTileName(moreInfoModList[i]);
         }
 
-        for (int i = 0; i < modsTileGroup.Tiles.Length; i++)
+        if (!StringArraysEqual(lastMoreInfoTileValues, values))
         {
-            if (modsTileGroup.Tiles[i] != null)
-                modsTileGroup.Tiles[i].SetActive(false);
+            lastMoreInfoTileValues = values;
+            SetCheckerTiles(modsTileGroup, values);
         }
-        if (modsTileGroup.NoneTitle != null)
-            modsTileGroup.NoneTitle.SetActive(false);
+        else
+        {
+            UpdateCheckerPageChrome(modsTileGroup);
+        }
 
-        int pageCount = GetMoreInfoModsPageCount();
+        // Keep page arrows visible whenever there is more than one page of mods.
+        int pageCount = GetCheckerPageCount(modsTileGroup);
+        bool multi = pageCount > 1;
         if (moreInfoBackArrow != null)
-            moreInfoBackArrow.gameObject.SetActive(pageCount > 1);
+            moreInfoBackArrow.gameObject.SetActive(multi);
         if (moreInfoNextArrow != null)
-            moreInfoNextArrow.gameObject.SetActive(pageCount > 1);
+            moreInfoNextArrow.gameObject.SetActive(multi);
         if (moreInfoPageText != null)
         {
-            moreInfoPageText.gameObject.SetActive(true);
-            moreInfoPageText.text = (moreInfoModsPage + 1) + " / " + pageCount;
+            moreInfoPageText.gameObject.SetActive(moreInfoModList != null && moreInfoModList.Length > 0);
+            moreInfoPageText.text = multi
+                ? (modsTileGroup.PageIndex + 1) + " / " + pageCount
+                : (moreInfoModList != null && moreInfoModList.Length > 0 ? "1 / 1" : "0 / 0");
         }
+    }
+
+    private static bool StringArraysEqual(string[] a, string[] b)
+    {
+        a ??= Array.Empty<string>();
+        b ??= Array.Empty<string>();
+        if (a.Length != b.Length)
+            return false;
+        for (int i = 0; i < a.Length; i++)
+        {
+            if (!string.Equals(a[i], b[i], StringComparison.Ordinal))
+                return false;
+        }
+        return true;
     }
 
     private static string FormatMoreInfoTileName(MoreInfoModEntry entry)
@@ -1702,14 +1726,22 @@ public partial class Main
 
         string hex = GetMoreInfoKindHex(entry.Kind);
         string badge = entry.Kind == MoreInfoModKind.Illegal
-            ? "ILLEGAL"
+            ? "ILL"
             : entry.Kind == MoreInfoModKind.Untrusted
-                ? "WARN"
+                ? "WRN"
                 : entry.Kind == MoreInfoModKind.Legal
-                    ? "LEGAL"
-                    : "UNKNOWN";
-        return "<color=" + hex + "><b>" + badge + "</b></color>  <color=#F5F5F5>" +
-               EscapeTmpText(entry.Name) + "</color>";
+                    ? "OK"
+                    : "?";
+        return "<color=" + hex + "><b>" + badge + "</b></color> <color=#F5F5F5>" +
+               EscapeTmpText(TruncatePlain(entry.Name, 22)) + "</color>";
+    }
+
+    private static string TruncatePlain(string value, int max)
+    {
+        if (string.IsNullOrEmpty(value))
+            return "";
+        value = value.Trim();
+        return value.Length <= max ? value : value.Substring(0, Math.Max(1, max - 3)) + "...";
     }
 
     private string BuildExpandedModsPageText(int pageCount)
@@ -1717,16 +1749,17 @@ public partial class Main
         if (moreInfoModList == null || moreInfoModList.Length == 0)
             return "<size=120%><color=#BDBDBD>No props / mods detected</color></size>\n\n<color=#9AD7FF>Tap to go back</color>";
 
-        int start = moreInfoModsPage * MoreInfoModsPerPage;
-        int end = Mathf.Min(start + MoreInfoModsPerPage, moreInfoModList.Length);
+        int pageSize = modsTileGroup != null ? GetCheckerPageSize(modsTileGroup) : MoreInfoModsPerPage;
+        int start = moreInfoModsPage * pageSize;
+        int end = Mathf.Min(start + pageSize, moreInfoModList.Length);
         System.Text.StringBuilder sb = new System.Text.StringBuilder(320);
         sb.Append("<size=130%><color=#9AD7FF><b>PROPS / MODS</b></color></size>  ")
             .Append("<color=#BDBDBD>").Append(moreInfoModsPage + 1).Append(" / ").Append(pageCount).Append("</color>")
             .Append("\n<color=#8A8A8A>Tap header to go back</color>\n")
-            .Append("<color=#55FF88><b>LEGAL</b></color>   ")
-            .Append("<color=#FF5555><b>ILLEGAL</b></color>   ")
-            .Append("<color=#FF9F43><b>WARN</b></color>   ")
-            .Append("<color=#FFD166><b>UNKNOWN</b></color>\n\n");
+            .Append("<color=#55FF88><b>OK</b></color>  ")
+            .Append("<color=#FF5555><b>ILL</b></color>  ")
+            .Append("<color=#FF9F43><b>WRN</b></color>  ")
+            .Append("<color=#FFD166><b>?</b></color>\n\n");
 
         for (int i = start; i < end; i++)
         {
@@ -1829,9 +1862,12 @@ public partial class Main
         {
             modsTitleTransform.gameObject.SetActive(false);
             moreInfoModList = Array.Empty<MoreInfoModEntry>();
+            lastMoreInfoTileValues = Array.Empty<string>();
             moreInfoModsPage = 0;
             moreInfoModsExpanded = false;
             lastCheckerUnknownPropList = Array.Empty<string>();
+            if (modsTileGroup != null)
+                SetCheckerTiles(modsTileGroup, Array.Empty<string>());
             if (modsCountTextComp != null)
                 modsCountTextComp.text = "0";
             if (moreInfoBodyText != null)
@@ -1861,6 +1897,7 @@ public partial class Main
         lastCheckerUnknownPropList = Array.Empty<string>();
         hasLastCheckerColor = false;
         moreInfoModList = Array.Empty<MoreInfoModEntry>();
+        lastMoreInfoTileValues = Array.Empty<string>();
         moreInfoModsPage = 0;
         moreInfoModsExpanded = false;
 
@@ -2316,15 +2353,18 @@ public partial class Main
             ? unknownProps.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim()).ToArray()
             : Array.Empty<string>();
 
-        if (string.Equals(lastCheckerLegalMods, legalMods, StringComparison.Ordinal) &&
+        bool same =
+            string.Equals(lastCheckerLegalMods, legalMods, StringComparison.Ordinal) &&
             string.Equals(lastCheckerIllegalMods, illegalMods, StringComparison.Ordinal) &&
-            UnknownPropListsEqual(lastCheckerUnknownPropList, unknownArray))
-            return;
+            UnknownPropListsEqual(lastCheckerUnknownPropList, unknownArray);
 
         lastCheckerLegalMods = legalMods;
         lastCheckerIllegalMods = illegalMods;
         lastCheckerUnknownPropList = unknownArray;
-        RefreshCheckerModsInfo();
+
+        // Always refresh when panel is open; also force once after identical data if chrome was empty.
+        if (!same || moreInfoVisible)
+            RefreshCheckerModsInfo();
     }
 
     private static bool UnknownPropListsEqual(string[] a, string[] b)

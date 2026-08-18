@@ -7,9 +7,9 @@ namespace CameraMod.Button.Buttons
     {
         private float lastClicked;
         private float lastHoldTick;
-        private float holdTickInterval = 0.1f;
-        public float clickMinInterval = 0.1f;
-        public float holdDurationThreshold = 0.3f;
+        private float holdTickInterval = 0.16f;
+        public float clickMinInterval = 0.22f;
+        public float holdDurationThreshold = 0.35f;
         private float entered;
         private int collidersCount;
 
@@ -25,12 +25,16 @@ namespace CameraMod.Button.Buttons
 
             collidersCount++;
             entered = Time.time;
-            if (Time.time - lastClicked < clickMinInterval)
+            float cooldown = controller != null
+                ? Mathf.Max(clickMinInterval, controller.ButtonCooldownSeconds)
+                : clickMinInterval;
+            if (Time.time - lastClicked < cooldown)
                 return;
 
             Vibration(isLeft(col));
             onClick?.Invoke();
             lastClicked = Time.time;
+            controller.NotifyButtonPressed();
         }
 
         private void OnTriggerStay(Collider col)
@@ -46,6 +50,7 @@ namespace CameraMod.Button.Buttons
             onClick?.Invoke();
             Vibration(isLeft(col));
             lastHoldTick = Time.time;
+            controller.NotifyButtonPressed();
         }
 
         private void OnTriggerExit(Collider col)

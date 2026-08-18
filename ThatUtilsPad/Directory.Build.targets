@@ -4,9 +4,12 @@
         <ItemGroup>
             <FilesToCopy Include="$(TargetPath)" />
             <FilesToCopy Include="$(TargetDir)$(TargetName).pdb" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
+            <TupPresetFiles Include="$(MSBuildProjectDirectory)\TUPshaders\Presets\**\*" />
         </ItemGroup>
 
         <Copy SourceFiles="@(FilesToCopy)" DestinationFiles="@(FilesToCopy->'$(PluginsPath)\$(ProjectName)\%(Filename)%(Extension)')" />
-        <Message Text="Copied $(TargetFileName) and $(TargetName).pdb to Plugins" Importance="high"/>
+        <MakeDir Directories="$(PluginsPath)\$(ProjectName)\TUPshaders\Presets" />
+        <Copy SourceFiles="@(TupPresetFiles)" DestinationFolder="$(PluginsPath)\$(ProjectName)\TUPshaders\Presets\%(RecursiveDir)" SkipUnchangedFiles="true" Condition="'@(TupPresetFiles)' != ''" />
+        <Message Text="Copied $(TargetFileName), TUPshaders presets, and PDB to Plugins" Importance="high"/>
     </Target>
 </Project>

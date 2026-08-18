@@ -3,7 +3,13 @@
         <TargetFramework>netstandard2.1</TargetFramework>
         <LangVersion>Latest</LangVersion>
         <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
+
+    <ItemGroup>
+        <Compile Remove="TUPshaders\Tools\**" />
+        <None Remove="TUPshaders\Tools\**" />
+    </ItemGroup>
 
     <ItemGroup>
         <None Remove="Assets\tup-prefab" />
@@ -106,6 +112,10 @@
         <None Remove="Assets\Models\tup-overv9" />
         <None Remove="Assets\UI\tup-nametagui" />
         <EmbeddedResource Include="Assets\UI\tup-nametagui" />
+        <None Remove="Assets\Camera\tup-cameramod" />
+        <EmbeddedResource Include="Assets\Camera\tup-cameramod" />
+        <None Remove="Assets\Native\ThatUtilsPad.RenderBridge.dll" />
+        <EmbeddedResource Include="Assets\Native\ThatUtilsPad.RenderBridge.dll" />
         <None Remove="Assets\UI\notifover" />
         <None Remove="Assets\UI\notifpls" />
         <EmbeddedResource Include="Assets\UI\notifpls" />

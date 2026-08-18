@@ -173,6 +173,7 @@ public partial class Main : BaseUnityPlugin
     private bool moreInfoModsExpanded;
     private TMP_Text moreInfoBodyText;
     private MoreInfoModEntry[] moreInfoModList = Array.Empty<MoreInfoModEntry>();
+    private string[] lastMoreInfoTileValues = Array.Empty<string>();
     private int moreInfoModsPage;
     private const int MoreInfoModsPerPage = 6;
     private Transform moreInfoNextArrow;
@@ -273,6 +274,8 @@ public partial class Main : BaseUnityPlugin
         Mods.ShutdownAnticheatHud();
         Mods.Shutdown();
         Mods.ShutdownSpotifyMedia();
+        TupDiscordRpc.Shutdown();
+        TUPshaders.Plugin.Shutdown();
         if (ReferenceEquals(Instance, this))
             Instance = null;
     }
@@ -304,6 +307,8 @@ public partial class Main : BaseUnityPlugin
         new GameObject("TUP_CoroutineHandler").AddComponent<CoroutineHandler>();
         CameraMod.Camera.Patches.StartPatch.EnsureStarted();
         Mods.StartEnabledLoops();
+        TUPshaders.Plugin.Bootstrap();
+        TupDiscordRpc.Init();
         btnPrefab = buttonBundle != null
             ? buttonBundle.LoadAsset<GameObject>("assets/prefabs/buttonmodelui2.prefab")
             : null;
@@ -480,6 +485,7 @@ public partial class Main : BaseUnityPlugin
 
         Mods.AnticheatHudLoop();
         UpdateSpotifyHudLoop();
+        TupDiscordRpc.Tick();
 
         if (menuBusy && (currentCategory == "SelectUser" || currentCategory == "Lobby" || currentCategory == "Cosmetics"))
             UpdatePlayerModelPreviewLive();

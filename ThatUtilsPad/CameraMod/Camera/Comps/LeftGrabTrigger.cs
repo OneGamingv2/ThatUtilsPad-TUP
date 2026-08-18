@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 #pragma warning disable CS0618
 namespace CameraMod.Camera.Comps
@@ -10,6 +10,7 @@ namespace CameraMod.Camera.Comps
         public Transform leftHandT => GorillaTagger.Instance != null ? GorillaTagger.Instance.leftHandTransform : null;
         private CameraController controller => CameraController.Instance;
         private Transform tabletT => controller != null ? controller.cameraTabletT : null;
+        private bool wasHolding;
 
         private void Start()
         {
@@ -25,33 +26,14 @@ namespace CameraMod.Camera.Comps
             {
                 CapsuleCollider cap = gameObject.AddComponent<CapsuleCollider>();
                 cap.isTrigger = true;
-                cap.radius = 0.5f;
-                cap.height = 2.2f;
+                cap.radius = 0.55f;
+                cap.height = 2.15f;
                 cap.direction = 1;
             }
             else
             {
                 col.isTrigger = true;
             }
-        }
-
-        private void OnTriggerStay(Collider col)
-        {
-            if (controller == null || tabletT == null || InputManager.instance == null || leftHandT == null || col == null)
-                return;
-
-            if (!col.name.Contains("Left"))
-                return;
-
-            if (InputManager.instance.LeftGrip && controller.cameraMode != CameraMode.FirstPersonView)
-            {
-                tabletT.parent = leftHandT;
-                if (controller.cameraMode == CameraMode.FollowPlayer)
-                    controller.cameraMode = CameraMode.None;
-            }
-
-            if (!InputManager.instance.LeftGrip && tabletT.parent == leftHandT)
-                tabletT.parent = null;
         }
 
         private void Update()
@@ -62,15 +44,22 @@ namespace CameraMod.Camera.Comps
                 return;
 
             float dist = Vector3.Distance(leftHandT.position, transform.position);
-            if (InputManager.instance.LeftGrip && dist < 0.24f)
+            bool gripping = InputManager.instance.LeftGrip && dist < 0.22f;
+
+            if (gripping)
             {
+                if (!wasHolding)
+                    controller.BeginHandHold();
                 tabletT.parent = leftHandT;
-                if (controller.cameraMode == CameraMode.FollowPlayer)
-                    controller.cameraMode = CameraMode.None;
+                wasHolding = true;
             }
-            else if (!InputManager.instance.LeftGrip && tabletT.parent == leftHandT)
+            else if (wasHolding || tabletT.parent == leftHandT)
             {
-                tabletT.parent = null;
+                if (tabletT.parent == leftHandT)
+                    tabletT.parent = null;
+                if (wasHolding)
+                    controller.EndHandHold();
+                wasHolding = false;
             }
         }
     }

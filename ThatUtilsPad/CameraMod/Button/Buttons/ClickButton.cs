@@ -7,7 +7,7 @@ namespace CameraMod.Button.Buttons
     public class ClickButton : BaseButton
     {
         private float lastClicked;
-        public float clickMinInterval = 0.1f;
+        public float clickMinInterval = 0.28f;
 
         private void OnTriggerEnter(Collider col)
         {
@@ -16,12 +16,15 @@ namespace CameraMod.Button.Buttons
                 return;
             if (!isHand(col))
                 return;
-            if (Time.time - lastClicked <= clickMinInterval)
+
+            float cooldown = Mathf.Max(clickMinInterval, controller.ButtonCooldownSeconds);
+            if (Time.time - lastClicked <= cooldown)
                 return;
 
             Vibration(isLeft(col));
             onClick?.Invoke();
             lastClicked = Time.time;
+            controller.NotifyButtonPressed();
         }
     }
 }

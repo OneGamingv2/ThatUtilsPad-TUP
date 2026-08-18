@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using Newtonsoft.Json;
 using UnityEngine;
@@ -91,6 +91,25 @@ namespace CameraMod {
             T defaultSettings = Activator.CreateInstance<T>();
             string json = JsonConvert.SerializeObject(defaultSettings, Formatting.Indented);
             File.WriteAllText(filePath, json);
+        }
+
+        public void Save(T settings) {
+            if (settings == null)
+                settings = Activator.CreateInstance<T>();
+            CurrentSettings = settings;
+            try
+            {
+                if (!Directory.Exists(configsFolder))
+                    Directory.CreateDirectory(configsFolder);
+                string json = JsonConvert.SerializeObject(CurrentSettings, Formatting.Indented);
+                File.WriteAllText(filePath, json);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[TUP Camera] Config save failed: " + ex.Message);
+            }
+
+            Changed?.Invoke(CurrentSettings);
         }
     }
 }

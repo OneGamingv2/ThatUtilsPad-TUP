@@ -50,7 +50,13 @@ public partial class Main
         if (!done || fetchError != null || string.IsNullOrWhiteSpace(json))
         {
             if (fetchError != null)
-                Debug.LogWarning("[TUP] Update check failed: " + fetchError.Message);
+            {
+                // Endpoint may not exist yet — quiet skip for 404.
+                string msg = fetchError.Message ?? "";
+                if (msg.IndexOf("(404)", StringComparison.OrdinalIgnoreCase) < 0 &&
+                    msg.IndexOf("Not Found", StringComparison.OrdinalIgnoreCase) < 0)
+                    Debug.LogWarning("[TUP] Update check failed: " + msg);
+            }
             yield break;
         }
 

@@ -313,6 +313,7 @@ public partial class Main
         lastCheckerUnknownPropList = Array.Empty<string>();
         hasLastCheckerColor = false;
         moreInfoModList = Array.Empty<MoreInfoModEntry>();
+        lastMoreInfoTileValues = Array.Empty<string>();
         moreInfoModsPage = 0;
         moreInfoModsExpanded = false;
         if (nameTextComp != null) nameTextComp.text = lastCheckerName;

@@ -14,7 +14,7 @@ namespace CameraMod.Button.Buttons
         private Material material;
         private Color baseColor = Color.white;
         private float lastClicked;
-        public float clickMinInterval = 0.12f;
+        public float clickMinInterval = 0.28f;
 
         public ToggleButton InitToggleButton(Action<bool> setter, Func<bool> getter, bool savable = true, string overrideSaveName = null)
         {
@@ -53,6 +53,11 @@ namespace CameraMod.Button.Buttons
             }
         }
 
+        public void RefreshAppearance()
+        {
+            UpdateAppearance(getter != null && getter());
+        }
+
         private void UpdateAppearance(bool isDown)
         {
             if (material == null)
@@ -69,13 +74,17 @@ namespace CameraMod.Button.Buttons
                 return;
             if (!isHand(col))
                 return;
-            if (Time.time - lastClicked <= clickMinInterval)
+            float cooldown = controller != null
+                ? Mathf.Max(clickMinInterval, controller.ButtonCooldownSeconds)
+                : clickMinInterval;
+            if (Time.time - lastClicked <= cooldown)
                 return;
 
             Vibration(isLeft(col));
             IsDown = !IsDown;
             onClick?.Invoke();
             lastClicked = Time.time;
+            controller.NotifyButtonPressed();
         }
     }
 }
